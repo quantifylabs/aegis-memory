@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_memory.py -v)"
+    ],
+    "deny": []
+  }
+}

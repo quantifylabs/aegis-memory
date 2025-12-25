@@ -1,0 +1,123 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aegis-memory"
+version = "1.2.0"
+description = "Agent-native memory fabric for AI agents. Scoped, multi-agent, self-hosted."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    { name = "Quantify Labs Ltd", email = "hello@quantifylabs.ai" }
+]
+keywords = [
+    "ai",
+    "agents",
+    "memory",
+    "llm",
+    "langchain",
+    "langgraph",
+    "crewai",
+    "multi-agent",
+    "context-engineering",
+    "vector-database",
+    "pgvector",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "httpx>=0.25.0",
+    "typer[all]>=0.9.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+aegis = "aegis_memory.cli.main:main"
+
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "sqlalchemy[asyncio]>=2.0.25",
+    "asyncpg>=0.29.0",
+    "pgvector>=0.2.4",
+    "pydantic>=2.7.0",
+    "openai>=1.35.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "httpx>=0.25.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+]
+langchain = [
+    "langchain>=0.2.0",
+    "langchain-core>=0.2.0",
+]
+crewai = [
+    "crewai>=0.30.0",
+]
+all = [
+    "aegis-memory[server,dev,langchain,crewai]",
+]
+
+[project.urls]
+Homepage = "https://github.com/quantifylabs/aegis-memory"
+Documentation = "https://github.com/quantifylabs/aegis-memory/tree/main/docs"
+Repository = "https://github.com/quantifylabs/aegis-memory"
+Issues = "https://github.com/quantifylabs/aegis-memory/issues"
+Changelog = "https://github.com/quantifylabs/aegis-memory/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["aegis_memory"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/aegis_memory",
+    "/README.md",
+    "/LICENSE",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # do not perform function calls in argument defaults
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

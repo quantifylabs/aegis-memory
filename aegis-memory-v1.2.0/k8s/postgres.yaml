@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: aegis-postgres
+  namespace: aegis
+  labels:
+    app.kubernetes.io/name: aegis-memory
+    app.kubernetes.io/component: database
+spec:
+  serviceName: aegis-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aegis-postgres
+  template:
+    metadata:
+      labels:
+        app: aegis-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: pgvector/pgvector:pg16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: aegis
+            - name: POSTGRES_USER
+              value: aegis
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aegis-secrets
+                  key: postgres-password
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          livenessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -U
+                - aegis
+            initialDelaySeconds: 30
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aegis-postgres
+  namespace: aegis
+  labels:
+    app.kubernetes.io/name: aegis-memory
+    app.kubernetes.io/component: database
+spec:
+  selector:
+    app: aegis-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+  type: ClusterIP
+

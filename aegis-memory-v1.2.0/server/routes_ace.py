@@ -1,0 +1,825 @@
+"""
+Aegis ACE-Enhanced Routes
+
+Endpoints inspired by:
+1. ACE Paper (Stanford/SambaNova) - Agentic Context Engineering
+2. Anthropic's Long-Running Agent Harnesses
+
+New Capabilities:
+- Memory voting (helpful/harmful)
+- Incremental delta updates
+- Session progress tracking
+- Feature status tracking
+- Reflection memory creation
+"""
+
+from datetime import datetime, timezone
+from typing import Any, List, Optional, Literal
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from config import get_settings
+from database import get_db, get_read_db
+from embedding_service import get_embedding_service, content_hash
+from memory_repository import MemoryRepository
+from ace_repository import ACERepository
+from eval_repository import EvalRepository
+from scope_inference import ScopeInference
+from models import MemoryScope, MemoryType, FeatureStatus
+from rate_limiter import RateLimiter, RateLimitExceeded
+from routes import get_project_id, check_rate_limit
+
+router = APIRouter(prefix="/ace", tags=["ACE"])
+settings = get_settings()
+
+
+# ---------- Request/Response Models ----------
+
+class VoteRequest(BaseModel):
+    """Vote on a memory's usefulness."""
+    vote: Literal["helpful", "harmful"]
+    voter_agent_id: str = Field(..., min_length=1, max_length=64)
+    context: Optional[str] = Field(default=None, max_length=1000)
+    task_id: Optional[str] = Field(default=None, max_length=64)
+
+
+class VoteResponse(BaseModel):
+    memory_id: str
+    bullet_helpful: int
+    bullet_harmful: int
+    effectiveness_score: float
+
+
+class DeltaOperation(BaseModel):
+    """Single delta operation for incremental updates."""
+    type: Literal["add", "update", "deprecate"]
+    
+    # For add operations
+    content: Optional[str] = Field(default=None, max_length=100_000)
+    memory_type: Optional[str] = Field(default=MemoryType.STANDARD.value)
+    agent_id: Optional[str] = None
+    user_id: Optional[str] = None
+    namespace: str = "default"
+    scope: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None
+    ttl_seconds: Optional[int] = None
+    
+    # For update/deprecate operations
+    memory_id: Optional[str] = None
+    
+    # For update - partial metadata update
+    metadata_patch: Optional[dict[str, Any]] = None
+    
+    # For deprecate
+    superseded_by: Optional[str] = None
+    deprecation_reason: Optional[str] = None
+
+
+class DeltaRequest(BaseModel):
+    """Batch of delta operations."""
+    operations: List[DeltaOperation] = Field(..., min_length=1, max_length=100)
+
+
+class DeltaResultItem(BaseModel):
+    operation: str
+    success: bool
+    memory_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+class DeltaResponse(BaseModel):
+    results: List[DeltaResultItem]
+    total_time_ms: float
+
+
+class ReflectionCreate(BaseModel):
+    """Create a reflection memory from agent trajectory analysis."""
+    content: str = Field(..., min_length=1, max_length=100_000)
+    agent_id: str = Field(..., min_length=1, max_length=64)
+    user_id: Optional[str] = None
+    namespace: str = "default"
+    
+    # Reflection-specific fields
+    source_trajectory_id: Optional[str] = Field(default=None, max_length=64)
+    error_pattern: Optional[str] = Field(default=None, max_length=128)
+    correct_approach: Optional[str] = Field(default=None, max_length=10_000)
+    applicable_contexts: Optional[List[str]] = None
+    
+    # Optional scope override (defaults to global for reflections)
+    scope: Optional[str] = None
+    metadata: Optional[dict[str, Any]] = None
+
+
+class ReflectionResponse(BaseModel):
+    id: str
+    memory_type: str
+    scope: str
+    effectiveness_score: float
+
+
+class SessionProgressCreate(BaseModel):
+    """Create or update session progress."""
+    session_id: str = Field(..., min_length=1, max_length=64)
+    agent_id: Optional[str] = None
+    user_id: Optional[str] = None
+    namespace: str = "default"
+
+
+class SessionProgressUpdate(BaseModel):
+    """Update session progress."""
+    completed_items: Optional[List[str]] = None
+    in_progress_item: Optional[str] = None
+    next_items: Optional[List[str]] = None
+    blocked_items: Optional[List[dict[str, str]]] = None  # [{item: "x", reason: "y"}]
+    summary: Optional[str] = None
+    last_action: Optional[str] = None
+    status: Optional[str] = None
+    total_items: Optional[int] = None
+
+
+class SessionProgressResponse(BaseModel):
+    id: str
+    session_id: str
+    status: str
+    completed_count: int
+    total_items: int
+    progress_percent: float
+    completed_items: List[str]
+    in_progress_item: Optional[str]
+    next_items: List[str]
+    blocked_items: List[dict]
+    summary: Optional[str]
+    last_action: Optional[str]
+    updated_at: datetime
+
+
+class FeatureCreate(BaseModel):
+    """Create a feature to track."""
+    feature_id: str = Field(..., min_length=1, max_length=128)
+    description: str = Field(..., min_length=1, max_length=10_000)
+    session_id: Optional[str] = None
+    namespace: str = "default"
+    category: Optional[str] = None
+    test_steps: Optional[List[str]] = None
+
+
+class FeatureUpdate(BaseModel):
+    """Update feature status."""
+    status: Optional[str] = None
+    passes: Optional[bool] = None
+    implemented_by: Optional[str] = None
+    verified_by: Optional[str] = None
+    implementation_notes: Optional[str] = None
+    failure_reason: Optional[str] = None
+
+
+class FeatureResponse(BaseModel):
+    id: str
+    feature_id: str
+    description: str
+    category: Optional[str]
+    status: str
+    passes: bool
+    test_steps: List[str]
+    implemented_by: Optional[str]
+    verified_by: Optional[str]
+    updated_at: datetime
+
+
+class FeatureListResponse(BaseModel):
+    features: List[FeatureResponse]
+    total: int
+    passing: int
+    failing: int
+    in_progress: int
+
+
+class EvalMetricsResponse(BaseModel):
+    success_rate: float
+    retrieval_precision: float
+    pollution_rate: float
+    mttr_seconds: float
+    total_tasks: int
+    passing_tasks: int
+    total_memories: int
+    helpful_votes: int
+    harmful_votes: int
+    window: str
+
+
+class EvalCorrelationResponse(BaseModel):
+    correlation_score: float
+    prob_pass_given_helpful: float
+    prob_pass_given_harmful: float
+    sample_size: int
+    helpful_count: int
+    harmful_count: int
+
+
+class PlaybookQueryRequest(BaseModel):
+    """Query for relevant playbook entries (strategies/reflections)."""
+    query: str = Field(..., min_length=1, max_length=10_000)
+    agent_id: str = Field(..., min_length=1, max_length=64)
+    namespace: str = "default"
+    include_types: List[str] = Field(
+        default=[MemoryType.STRATEGY.value, MemoryType.REFLECTION.value]
+    )
+    top_k: int = Field(default=20, ge=1, le=100)
+    min_effectiveness: float = Field(default=-1.0, ge=-1.0, le=1.0)
+
+
+class PlaybookEntry(BaseModel):
+    id: str
+    content: str
+    memory_type: str
+    effectiveness_score: float
+    bullet_helpful: int
+    bullet_harmful: int
+    error_pattern: Optional[str]
+    created_at: datetime
+
+
+class PlaybookResponse(BaseModel):
+    entries: List[PlaybookEntry]
+    query_time_ms: float
+
+
+# ---------- Routes ----------
+
+@router.post("/vote/{memory_id}", response_model=VoteResponse)
+async def vote_memory(
+    memory_id: str,
+    body: VoteRequest,
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Vote on a memory's usefulness.
+    
+    This enables ACE-style self-improvement where agents can mark
+    which memories were helpful or harmful for completing tasks.
+    
+    Votes are tracked in history for analysis and the memory's
+    bullet_helpful/bullet_harmful counters are updated.
+    """
+    result = await ACERepository.vote_memory(
+        db,
+        memory_id=memory_id,
+        project_id=project_id,
+        voter_agent_id=body.voter_agent_id,
+        vote=body.vote,
+        context=body.context,
+        task_id=body.task_id,
+    )
+    
+    if result is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    
+    return VoteResponse(
+        memory_id=memory_id,
+        bullet_helpful=result.bullet_helpful,
+        bullet_harmful=result.bullet_harmful,
+        effectiveness_score=result.get_effectiveness_score(),
+    )
+
+
+@router.post("/delta", response_model=DeltaResponse)
+async def apply_delta(
+    body: DeltaRequest,
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Apply incremental delta updates to memories.
+    
+    ACE Insight: Never rewrite entire context. Instead use incremental
+    deltas that add, update, or deprecate individual memories.
+    
+    This prevents context collapse where accumulated knowledge is
+    accidentally compressed away.
+    
+    Operations:
+    - add: Create new memory
+    - update: Modify existing memory metadata/counters
+    - deprecate: Soft-delete memory (preserves history)
+    """
+    start = time.monotonic()
+    embed_service = get_embedding_service()
+    results = []
+    
+    for op in body.operations:
+        try:
+            if op.type == "add":
+                if not op.content:
+                    results.append(DeltaResultItem(
+                        operation="add",
+                        success=False,
+                        error="Content required for add operation"
+                    ))
+                    continue
+                
+                # Generate embedding
+                embedding = await embed_service.embed_single(op.content, db)
+                
+                # Infer scope (reflections default to global)
+                default_scope = MemoryScope.GLOBAL if op.memory_type == MemoryType.REFLECTION.value else None
+                resolved_scope = ScopeInference.infer_scope(
+                    content=op.content,
+                    explicit_scope=op.scope or (default_scope.value if default_scope else None),
+                    agent_id=op.agent_id,
+                    metadata=op.metadata or {},
+                )
+                
+                mem = await MemoryRepository.add(
+                    db,
+                    project_id=project_id,
+                    content=op.content,
+                    embedding=embedding,
+                    user_id=op.user_id,
+                    agent_id=op.agent_id,
+                    namespace=op.namespace,
+                    metadata=op.metadata,
+                    ttl_seconds=op.ttl_seconds,
+                    scope=resolved_scope.value,
+                    memory_type=op.memory_type,
+                )
+                
+                results.append(DeltaResultItem(
+                    operation="add",
+                    success=True,
+                    memory_id=mem.id,
+                ))
+                
+            elif op.type == "update":
+                if not op.memory_id:
+                    results.append(DeltaResultItem(
+                        operation="update",
+                        success=False,
+                        error="memory_id required for update operation"
+                    ))
+                    continue
+                
+                updated = await ACERepository.update_memory_metadata(
+                    db,
+                    memory_id=op.memory_id,
+                    project_id=project_id,
+                    metadata_patch=op.metadata_patch,
+                )
+                
+                if updated:
+                    results.append(DeltaResultItem(
+                        operation="update",
+                        success=True,
+                        memory_id=op.memory_id,
+                    ))
+                else:
+                    results.append(DeltaResultItem(
+                        operation="update",
+                        success=False,
+                        memory_id=op.memory_id,
+                        error="Memory not found",
+                    ))
+                    
+            elif op.type == "deprecate":
+                if not op.memory_id:
+                    results.append(DeltaResultItem(
+                        operation="deprecate",
+                        success=False,
+                        error="memory_id required for deprecate operation"
+                    ))
+                    continue
+                
+                deprecated = await ACERepository.deprecate_memory(
+                    db,
+                    memory_id=op.memory_id,
+                    project_id=project_id,
+                    deprecated_by=op.agent_id,
+                    superseded_by=op.superseded_by,
+                    reason=op.deprecation_reason,
+                )
+                
+                if deprecated:
+                    results.append(DeltaResultItem(
+                        operation="deprecate",
+                        success=True,
+                        memory_id=op.memory_id,
+                    ))
+                else:
+                    results.append(DeltaResultItem(
+                        operation="deprecate",
+                        success=False,
+                        memory_id=op.memory_id,
+                        error="Memory not found",
+                    ))
+                    
+        except Exception as e:
+            results.append(DeltaResultItem(
+                operation=op.type,
+                success=False,
+                memory_id=op.memory_id,
+                error=str(e),
+            ))
+    
+    elapsed_ms = (time.monotonic() - start) * 1000
+    
+    return DeltaResponse(
+        results=results,
+        total_time_ms=round(elapsed_ms, 2),
+    )
+
+
+@router.post("/reflection", response_model=ReflectionResponse)
+async def create_reflection(
+    body: ReflectionCreate,
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Create a reflection memory from trajectory analysis.
+    
+    ACE Pattern: The Reflector component extracts insights from
+    successes and failures. These insights become reflection memories
+    that help future tasks avoid the same mistakes.
+    
+    Reflections default to GLOBAL scope so all agents can benefit.
+    """
+    embed_service = get_embedding_service()
+    
+    # Generate embedding
+    embedding = await embed_service.embed_single(body.content, db)
+    
+    # Build metadata
+    metadata = body.metadata or {}
+    if body.correct_approach:
+        metadata["correct_approach"] = body.correct_approach
+    if body.applicable_contexts:
+        metadata["applicable_contexts"] = body.applicable_contexts
+    
+    # Reflections default to global scope
+    resolved_scope = ScopeInference.infer_scope(
+        content=body.content,
+        explicit_scope=body.scope or MemoryScope.GLOBAL.value,
+        agent_id=body.agent_id,
+        metadata=metadata,
+    )
+    
+    mem = await ACERepository.create_reflection(
+        db,
+        project_id=project_id,
+        content=body.content,
+        embedding=embedding,
+        agent_id=body.agent_id,
+        user_id=body.user_id,
+        namespace=body.namespace,
+        scope=resolved_scope.value,
+        metadata=metadata,
+        source_trajectory_id=body.source_trajectory_id,
+        error_pattern=body.error_pattern,
+    )
+    
+    return ReflectionResponse(
+        id=mem.id,
+        memory_type=mem.memory_type,
+        scope=mem.scope,
+        effectiveness_score=mem.get_effectiveness_score(),
+    )
+
+
+@router.post("/playbook", response_model=PlaybookResponse)
+async def query_playbook(
+    body: PlaybookQueryRequest,
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_read_db),
+):
+    """
+    Query the playbook for relevant strategies and reflections.
+    
+    ACE Pattern: Before starting a task, agents should consult the
+    playbook for relevant strategies, past mistakes to avoid, and
+    proven approaches.
+    
+    Results are ranked by semantic similarity and filtered by
+    effectiveness score (helpful votes - harmful votes).
+    """
+    start = time.monotonic()
+    embed_service = get_embedding_service()
+    
+    query_embedding = await embed_service.embed_single(body.query, db)
+    
+    results = await ACERepository.query_playbook(
+        db,
+        query_embedding=query_embedding,
+        project_id=project_id,
+        namespace=body.namespace,
+        requesting_agent_id=body.agent_id,
+        include_types=body.include_types,
+        top_k=body.top_k,
+        min_effectiveness=body.min_effectiveness,
+    )
+    
+    elapsed_ms = (time.monotonic() - start) * 1000
+    
+    entries = [
+        PlaybookEntry(
+            id=mem.id,
+            content=mem.content,
+            memory_type=mem.memory_type,
+            effectiveness_score=mem.get_effectiveness_score(),
+            bullet_helpful=mem.bullet_helpful,
+            bullet_harmful=mem.bullet_harmful,
+            error_pattern=mem.error_pattern,
+            created_at=mem.created_at,
+        )
+        for mem, score in results
+    ]
+    
+    return PlaybookResponse(
+        entries=entries,
+        query_time_ms=round(elapsed_ms, 2),
+    )
+
+
+# ---------- Session Progress Routes ----------
+
+@router.post("/session", response_model=SessionProgressResponse)
+async def create_session(
+    body: SessionProgressCreate,
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Create a new session for progress tracking.
+    
+    Anthropic Pattern: claude-progress.txt enables agents to quickly
+    understand state when starting with fresh context. This is the
+    structured, queryable version.
+    """
+    session = await ACERepository.create_session(
+        db,
+        project_id=project_id,
+        session_id=body.session_id,
+        agent_id=body.agent_id,
+        user_id=body.user_id,
+        namespace=body.namespace,
+    )
+    
+    return _session_to_response(session)
+
+
+@router.get("/session/{session_id}", response_model=SessionProgressResponse)
+async def get_session(
+    session_id: str,
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_read_db),
+):
+    """Get session progress by session_id."""
+    session = await ACERepository.get_session(db, session_id, project_id)
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    return _session_to_response(session)
+
+
+@router.patch("/session/{session_id}", response_model=SessionProgressResponse)
+async def update_session(
+    session_id: str,
+    body: SessionProgressUpdate,
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update session progress.
+    
+    This is how agents record their progress:
+    - Mark items complete
+    - Set current work item
+    - Queue next items
+    - Record blockers
+    """
+    session = await ACERepository.update_session(
+        db,
+        session_id=session_id,
+        project_id=project_id,
+        completed_items=body.completed_items,
+        in_progress_item=body.in_progress_item,
+        next_items=body.next_items,
+        blocked_items=body.blocked_items,
+        summary=body.summary,
+        last_action=body.last_action,
+        status=body.status,
+        total_items=body.total_items,
+    )
+    
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    return _session_to_response(session)
+
+
+def _session_to_response(session) -> SessionProgressResponse:
+    """Convert session model to response."""
+    completed = session.completed_items or []
+    total = session.total_items or len(completed)
+    progress = (len(completed) / total * 100) if total > 0 else 0
+    
+    return SessionProgressResponse(
+        id=session.id,
+        session_id=session.session_id,
+        status=session.status,
+        completed_count=len(completed),
+        total_items=total,
+        progress_percent=round(progress, 1),
+        completed_items=completed,
+        in_progress_item=session.in_progress_item,
+        next_items=session.next_items or [],
+        blocked_items=session.blocked_items or [],
+        summary=session.summary,
+        last_action=session.last_action,
+        updated_at=session.updated_at,
+    )
+
+
+# ---------- Feature Tracking Routes ----------
+
+@router.post("/feature", response_model=FeatureResponse)
+async def create_feature(
+    body: FeatureCreate,
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Create a feature to track.
+    
+    Anthropic Pattern: Feature lists with pass/fail status prevent
+    agents from declaring victory prematurely. Each feature must be
+    explicitly verified before marking complete.
+    """
+    feature = await ACERepository.create_feature(
+        db,
+        project_id=project_id,
+        feature_id=body.feature_id,
+        description=body.description,
+        session_id=body.session_id,
+        namespace=body.namespace,
+        category=body.category,
+        test_steps=body.test_steps,
+    )
+    
+    return _feature_to_response(feature)
+
+
+@router.get("/feature/{feature_id}", response_model=FeatureResponse)
+async def get_feature(
+    feature_id: str,
+    namespace: str = "default",
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_read_db),
+):
+    """Get feature by feature_id."""
+    feature = await ACERepository.get_feature(
+        db, feature_id, project_id, namespace
+    )
+    
+    if not feature:
+        raise HTTPException(status_code=404, detail="Feature not found")
+    
+    return _feature_to_response(feature)
+
+
+@router.patch("/feature/{feature_id}", response_model=FeatureResponse)
+async def update_feature(
+    feature_id: str,
+    body: FeatureUpdate,
+    namespace: str = "default",
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update feature status.
+    
+    Only mark passes=true after proper verification!
+    """
+    feature = await ACERepository.update_feature(
+        db,
+        feature_id=feature_id,
+        project_id=project_id,
+        namespace=namespace,
+        status=body.status,
+        passes=body.passes,
+        implemented_by=body.implemented_by,
+        verified_by=body.verified_by,
+        implementation_notes=body.implementation_notes,
+        failure_reason=body.failure_reason,
+    )
+    
+    if not feature:
+        raise HTTPException(status_code=404, detail="Feature not found")
+    
+    return _feature_to_response(feature)
+
+
+@router.get("/features", response_model=FeatureListResponse)
+async def list_features(
+    namespace: str = "default",
+    session_id: Optional[str] = None,
+    status: Optional[str] = None,
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_read_db),
+):
+    """
+    List all features with status summary.
+    
+    Use this at the start of a session to see what's complete
+    and what still needs work.
+    """
+    features = await ACERepository.list_features(
+        db,
+        project_id=project_id,
+        namespace=namespace,
+        session_id=session_id,
+        status=status,
+    )
+    
+    total = len(features)
+    passing = sum(1 for f in features if f.passes)
+    failing = sum(1 for f in features if f.status == FeatureStatus.FAILED.value)
+    in_progress = sum(1 for f in features if f.status == FeatureStatus.IN_PROGRESS.value)
+    
+    return FeatureListResponse(
+        features=[_feature_to_response(f) for f in features],
+        total=total,
+        passing=passing,
+        failing=failing,
+        in_progress=in_progress,
+    )
+
+
+def _feature_to_response(feature) -> FeatureResponse:
+    """Convert feature model to response."""
+    return FeatureResponse(
+        id=feature.id,
+        feature_id=feature.feature_id,
+        description=feature.description,
+        category=feature.category,
+        status=feature.status,
+        passes=feature.passes,
+        test_steps=feature.test_steps or [],
+        implemented_by=feature.implemented_by,
+        verified_by=feature.verified_by,
+        updated_at=feature.updated_at,
+    )
+
+
+# ---------- Evaluation Harness Routes ----------
+
+@router.get("/eval/metrics", response_model=EvalMetricsResponse)
+async def get_evaluation_metrics(
+    namespace: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    window: str = "global",
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_read_db),
+):
+    """
+    Get aggregated evaluation metrics for the confidence harness.
+    
+    Supported windows: 24h, 7d, 30d, global
+    """
+    if window not in ["24h", "7d", "30d", "global"]:
+        raise HTTPException(status_code=400, detail="Invalid window. Use 24h, 7d, 30d, or global.")
+        
+    metrics = await EvalRepository.get_metrics(
+        db, 
+        project_id=project_id,
+        namespace=namespace,
+        agent_id=agent_id,
+        window=window
+    )
+    return EvalMetricsResponse(**metrics)
+
+
+@router.get("/eval/correlation", response_model=EvalCorrelationResponse)
+async def get_vote_utility_correlation(
+    namespace: Optional[str] = None,
+    agent_id: Optional[str] = None,
+    window: str = "global",
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_read_db),
+):
+    """
+    Calculate correlation between memory votes and actual task success.
+    
+    This answers the research question: 'Do votes predict actual usefulness?'
+    """
+    correlation = await EvalRepository.get_vote_utility_correlation(
+        db,
+        project_id=project_id,
+        namespace=namespace,
+        agent_id=agent_id,
+        window=window
+    )
+    return EvalCorrelationResponse(**correlation)
