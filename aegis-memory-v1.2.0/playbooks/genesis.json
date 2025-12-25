@@ -1,0 +1,524 @@
+{
+  "metadata": {
+    "version": "1.0.0",
+    "name": "Aegis Genesis Playbook",
+    "description": "Pre-seeded strategies and reflections for common coding tasks",
+    "created_at": "2024-12-17",
+    "categories": ["python", "api", "docker", "react", "database", "testing", "debugging", "architecture"]
+  },
+  "entries": [
+    {
+      "content": "When handling HTTP requests in Python, prefer httpx over requests for async support. httpx provides a consistent API for both sync and async operations, making it easier to migrate codebases to async patterns later.",
+      "memory_type": "strategy",
+      "namespace": "aegis/python/http",
+      "metadata": {
+        "category": "python",
+        "tags": ["http", "async", "httpx", "requests"],
+        "applicable_contexts": ["api-client", "web-scraping", "microservices"]
+      }
+    },
+    {
+      "content": "Use Pydantic models for all API request/response validation. Define strict types with Field() constraints. This catches bugs at the API boundary before they propagate into business logic.",
+      "memory_type": "strategy",
+      "namespace": "aegis/python/api",
+      "metadata": {
+        "category": "api",
+        "tags": ["pydantic", "validation", "fastapi"],
+        "applicable_contexts": ["api-development", "data-validation"]
+      }
+    },
+    {
+      "content": "In FastAPI, use dependency injection for database sessions: `db: AsyncSession = Depends(get_db)`. Never create sessions inside route handlers. This ensures proper connection cleanup and enables testing.",
+      "memory_type": "strategy",
+      "namespace": "aegis/python/fastapi",
+      "metadata": {
+        "category": "api",
+        "tags": ["fastapi", "database", "dependency-injection"],
+        "applicable_contexts": ["api-development", "database"]
+      }
+    },
+    {
+      "content": "REFLECTION: Attempted to use `requests` library in an async function, which blocked the event loop and caused timeout errors. The correct approach is to use `httpx.AsyncClient` with `async with` context manager for proper resource cleanup.",
+      "memory_type": "reflection",
+      "namespace": "aegis/python/http",
+      "error_pattern": "sync-in-async",
+      "metadata": {
+        "category": "python",
+        "tags": ["async", "requests", "blocking"],
+        "correct_approach": "Use httpx.AsyncClient with 'async with' for async HTTP requests"
+      }
+    },
+    {
+      "content": "Always use context managers (`with` or `async with`) for resources that need cleanup: files, database connections, HTTP clients. This prevents resource leaks even when exceptions occur.",
+      "memory_type": "strategy",
+      "namespace": "aegis/python/resources",
+      "metadata": {
+        "category": "python",
+        "tags": ["context-manager", "resources", "cleanup"],
+        "applicable_contexts": ["file-handling", "database", "http-clients"]
+      }
+    },
+    {
+      "content": "For Docker multi-stage builds: Use a builder stage with all build dependencies, then copy only the compiled artifacts to a slim runtime image. This reduces final image size by 60-80%.",
+      "memory_type": "strategy",
+      "namespace": "aegis/docker/optimization",
+      "metadata": {
+        "category": "docker",
+        "tags": ["multi-stage", "optimization", "image-size"],
+        "applicable_contexts": ["containerization", "ci-cd"]
+      }
+    },
+    {
+      "content": "In docker-compose, always use `depends_on` with `condition: service_healthy` for services that need other services to be ready. Simple `depends_on` only waits for container start, not service readiness.",
+      "memory_type": "strategy",
+      "namespace": "aegis/docker/compose",
+      "metadata": {
+        "category": "docker",
+        "tags": ["docker-compose", "healthcheck", "dependencies"],
+        "applicable_contexts": ["local-development", "testing"]
+      }
+    },
+    {
+      "content": "REFLECTION: Deployed a service that started before the database was accepting connections, causing crash loops. Fixed by adding healthcheck to postgres container and using `condition: service_healthy` in depends_on.",
+      "memory_type": "reflection",
+      "namespace": "aegis/docker/compose",
+      "error_pattern": "startup-order",
+      "metadata": {
+        "category": "docker",
+        "tags": ["startup", "healthcheck", "depends_on"],
+        "correct_approach": "Add healthcheck to dependent services and use condition: service_healthy"
+      }
+    },
+    {
+      "content": "Use `COPY requirements.txt .` before `COPY . .` in Dockerfiles. This leverages Docker layer caching - dependencies only rebuild when requirements.txt changes, not on every code change.",
+      "memory_type": "strategy",
+      "namespace": "aegis/docker/caching",
+      "metadata": {
+        "category": "docker",
+        "tags": ["layer-caching", "build-optimization"],
+        "applicable_contexts": ["dockerfile", "ci-cd"]
+      }
+    },
+    {
+      "content": "In React, use React Query (TanStack Query) for server state management. It handles caching, background updates, stale data, and error states automatically. Keep UI state in useState/useReducer, server state in React Query.",
+      "memory_type": "strategy",
+      "namespace": "aegis/react/state",
+      "metadata": {
+        "category": "react",
+        "tags": ["react-query", "state-management", "caching"],
+        "applicable_contexts": ["frontend", "data-fetching"]
+      }
+    },
+    {
+      "content": "For React forms, use react-hook-form with Zod validation. Define schema once, get TypeScript types automatically. Much lighter than Formik and integrates cleanly with server validation errors.",
+      "memory_type": "strategy",
+      "namespace": "aegis/react/forms",
+      "metadata": {
+        "category": "react",
+        "tags": ["forms", "validation", "zod", "react-hook-form"],
+        "applicable_contexts": ["frontend", "forms"]
+      }
+    },
+    {
+      "content": "REFLECTION: Used useState for API response data, causing stale data issues when navigating back to a page. React Query's automatic background refetching and cache invalidation solved this without manual refetch logic.",
+      "memory_type": "reflection",
+      "namespace": "aegis/react/state",
+      "error_pattern": "stale-data",
+      "metadata": {
+        "category": "react",
+        "tags": ["caching", "stale-data", "react-query"],
+        "correct_approach": "Use React Query for server state - it handles cache invalidation automatically"
+      }
+    },
+    {
+      "content": "In React components, extract custom hooks when logic is reused OR when a component exceeds ~100 lines. Hooks should be named `use*` and can be tested independently of components.",
+      "memory_type": "strategy",
+      "namespace": "aegis/react/patterns",
+      "metadata": {
+        "category": "react",
+        "tags": ["hooks", "refactoring", "testing"],
+        "applicable_contexts": ["frontend", "code-organization"]
+      }
+    },
+    {
+      "content": "Always use prepared statements or parameterized queries for database operations. Never concatenate user input into SQL strings. Use SQLAlchemy ORM or execute with bound parameters.",
+      "memory_type": "strategy",
+      "namespace": "aegis/database/security",
+      "metadata": {
+        "category": "database",
+        "tags": ["sql-injection", "security", "sqlalchemy"],
+        "applicable_contexts": ["database", "security"]
+      }
+    },
+    {
+      "content": "For PostgreSQL with high read loads, create composite indexes that match your WHERE clause column order. The leftmost columns in the index should be your most selective filters.",
+      "memory_type": "strategy",
+      "namespace": "aegis/database/indexing",
+      "metadata": {
+        "category": "database",
+        "tags": ["postgresql", "indexing", "performance"],
+        "applicable_contexts": ["database", "optimization"]
+      }
+    },
+    {
+      "content": "REFLECTION: Created individual indexes on columns used in WHERE clauses, but queries remained slow. PostgreSQL was doing index scans on each column then merging. A composite index matching the full WHERE clause reduced query time from 2s to 50ms.",
+      "memory_type": "reflection",
+      "namespace": "aegis/database/indexing",
+      "error_pattern": "inefficient-indexing",
+      "metadata": {
+        "category": "database",
+        "tags": ["postgresql", "composite-index", "query-optimization"],
+        "correct_approach": "Create composite indexes that match your WHERE clause column order"
+      }
+    },
+    {
+      "content": "Use database migrations (Alembic for SQLAlchemy) for all schema changes. Never modify production schemas manually. Migrations should be reversible with upgrade() and downgrade() functions.",
+      "memory_type": "strategy",
+      "namespace": "aegis/database/migrations",
+      "metadata": {
+        "category": "database",
+        "tags": ["alembic", "migrations", "sqlalchemy"],
+        "applicable_contexts": ["database", "deployment"]
+      }
+    },
+    {
+      "content": "Write tests for behavior, not implementation. Test what the code does, not how it does it. This allows refactoring without breaking tests. Mock external dependencies at the boundary.",
+      "memory_type": "strategy",
+      "namespace": "aegis/testing/principles",
+      "metadata": {
+        "category": "testing",
+        "tags": ["testing", "mocking", "behavior"],
+        "applicable_contexts": ["testing", "tdd"]
+      }
+    },
+    {
+      "content": "Use pytest fixtures with `scope='session'` for expensive setup like database connections. Use `scope='function'` (default) for test isolation. Prefer factories over fixtures for test data.",
+      "memory_type": "strategy",
+      "namespace": "aegis/testing/pytest",
+      "metadata": {
+        "category": "testing",
+        "tags": ["pytest", "fixtures", "factories"],
+        "applicable_contexts": ["testing", "python"]
+      }
+    },
+    {
+      "content": "REFLECTION: Tests passed individually but failed when run together. Issue was shared state in module-level variables. Fixed by using pytest fixtures with function scope to reset state between tests.",
+      "memory_type": "reflection",
+      "namespace": "aegis/testing/isolation",
+      "error_pattern": "test-pollution",
+      "metadata": {
+        "category": "testing",
+        "tags": ["test-isolation", "fixtures", "shared-state"],
+        "correct_approach": "Use function-scoped fixtures and avoid module-level mutable state"
+      }
+    },
+    {
+      "content": "For API testing, use httpx.AsyncClient with ASGITransport to test FastAPI directly without starting a server. This is faster and more reliable than running actual HTTP requests.",
+      "memory_type": "strategy",
+      "namespace": "aegis/testing/api",
+      "metadata": {
+        "category": "testing",
+        "tags": ["api-testing", "fastapi", "httpx"],
+        "applicable_contexts": ["testing", "api"]
+      }
+    },
+    {
+      "content": "When debugging, reproduce the bug with a failing test first. Then fix the bug. The test prevents regressions and documents the edge case for future maintainers.",
+      "memory_type": "strategy",
+      "namespace": "aegis/debugging/workflow",
+      "metadata": {
+        "category": "debugging",
+        "tags": ["debugging", "testing", "workflow"],
+        "applicable_contexts": ["debugging", "maintenance"]
+      }
+    },
+    {
+      "content": "Use structured logging (JSON) in production. Include request_id, user_id, and relevant context in every log. Use log levels correctly: DEBUG for development, INFO for events, WARNING for recoverable issues, ERROR for failures.",
+      "memory_type": "strategy",
+      "namespace": "aegis/debugging/logging",
+      "metadata": {
+        "category": "debugging",
+        "tags": ["logging", "observability", "structured-logs"],
+        "applicable_contexts": ["production", "debugging"]
+      }
+    },
+    {
+      "content": "REFLECTION: Spent 3 hours debugging a production issue because logs only showed 'Error occurred'. After adding structured logging with full context (request_id, user_id, input parameters), similar issues are now diagnosable in minutes.",
+      "memory_type": "reflection",
+      "namespace": "aegis/debugging/logging",
+      "error_pattern": "poor-observability",
+      "metadata": {
+        "category": "debugging",
+        "tags": ["logging", "context", "debugging"],
+        "correct_approach": "Include request_id, user_id, and relevant parameters in all log entries"
+      }
+    },
+    {
+      "content": "For complex conditionals, extract them into well-named boolean functions or variables. `if user.is_premium and not user.is_suspended and user.subscription.is_active` becomes `if user.can_access_premium_features()`.",
+      "memory_type": "strategy",
+      "namespace": "aegis/python/readability",
+      "metadata": {
+        "category": "python",
+        "tags": ["readability", "refactoring", "clean-code"],
+        "applicable_contexts": ["code-quality", "refactoring"]
+      }
+    },
+    {
+      "content": "Use environment variables for configuration, not config files committed to git. Use python-dotenv for local development, environment variables in production. Never commit secrets.",
+      "memory_type": "strategy",
+      "namespace": "aegis/architecture/config",
+      "metadata": {
+        "category": "architecture",
+        "tags": ["configuration", "secrets", "12-factor"],
+        "applicable_contexts": ["configuration", "security"]
+      }
+    },
+    {
+      "content": "Design APIs with idempotency in mind. POST requests that create resources should support idempotency keys. Clients can safely retry without creating duplicates.",
+      "memory_type": "strategy",
+      "namespace": "aegis/api/design",
+      "metadata": {
+        "category": "api",
+        "tags": ["idempotency", "api-design", "reliability"],
+        "applicable_contexts": ["api-design", "payments"]
+      }
+    },
+    {
+      "content": "REFLECTION: Payment endpoint was called twice due to network retry, resulting in double charge. Fixed by implementing idempotency keys - client sends unique key, server deduplicates based on key within 24 hours.",
+      "memory_type": "reflection",
+      "namespace": "aegis/api/payments",
+      "error_pattern": "double-submission",
+      "metadata": {
+        "category": "api",
+        "tags": ["idempotency", "payments", "duplicates"],
+        "correct_approach": "Implement idempotency keys for state-changing operations"
+      }
+    },
+    {
+      "content": "Use semantic versioning (MAJOR.MINOR.PATCH) for APIs and libraries. Breaking changes increment MAJOR. New features increment MINOR. Bug fixes increment PATCH. Document breaking changes in CHANGELOG.",
+      "memory_type": "strategy",
+      "namespace": "aegis/architecture/versioning",
+      "metadata": {
+        "category": "architecture",
+        "tags": ["semver", "versioning", "api"],
+        "applicable_contexts": ["api-design", "libraries"]
+      }
+    },
+    {
+      "content": "For microservices communication, use explicit contracts (OpenAPI/JSON Schema). Generate client code from contracts. This catches breaking changes at build time, not runtime.",
+      "memory_type": "strategy",
+      "namespace": "aegis/architecture/microservices",
+      "metadata": {
+        "category": "architecture",
+        "tags": ["microservices", "contracts", "openapi"],
+        "applicable_contexts": ["microservices", "api"]
+      }
+    },
+    {
+      "content": "Implement circuit breakers for external service calls. After N failures, stop attempting calls for a cooldown period. This prevents cascade failures and allows degraded functionality.",
+      "memory_type": "strategy",
+      "namespace": "aegis/architecture/resilience",
+      "metadata": {
+        "category": "architecture",
+        "tags": ["circuit-breaker", "resilience", "fault-tolerance"],
+        "applicable_contexts": ["microservices", "reliability"]
+      }
+    },
+    {
+      "content": "REFLECTION: External payment service went down, causing our API to timeout waiting for responses. All requests backed up, exhausting connection pool, bringing down our entire service. Circuit breaker would have failed fast and preserved core functionality.",
+      "memory_type": "reflection",
+      "namespace": "aegis/architecture/resilience",
+      "error_pattern": "cascade-failure",
+      "metadata": {
+        "category": "architecture",
+        "tags": ["circuit-breaker", "cascade-failure", "resilience"],
+        "correct_approach": "Implement circuit breakers for all external service calls"
+      }
+    },
+    {
+      "content": "Use connection pooling for databases. Configure pool_size based on expected concurrency. Set pool_pre_ping=True to handle stale connections. Never create a new connection per request.",
+      "memory_type": "strategy",
+      "namespace": "aegis/database/connections",
+      "metadata": {
+        "category": "database",
+        "tags": ["connection-pooling", "sqlalchemy", "performance"],
+        "applicable_contexts": ["database", "performance"]
+      }
+    },
+    {
+      "content": "For TypeScript, enable strict mode in tsconfig.json. The compiler will catch null/undefined errors, implicit any types, and other common bugs at compile time.",
+      "memory_type": "strategy",
+      "namespace": "aegis/typescript/config",
+      "metadata": {
+        "category": "typescript",
+        "tags": ["typescript", "strict-mode", "type-safety"],
+        "applicable_contexts": ["frontend", "typescript"]
+      }
+    },
+    {
+      "content": "In TypeScript, use discriminated unions for state machines and complex objects. Add a `type` or `status` literal field that TypeScript can use to narrow types in switch statements.",
+      "memory_type": "strategy",
+      "namespace": "aegis/typescript/patterns",
+      "metadata": {
+        "category": "typescript",
+        "tags": ["typescript", "discriminated-unions", "patterns"],
+        "applicable_contexts": ["typescript", "state-machines"]
+      }
+    },
+    {
+      "content": "REFLECTION: Used `any` type to quickly fix compilation errors. Later spent days debugging runtime type errors that TypeScript would have caught. The short-term gain wasn't worth the long-term pain.",
+      "memory_type": "reflection",
+      "namespace": "aegis/typescript/types",
+      "error_pattern": "any-abuse",
+      "metadata": {
+        "category": "typescript",
+        "tags": ["typescript", "any", "type-safety"],
+        "correct_approach": "Fix type errors properly, use 'unknown' if type is truly unknown, then narrow with type guards"
+      }
+    },
+    {
+      "content": "Use rate limiting on all public APIs. Implement with sliding window algorithm for smooth limiting. Return 429 with Retry-After header. Consider different limits for authenticated vs anonymous users.",
+      "memory_type": "strategy",
+      "namespace": "aegis/api/security",
+      "metadata": {
+        "category": "api",
+        "tags": ["rate-limiting", "security", "dos-protection"],
+        "applicable_contexts": ["api-design", "security"]
+      }
+    },
+    {
+      "content": "For authentication, use short-lived access tokens (15 min) with longer-lived refresh tokens (7 days). Store refresh tokens securely. Access tokens can be stored in memory. Never store tokens in localStorage.",
+      "memory_type": "strategy",
+      "namespace": "aegis/security/auth",
+      "metadata": {
+        "category": "security",
+        "tags": ["authentication", "jwt", "tokens"],
+        "applicable_contexts": ["authentication", "security"]
+      }
+    },
+    {
+      "content": "REFLECTION: Stored JWT in localStorage, making it accessible to any JavaScript on the page. XSS vulnerability allowed attacker to steal tokens. Now use httpOnly cookies for refresh tokens and in-memory storage for access tokens.",
+      "memory_type": "reflection",
+      "namespace": "aegis/security/auth",
+      "error_pattern": "token-storage",
+      "metadata": {
+        "category": "security",
+        "tags": ["jwt", "localStorage", "xss", "security"],
+        "correct_approach": "Use httpOnly cookies for refresh tokens, in-memory storage for access tokens"
+      }
+    },
+    {
+      "content": "Validate and sanitize all user input at the API boundary. Use allowlists (not blocklists) for validation. Escape output based on context (HTML, SQL, URL, etc.).",
+      "memory_type": "strategy",
+      "namespace": "aegis/security/input",
+      "metadata": {
+        "category": "security",
+        "tags": ["input-validation", "sanitization", "security"],
+        "applicable_contexts": ["api", "security"]
+      }
+    },
+    {
+      "content": "Use async/await consistently in Python. Don't mix sync and async code. If you must call sync code from async, use `asyncio.to_thread()` to run it in a thread pool.",
+      "memory_type": "strategy",
+      "namespace": "aegis/python/async",
+      "metadata": {
+        "category": "python",
+        "tags": ["async", "asyncio", "concurrency"],
+        "applicable_contexts": ["async-python", "performance"]
+      }
+    },
+    {
+      "content": "For Python dataclasses, use `@dataclass(frozen=True)` for immutable value objects. Use `@dataclass(slots=True)` for memory efficiency. Combine with `kw_only=True` for safer initialization.",
+      "memory_type": "strategy",
+      "namespace": "aegis/python/dataclasses",
+      "metadata": {
+        "category": "python",
+        "tags": ["dataclasses", "immutability", "patterns"],
+        "applicable_contexts": ["python", "data-modeling"]
+      }
+    },
+    {
+      "content": "REFLECTION: Modified a dataclass instance that was being used as a dictionary key, causing lookup failures and subtle bugs. Using `frozen=True` would have raised an error immediately on attempted modification.",
+      "memory_type": "reflection",
+      "namespace": "aegis/python/dataclasses",
+      "error_pattern": "mutable-key",
+      "metadata": {
+        "category": "python",
+        "tags": ["dataclasses", "frozen", "immutability"],
+        "correct_approach": "Use frozen=True for dataclasses used as dict keys or in sets"
+      }
+    },
+    {
+      "content": "For background job processing, use a proper queue (Redis + RQ, Celery, or cloud alternatives). Don't use threading for I/O-bound tasks in Python due to GIL. Don't rely on cron for critical jobs.",
+      "memory_type": "strategy",
+      "namespace": "aegis/architecture/jobs",
+      "metadata": {
+        "category": "architecture",
+        "tags": ["background-jobs", "queues", "celery"],
+        "applicable_contexts": ["background-processing", "architecture"]
+      }
+    },
+    {
+      "content": "Implement graceful shutdown in services. Listen for SIGTERM, stop accepting new requests, finish in-flight requests, close database connections, then exit. Set appropriate timeouts in orchestrators.",
+      "memory_type": "strategy",
+      "namespace": "aegis/architecture/deployment",
+      "metadata": {
+        "category": "architecture",
+        "tags": ["graceful-shutdown", "kubernetes", "deployment"],
+        "applicable_contexts": ["deployment", "containers"]
+      }
+    },
+    {
+      "content": "REFLECTION: Deployed new version with rolling update, but old pods were killed immediately while processing requests, causing 500 errors for users. Added graceful shutdown handler and preStop hook to allow in-flight requests to complete.",
+      "memory_type": "reflection",
+      "namespace": "aegis/architecture/deployment",
+      "error_pattern": "hard-shutdown",
+      "metadata": {
+        "category": "architecture",
+        "tags": ["graceful-shutdown", "deployment", "errors"],
+        "correct_approach": "Implement graceful shutdown: stop accepting new requests, complete in-flight, then exit"
+      }
+    },
+    {
+      "content": "Use health checks: `/health` for liveness (is the service running?), `/ready` for readiness (can it handle traffic?). Readiness should check database connections and external dependencies.",
+      "memory_type": "strategy",
+      "namespace": "aegis/architecture/health",
+      "metadata": {
+        "category": "architecture",
+        "tags": ["health-checks", "kubernetes", "observability"],
+        "applicable_contexts": ["deployment", "containers"]
+      }
+    },
+    {
+      "content": "For error handling in Python, catch specific exceptions, not bare `except:`. Log the full traceback with `logger.exception()`. Re-raise unknown exceptions after logging.",
+      "memory_type": "strategy",
+      "namespace": "aegis/python/errors",
+      "metadata": {
+        "category": "python",
+        "tags": ["error-handling", "exceptions", "logging"],
+        "applicable_contexts": ["python", "debugging"]
+      }
+    },
+    {
+      "content": "REFLECTION: Used bare `except: pass` to handle an intermittent error. This silently swallowed an unrelated exception for weeks, making debugging nearly impossible when it finally caused visible issues.",
+      "memory_type": "reflection",
+      "namespace": "aegis/python/errors",
+      "error_pattern": "silent-failure",
+      "metadata": {
+        "category": "python",
+        "tags": ["exception-handling", "silent-failure", "debugging"],
+        "correct_approach": "Catch specific exceptions, log all errors, never use bare except"
+      }
+    },
+    {
+      "content": "Use Git hooks (pre-commit) to enforce code quality. Run linting (ruff), formatting (black), and type checking (mypy) before commits. This catches issues before they enter the codebase.",
+      "memory_type": "strategy",
+      "namespace": "aegis/development/workflow",
+      "metadata": {
+        "category": "development",
+        "tags": ["git-hooks", "pre-commit", "code-quality"],
+        "applicable_contexts": ["development", "ci-cd"]
+      }
+    }
+  ]
+}

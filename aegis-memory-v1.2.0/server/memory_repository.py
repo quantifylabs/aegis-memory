@@ -1,0 +1,391 @@
+"""
+Aegis Production Memory Repository
+
+This is where the real scalability magic happens:
+- Uses pgvector's native similarity search (HNSW index)
+- Pre-filters BEFORE vector search (critical for performance)
+- Proper query planning for multi-tenant workloads
+
+ACE Enhancements:
+- Memory type filtering
+- Deprecated memory exclusion
+- Effectiveness score support
+"""
+
+from datetime import datetime, timezone, timedelta
+from typing import List, Optional, Tuple
+from uuid import uuid4
+
+from sqlalchemy import select, delete, text, and_, or_, func, cast
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+from models import Memory, MemoryScope, MemoryType
+from embedding_service import content_hash
+
+
+class MemoryRepository:
+    """
+    Production memory repository with O(log n) vector search.
+    
+    Query Strategy:
+    1. Build filter predicates (project_id, namespace, scope, etc.)
+    2. Use pgvector's <=> operator with HNSW index
+    3. Let PostgreSQL's query planner optimize the join
+    
+    The key insight: pgvector can apply filters BEFORE the ANN search
+    when using the right query structure.
+    """
+    
+    @staticmethod
+    async def add(
+        db: AsyncSession,
+        *,
+        project_id: str,
+        content: str,
+        embedding: List[float],
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        namespace: str = "default",
+        metadata: Optional[dict] = None,
+        ttl_seconds: Optional[int] = None,
+        scope: str = MemoryScope.AGENT_PRIVATE.value,
+        shared_with_agents: Optional[List[str]] = None,
+        derived_from_agents: Optional[List[str]] = None,
+        coordination_metadata: Optional[dict] = None,
+        memory_type: str = MemoryType.STANDARD.value,  # ACE Enhancement
+        source_trajectory_id: Optional[str] = None,  # ACE Enhancement
+        error_pattern: Optional[str] = None,  # ACE Enhancement
+    ) -> Memory:
+        """Add a single memory."""
+        memory_id = uuid4().hex
+        
+        # Compute expiration time upfront (avoids runtime TTL checks)
+        expires_at = None
+        if ttl_seconds is not None:
+            expires_at = datetime.now(timezone.utc).replace(
+                microsecond=0
+            ) + timedelta(seconds=ttl_seconds)
+        
+        mem = Memory(
+            id=memory_id,
+            project_id=project_id,
+            user_id=user_id,
+            agent_id=agent_id,
+            namespace=namespace,
+            content=content,
+            content_hash=content_hash(content),
+            embedding=embedding,
+            metadata_json=metadata or {},
+            expires_at=expires_at,
+            scope=scope,
+            shared_with_agents=shared_with_agents or [],
+            derived_from_agents=derived_from_agents or [],
+            coordination_metadata=coordination_metadata or {},
+            memory_type=memory_type,
+            source_trajectory_id=source_trajectory_id,
+            error_pattern=error_pattern,
+        )
+        
+        db.add(mem)
+        await db.flush()
+        return mem
+    
+    @staticmethod
+    async def add_batch(
+        db: AsyncSession,
+        memories: List[dict],
+    ) -> List[Memory]:
+        """
+        Bulk insert memories.
+        
+        Uses PostgreSQL's multi-value INSERT for efficiency.
+        """
+        now = datetime.now(timezone.utc)
+        objs = []
+        
+        for m in memories:
+            ttl = m.get("ttl_seconds")
+            expires_at = None
+            if ttl is not None:
+                expires_at = now + timedelta(seconds=ttl)
+            
+            obj = Memory(
+                id=uuid4().hex,
+                project_id=m["project_id"],
+                user_id=m.get("user_id"),
+                agent_id=m.get("agent_id"),
+                namespace=m.get("namespace", "default"),
+                content=m["content"],
+                content_hash=content_hash(m["content"]),
+                embedding=m["embedding"],
+                metadata_json=m.get("metadata") or {},
+                expires_at=expires_at,
+                scope=m.get("scope", MemoryScope.AGENT_PRIVATE.value),
+                shared_with_agents=m.get("shared_with_agents") or [],
+                derived_from_agents=m.get("derived_from_agents") or [],
+                coordination_metadata=m.get("coordination_metadata") or {},
+                memory_type=m.get("memory_type", MemoryType.STANDARD.value),
+            )
+            objs.append(obj)
+        
+        db.add_all(objs)
+        await db.flush()
+        return objs
+    
+    @staticmethod
+    async def semantic_search(
+        db: AsyncSession,
+        *,
+        query_embedding: List[float],
+        project_id: str,
+        namespace: str = "default",
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        requesting_agent_id: Optional[str] = None,  # For cross-agent access control
+        target_agent_ids: Optional[List[str]] = None,  # For cross-agent queries
+        top_k: int = 10,
+        min_score: float = 0.0,
+        include_deprecated: bool = False,  # ACE Enhancement
+        memory_types: Optional[List[str]] = None,  # ACE Enhancement: filter by type
+    ) -> List[Tuple[Memory, float]]:
+        """
+        Semantic search using pgvector's HNSW index.
+        
+        This is the CRITICAL fix from v0:
+        - v0: Fetch 100+ rows, compute cosine similarity in Python → O(n)
+        - v1: Use pgvector's <=> operator with HNSW index → O(log n)
+        
+        Query structure matters for pgvector:
+        - Filters go in WHERE clause (not subquery)
+        - ORDER BY embedding <=> query_embedding uses the HNSW index
+        - LIMIT caps the ANN search, not post-filtering
+        """
+        # Build the embedding literal for pgvector
+        embedding_literal = f"[{','.join(str(x) for x in query_embedding)}]"
+        
+        # Base query with cosine distance (1 - similarity)
+        # pgvector's <=> is cosine distance, so lower is better
+        distance_expr = Memory.embedding.cosine_distance(query_embedding)
+        
+        # Start with mandatory filters
+        conditions = [
+            Memory.project_id == project_id,
+            Memory.namespace == namespace,
+            or_(
+                Memory.expires_at.is_(None),
+                Memory.expires_at > datetime.now(timezone.utc)
+            ),
+        ]
+        
+        # ACE Enhancement: Exclude deprecated by default
+        if not include_deprecated:
+            conditions.append(Memory.is_deprecated == False)
+        
+        # ACE Enhancement: Filter by memory type
+        if memory_types:
+            conditions.append(Memory.memory_type.in_(memory_types))
+        
+        # Optional user filter
+        if user_id is not None:
+            conditions.append(Memory.user_id == user_id)
+        
+        # Agent filtering based on query type
+        if target_agent_ids is not None:
+            # Cross-agent query: search specific agents
+            conditions.append(Memory.agent_id.in_(target_agent_ids))
+        elif agent_id is not None:
+            # Single-agent query
+            conditions.append(Memory.agent_id == agent_id)
+        
+        # Build scope-aware access control
+        # This is the complex part: we need to filter based on scope + requesting_agent
+        if requesting_agent_id is not None:
+            # Can access if:
+            # 1. Scope is GLOBAL, or
+            # 2. Scope is AGENT_PRIVATE and agent_id matches, or
+            # 3. Scope is AGENT_SHARED and (agent_id matches OR in shared_with_agents)
+            # Use cast to JSONB for proper containment check
+            # PostgreSQL's @> operator checks if JSONB array contains a value
+            shared_contains = cast(Memory.shared_with_agents, JSONB).contains(
+                cast([requesting_agent_id], JSONB)
+            )
+            
+            scope_filter = or_(
+                Memory.scope == MemoryScope.GLOBAL.value,
+                and_(
+                    Memory.scope == MemoryScope.AGENT_PRIVATE.value,
+                    Memory.agent_id == requesting_agent_id
+                ),
+                and_(
+                    Memory.scope == MemoryScope.AGENT_SHARED.value,
+                    or_(
+                        Memory.agent_id == requesting_agent_id,
+                        shared_contains
+                    )
+                ),
+            )
+            conditions.append(scope_filter)
+        else:
+            # No requesting agent = only global memories
+            conditions.append(Memory.scope == MemoryScope.GLOBAL.value)
+        
+        # Build the query
+        # Key: ORDER BY distance LIMIT k uses the HNSW index efficiently
+        stmt = (
+            select(Memory, distance_expr.label("distance"))
+            .where(and_(*conditions))
+            .order_by(distance_expr)
+            .limit(top_k)
+        )
+        
+        result = await db.execute(stmt)
+        rows = result.all()
+        
+        # Convert distance to similarity score (1 - distance for cosine)
+        # Filter by min_score
+        output = []
+        for mem, distance in rows:
+            score = 1.0 - distance
+            if score >= min_score:
+                output.append((mem, score))
+        
+        return output
+    
+    @staticmethod
+    async def find_duplicates(
+        db: AsyncSession,
+        *,
+        content_hash: str,
+        project_id: str,
+        namespace: str,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+    ) -> Optional[Memory]:
+        """
+        Fast deduplication using content hash.
+        
+        v0 did semantic similarity for dedup (expensive).
+        v1 uses content hash (O(1) with index).
+        """
+        conditions = [
+            Memory.project_id == project_id,
+            Memory.namespace == namespace,
+            Memory.content_hash == content_hash,
+        ]
+        
+        if user_id is not None:
+            conditions.append(Memory.user_id == user_id)
+        if agent_id is not None:
+            conditions.append(Memory.agent_id == agent_id)
+        
+        stmt = select(Memory).where(and_(*conditions)).limit(1)
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+    
+    @staticmethod
+    async def get_by_id(
+        db: AsyncSession,
+        memory_id: str,
+        project_id: str,
+    ) -> Optional[Memory]:
+        """Get a memory by ID with project validation."""
+        stmt = select(Memory).where(
+            Memory.id == memory_id,
+            Memory.project_id == project_id,
+        )
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none()
+    
+    @staticmethod
+    async def delete(
+        db: AsyncSession,
+        memory_id: str,
+        project_id: str,
+    ) -> bool:
+        """Delete a memory. Returns True if deleted."""
+        stmt = delete(Memory).where(
+            Memory.id == memory_id,
+            Memory.project_id == project_id,
+        ).returning(Memory.id)
+        
+        result = await db.execute(stmt)
+        return result.scalar_one_or_none() is not None
+    
+    @staticmethod
+    async def cleanup_expired(db: AsyncSession, batch_size: int = 1000) -> int:
+        """
+        Delete expired memories.
+        
+        Run this periodically (e.g., every 5 minutes via cron/scheduler).
+        Uses LIMIT to avoid long-running transactions.
+        """
+        now = datetime.now(timezone.utc)
+        
+        # Find IDs to delete (subquery)
+        subquery = (
+            select(Memory.id)
+            .where(
+                Memory.expires_at.isnot(None),
+                Memory.expires_at <= now,
+            )
+            .limit(batch_size)
+        )
+        
+        # Delete by IDs
+        stmt = delete(Memory).where(Memory.id.in_(subquery))
+        result = await db.execute(stmt)
+        
+        return result.rowcount
+    
+    @staticmethod
+    async def get_agent_memories_for_handoff(
+        db: AsyncSession,
+        *,
+        project_id: str,
+        source_agent_id: str,
+        namespace: str = "default",
+        user_id: Optional[str] = None,
+        task_embedding: Optional[List[float]] = None,
+        max_memories: int = 20,
+    ) -> List[Tuple[Memory, Optional[float]]]:
+        """
+        Get memories for agent handoff.
+        
+        If task_embedding provided, rank by relevance.
+        Otherwise, return most recent.
+        """
+        conditions = [
+            Memory.project_id == project_id,
+            Memory.agent_id == source_agent_id,
+            Memory.namespace == namespace,
+            or_(
+                Memory.expires_at.is_(None),
+                Memory.expires_at > datetime.now(timezone.utc)
+            ),
+        ]
+        
+        if user_id is not None:
+            conditions.append(Memory.user_id == user_id)
+        
+        if task_embedding is not None:
+            # Rank by semantic similarity to task
+            distance_expr = Memory.embedding.cosine_distance(task_embedding)
+            stmt = (
+                select(Memory, (1.0 - distance_expr).label("score"))
+                .where(and_(*conditions))
+                .order_by(distance_expr)
+                .limit(max_memories)
+            )
+        else:
+            # Rank by recency
+            stmt = (
+                select(Memory, text("NULL::float as score"))
+                .where(and_(*conditions))
+                .order_by(Memory.created_at.desc())
+                .limit(max_memories)
+            )
+        
+        result = await db.execute(stmt)
+        return [(mem, score) for mem, score in result.all()]
