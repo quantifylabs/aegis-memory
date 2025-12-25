@@ -10,7 +10,7 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [
-    { name = "Quantify Labs Ltd", email = "hello@quantifylabs.ai" }
+    { name = "Quantify Labs", email = "arulnidhi@quantifylabs.ai" }
 ]
 keywords = [
     "ai",
