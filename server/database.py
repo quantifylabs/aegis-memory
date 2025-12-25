@@ -9,19 +9,16 @@ Key improvements:
 """
 
 import asyncio
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional
 
+from config import get_settings
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.pool import NullPool
-from sqlalchemy import text
-
-from config import get_settings
-
 
 settings = get_settings()
 
@@ -29,12 +26,12 @@ settings = get_settings()
 def _create_engine(url: str, pool_size: int = 20, max_overflow: int = 10, is_read_replica: bool = False):
     """
     Create an async engine with production-ready pooling.
-    
+
     Pool sizing guidelines:
     - pool_size: Number of persistent connections (match expected concurrency)
     - max_overflow: Burst capacity (for traffic spikes)
     - Total max connections = pool_size + max_overflow
-    
+
     For a typical deployment:
     - 2 uvicorn workers × 20 pool_size = 40 connections
     - PostgreSQL default max_connections = 100
@@ -145,7 +142,7 @@ async def init_db():
     async with primary_engine.begin() as conn:
         # Enable pgvector
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        
+
         # Import and create all tables
         from models import Base
         await conn.run_sync(Base.metadata.create_all)
@@ -156,9 +153,9 @@ async def check_db_health() -> dict:
     try:
         async with AsyncSessionLocal() as session:
             start = asyncio.get_event_loop().time()
-            result = await session.execute(text("SELECT 1"))
+            await session.execute(text("SELECT 1"))
             latency = (asyncio.get_event_loop().time() - start) * 1000
-            
+
             # Get pool stats
             pool = primary_engine.pool
             return {

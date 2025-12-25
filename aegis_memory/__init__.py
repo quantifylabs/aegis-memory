@@ -9,15 +9,15 @@ Aegis Memory is an open-source, self-hostable memory engine for LLM agents with:
 
 Quick Start:
     from aegis_memory import AegisClient
-    
+
     client = AegisClient(api_key="your-key", base_url="http://localhost:8000")
-    
+
     # Add a memory
     result = client.add("User prefers dark mode", agent_id="ui-agent")
-    
-    # Query memories  
+
+    # Query memories
     memories = client.query("user preferences", agent_id="ui-agent")
-    
+
     # Cross-agent query with access control
     memories = client.query_cross_agent(
         "user settings",
@@ -31,10 +31,10 @@ __version__ = "1.2.0"
 
 from aegis_memory.client import (
     AegisClient,
+    Feature,
     Memory,
     PlaybookEntry,
     SessionProgress,
-    Feature,
 )
 
 __all__ = [

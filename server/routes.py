@@ -9,23 +9,20 @@ Key improvements:
 5. Request validation with Pydantic v2
 """
 
-from datetime import datetime, timezone
-from typing import Any, List, Optional
-import asyncio
-
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, status
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import and_, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
+from typing import Any
 
 from config import get_settings
 from database import get_db, get_read_db
-from embedding_service import get_embedding_service, content_hash
+from embedding_service import content_hash, get_embedding_service
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from memory_repository import MemoryRepository
-from scope_inference import ScopeInference
 from models import Memory, MemoryScope
+from pydantic import BaseModel, Field, field_validator
 from rate_limiter import RateLimiter, RateLimitExceeded
+from scope_inference import ScopeInference
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 settings = get_settings()
@@ -36,16 +33,16 @@ rate_limiter = RateLimiter()
 
 class MemoryCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=100_000)
-    user_id: Optional[str] = Field(default=None, max_length=64)
-    agent_id: Optional[str] = Field(default=None, max_length=64)
+    user_id: str | None = Field(default=None, max_length=64)
+    agent_id: str | None = Field(default=None, max_length=64)
     namespace: str = Field(default="default", max_length=64)
-    metadata: Optional[dict[str, Any]] = None
-    ttl_seconds: Optional[int] = Field(default=None, ge=1, le=31536000)  # Max 1 year
-    scope: Optional[str] = None
-    shared_with_agents: Optional[List[str]] = None
-    derived_from_agents: Optional[List[str]] = None
-    coordination_metadata: Optional[dict[str, Any]] = None
-    
+    metadata: dict[str, Any] | None = None
+    ttl_seconds: int | None = Field(default=None, ge=1, le=31536000)  # Max 1 year
+    scope: str | None = None
+    shared_with_agents: list[str] | None = None
+    derived_from_agents: list[str] | None = None
+    coordination_metadata: dict[str, Any] | None = None
+
     @field_validator("scope")
     @classmethod
     def validate_scope(cls, v):
@@ -57,13 +54,13 @@ class MemoryCreate(BaseModel):
 
 
 class MemoryCreateBatch(BaseModel):
-    items: List[MemoryCreate] = Field(..., min_length=1, max_length=100)
+    items: list[MemoryCreate] = Field(..., min_length=1, max_length=100)
 
 
 class MemoryQuery(BaseModel):
     query: str = Field(..., min_length=1, max_length=10_000)
-    user_id: Optional[str] = None
-    agent_id: Optional[str] = None
+    user_id: str | None = None
+    agent_id: str | None = None
     namespace: str = "default"
     top_k: int = Field(default=10, ge=1, le=100)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -72,8 +69,8 @@ class MemoryQuery(BaseModel):
 class CrossAgentQuery(BaseModel):
     query: str = Field(..., min_length=1, max_length=10_000)
     requesting_agent_id: str = Field(..., min_length=1, max_length=64)
-    target_agent_ids: Optional[List[str]] = None
-    user_id: Optional[str] = None
+    target_agent_ids: list[str] | None = None
+    user_id: str | None = None
     namespace: str = "default"
     top_k: int = Field(default=10, ge=1, le=100)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -83,43 +80,43 @@ class HandoffRequest(BaseModel):
     source_agent_id: str
     target_agent_id: str
     namespace: str = "default"
-    user_id: Optional[str] = None
-    task_context: Optional[str] = Field(default=None, max_length=10_000)
+    user_id: str | None = None
+    task_context: str | None = Field(default=None, max_length=10_000)
     max_memories: int = Field(default=20, ge=1, le=100)
 
 
 class MemoryOut(BaseModel):
     id: str
     content: str
-    user_id: Optional[str]
-    agent_id: Optional[str]
+    user_id: str | None
+    agent_id: str | None
     namespace: str
     metadata: dict[str, Any]
     created_at: datetime
     scope: str
-    shared_with_agents: List[str]
-    derived_from_agents: List[str]
+    shared_with_agents: list[str]
+    derived_from_agents: list[str]
     coordination_metadata: dict[str, Any]
-    score: Optional[float] = None
-    
+    score: float | None = None
+
     class Config:
         from_attributes = True
 
 
 class AddResult(BaseModel):
     id: str
-    deduped_from: Optional[str] = None
-    inferred_scope: Optional[str] = None
+    deduped_from: str | None = None
+    inferred_scope: str | None = None
 
 
 class AddBatchResult(BaseModel):
-    results: List[AddResult]
+    results: list[AddResult]
     embeddings_cached: int
     total_time_ms: float
 
 
 class QueryResult(BaseModel):
-    memories: List[MemoryOut]
+    memories: list[MemoryOut]
     query_time_ms: float
 
 
@@ -127,14 +124,14 @@ class HandoffBaton(BaseModel):
     source_agent_id: str
     target_agent_id: str
     namespace: str
-    user_id: Optional[str]
-    task_context: Optional[str]
-    summary: Optional[str]
-    active_tasks: List[str]
-    blocked_on: List[str]
-    recent_decisions: List[str]
-    key_facts: List[str]
-    memory_ids: List[str]
+    user_id: str | None
+    task_context: str | None
+    summary: str | None
+    active_tasks: list[str]
+    blocked_on: list[str]
+    recent_decisions: list[str]
+    key_facts: list[str]
+    memory_ids: list[str]
 
 
 # ---------- Dependencies ----------
@@ -147,9 +144,9 @@ async def get_project_id(request: Request) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing Authorization header"
         )
-    
+
     token = auth[7:].strip()
-    
+
     # In production, validate against a projects table
     # For now, use the configured API key
     if token != settings.aegis_api_key:
@@ -157,7 +154,7 @@ async def get_project_id(request: Request) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key"
         )
-    
+
     return settings.default_project_id
 
 
@@ -170,7 +167,7 @@ async def check_rate_limit(project_id: str = Depends(get_project_id)):
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=str(e),
             headers={"Retry-After": str(e.retry_after)}
-        )
+        ) from e
     return project_id
 
 
@@ -186,7 +183,7 @@ async def add_memory(
     Add a single memory with automatic scope inference and deduplication.
     """
     embed_service = get_embedding_service()
-    
+
     # Check for duplicates using content hash (fast)
     hash_val = content_hash(body.content)
     existing = await MemoryRepository.find_duplicates(
@@ -197,13 +194,13 @@ async def add_memory(
         user_id=body.user_id,
         agent_id=body.agent_id,
     )
-    
+
     if existing:
         return AddResult(id=existing.id, deduped_from=existing.id)
-    
+
     # Generate embedding
     embedding = await embed_service.embed_single(body.content, db)
-    
+
     # Infer scope if not provided
     resolved_scope = ScopeInference.infer_scope(
         content=body.content,
@@ -211,7 +208,7 @@ async def add_memory(
         agent_id=body.agent_id,
         metadata=body.metadata or {},
     )
-    
+
     # Create memory
     mem = await MemoryRepository.add(
         db,
@@ -228,7 +225,7 @@ async def add_memory(
         derived_from_agents=body.derived_from_agents,
         coordination_metadata=body.coordination_metadata,
     )
-    
+
     return AddResult(
         id=mem.id,
         deduped_from=None,
@@ -244,23 +241,23 @@ async def add_memory_batch(
 ):
     """
     Add multiple memories efficiently with batched embedding.
-    
+
     This is MUCH faster than calling /add multiple times:
     - Single embedding API call for all texts
     - Bulk database insert
     """
     import time
     start = time.monotonic()
-    
+
     embed_service = get_embedding_service()
-    
+
     # Batch embed all content
     texts = [item.content for item in body.items]
     embeddings = await embed_service.embed_batch(texts, db)
-    
+
     results = []
     to_insert = []
-    
+
     for i, item in enumerate(body.items):
         # Check dedup
         hash_val = content_hash(item.content)
@@ -272,11 +269,11 @@ async def add_memory_batch(
             user_id=item.user_id,
             agent_id=item.agent_id,
         )
-        
+
         if existing:
             results.append(AddResult(id=existing.id, deduped_from=existing.id))
             continue
-        
+
         # Prepare for bulk insert
         resolved_scope = ScopeInference.infer_scope(
             content=item.content,
@@ -284,7 +281,7 @@ async def add_memory_batch(
             agent_id=item.agent_id,
             metadata=item.metadata or {},
         )
-        
+
         to_insert.append({
             "project_id": project_id,
             "content": item.content,
@@ -299,24 +296,24 @@ async def add_memory_batch(
             "derived_from_agents": item.derived_from_agents,
             "coordination_metadata": item.coordination_metadata,
         })
-        
+
         # Placeholder - will be filled after bulk insert
         results.append(None)
-    
+
     # Bulk insert
     if to_insert:
         memories = await MemoryRepository.add_batch(db, to_insert)
-        
+
         # Fill in results
         mem_iter = iter(memories)
         for i in range(len(results)):
             if results[i] is None:
                 mem = next(mem_iter)
                 results[i] = AddResult(id=mem.id, deduped_from=None)
-    
+
     elapsed_ms = (time.monotonic() - start) * 1000
     stats = embed_service.get_stats()
-    
+
     return AddBatchResult(
         results=results,
         embeddings_cached=stats["cache_hits"],
@@ -332,15 +329,15 @@ async def query_memories(
 ):
     """
     Semantic search over memories.
-    
+
     Uses pgvector's HNSW index for O(log n) search.
     """
     import time
     start = time.monotonic()
-    
+
     embed_service = get_embedding_service()
     query_embedding = await embed_service.embed_single(body.query, db)
-    
+
     results = await MemoryRepository.semantic_search(
         db,
         query_embedding=query_embedding,
@@ -352,9 +349,9 @@ async def query_memories(
         top_k=body.top_k,
         min_score=body.min_score,
     )
-    
+
     elapsed_ms = (time.monotonic() - start) * 1000
-    
+
     memories = [
         MemoryOut(
             id=mem.id,
@@ -372,7 +369,7 @@ async def query_memories(
         )
         for mem, score in results
     ]
-    
+
     return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2))
 
 
@@ -384,7 +381,7 @@ async def query_cross_agent(
 ):
     """
     Cross-agent semantic search with scope-aware access control.
-    
+
     Agents can only see:
     - GLOBAL memories (any agent)
     - AGENT_PRIVATE memories they own
@@ -392,10 +389,10 @@ async def query_cross_agent(
     """
     import time
     start = time.monotonic()
-    
+
     embed_service = get_embedding_service()
     query_embedding = await embed_service.embed_single(body.query, db)
-    
+
     results = await MemoryRepository.semantic_search(
         db,
         query_embedding=query_embedding,
@@ -407,9 +404,9 @@ async def query_cross_agent(
         top_k=body.top_k,
         min_score=body.min_score,
     )
-    
+
     elapsed_ms = (time.monotonic() - start) * 1000
-    
+
     memories = [
         MemoryOut(
             id=mem.id,
@@ -427,7 +424,7 @@ async def query_cross_agent(
         )
         for mem, score in results
     ]
-    
+
     return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2))
 
 
@@ -440,17 +437,17 @@ async def handoff(
 ):
     """
     Generate a structured handoff baton for agent-to-agent state transfer.
-    
+
     The LLM summarization runs in the background to avoid blocking.
     Returns immediately with raw facts, then updates asynchronously.
     """
     embed_service = get_embedding_service()
-    
+
     # Get task embedding if context provided
     task_embedding = None
     if body.task_context:
         task_embedding = await embed_service.embed_single(body.task_context, db)
-    
+
     # Fetch relevant memories
     results = await MemoryRepository.get_agent_memories_for_handoff(
         db,
@@ -461,11 +458,11 @@ async def handoff(
         task_embedding=task_embedding,
         max_memories=body.max_memories,
     )
-    
+
     memories = [mem for mem, _ in results]
     memory_ids = [mem.id for mem in memories]
     key_facts = [mem.content for mem in memories]
-    
+
     # Return immediately with raw data
     # Background task can update with LLM summary if needed
     return HandoffBaton(
@@ -493,7 +490,7 @@ async def get_memory(
     mem = await MemoryRepository.get_by_id(db, memory_id, project_id)
     if not mem:
         raise HTTPException(status_code=404, detail="Memory not found")
-    
+
     return MemoryOut(
         id=mem.id,
         content=mem.content,
@@ -526,19 +523,19 @@ async def delete_memory(
 
 class ExportRequest(BaseModel):
     """Request for data export."""
-    namespace: Optional[str] = None
-    agent_id: Optional[str] = None
+    namespace: str | None = None
+    agent_id: str | None = None
     format: str = Field(default="jsonl", pattern="^(jsonl|json)$")
     include_embeddings: bool = False
-    limit: Optional[int] = Field(default=None, ge=1, le=100000)
+    limit: int | None = Field(default=None, ge=1, le=100000)
 
 
 class ExportStats(BaseModel):
     """Export statistics."""
     total_exported: int
     format: str
-    namespaces: List[str]
-    agents: List[str]
+    namespaces: list[str]
+    agents: list[str]
 
 
 @router.post("/export")
@@ -549,49 +546,50 @@ async def export_memories(
 ):
     """
     Export memories for backup or migration.
-    
+
     Supports JSONL (streaming) and JSON formats.
     Does NOT include proprietary data - standard JSON format only.
-    
+
     Use cases:
     - GDPR data portability requests
     - Migration to another system
     - Backup verification
     - Analytics/debugging
     """
-    from fastapi.responses import StreamingResponse
     import json
-    
+
+    from fastapi.responses import StreamingResponse
+
     # Build query
     conditions = [Memory.project_id == project_id]
-    
+
     if body.namespace:
         conditions.append(Memory.namespace == body.namespace)
     if body.agent_id:
         conditions.append(Memory.agent_id == body.agent_id)
-    
+
     stmt = (
         select(Memory)
         .where(and_(*conditions))
         .order_by(Memory.created_at)
     )
-    
+
     if body.limit:
         stmt = stmt.limit(body.limit)
-    
+
     result = await db.execute(stmt)
     memories = result.scalars().all()
-    
+
     # Track stats
     namespaces = set()
     agents = set()
-    
+
     def serialize_memory(mem: Memory) -> dict:
         """Serialize memory to portable JSON."""
         namespaces.add(mem.namespace)
         if mem.agent_id:
             agents.add(mem.agent_id)
-        
+
         data = {
             "id": mem.id,
             "content": mem.content,
@@ -606,18 +604,18 @@ async def export_memories(
             "bullet_helpful": mem.bullet_helpful,
             "bullet_harmful": mem.bullet_harmful,
         }
-        
+
         if body.include_embeddings:
             data["embedding"] = list(mem.embedding) if mem.embedding else None
-        
+
         return data
-    
+
     if body.format == "jsonl":
         # Stream JSONL for large exports
         def generate():
             for mem in memories:
                 yield json.dumps(serialize_memory(mem)) + "\n"
-        
+
         return StreamingResponse(
             generate(),
             media_type="application/x-ndjson",

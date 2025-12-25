@@ -4,22 +4,22 @@ Aegis CLI Commands
 All command implementations.
 """
 
-from aegis_memory.cli.commands.config import app as config_app
 from aegis_memory.cli.commands import (
-    status,
-    stats,
-    memory,
-    vote,
-    progress,
-    features,
-    playbook,
     export_import,
+    features,
+    memory,
+    playbook,
+    progress,
+    stats,
+    status,
+    vote,
 )
+from aegis_memory.cli.commands.config import app as config_app
 
 __all__ = [
     "config_app",
     "status",
-    "stats", 
+    "stats",
     "memory",
     "vote",
     "progress",

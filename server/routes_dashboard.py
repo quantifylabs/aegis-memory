@@ -1,13 +1,12 @@
-from typing import List, Optional
-from fastapi import APIRouter, Depends
-from sqlalchemy import select, func, desc
-from sqlalchemy.ext.asyncio import AsyncSession
-from pydantic import BaseModel
 from datetime import datetime, timedelta
 
 from database import get_read_db
-from models import Memory, MemoryType, SessionProgress, FeatureTracker
+from fastapi import APIRouter, Depends
+from models import FeatureTracker, Memory, MemoryType, SessionProgress
+from pydantic import BaseModel
 from routes import check_rate_limit
+from sqlalchemy import desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/memories/ace/dashboard", tags=["dashboard"])
 
@@ -17,21 +16,21 @@ class DashboardStats(BaseModel):
     total_strategies: int
     total_features: int
     recent_activity_count: int
-    top_agents: List[dict]
+    top_agents: list[dict]
 
 class ActivityItem(BaseModel):
     id: str
     memory_type: str
     content_preview: str
-    agent_id: Optional[str]
+    agent_id: str | None
     effectiveness_score: float
     bullet_helpful: int
     bullet_harmful: int
     created_at: datetime
-    error_pattern: Optional[str]
+    error_pattern: str | None
 
 class ActivityFeed(BaseModel):
-    items: List[ActivityItem]
+    items: list[ActivityItem]
 
 @router.get("/stats", response_model=DashboardStats)
 async def get_dashboard_stats(
@@ -40,23 +39,23 @@ async def get_dashboard_stats(
     db: AsyncSession = Depends(get_read_db),
 ):
     """Aggregate stats for the 'The Brain' view."""
-    
+
     # 1. Counts by type
     # Note: In production, cache these queries or use estimates for scale
     total_memories = await db.scalar(
         select(func.count(Memory.id)).where(Memory.project_id == project_id)
     )
-    
+
     total_reflections = await db.scalar(
         select(func.count(Memory.id)).where(
-            Memory.project_id == project_id, 
+            Memory.project_id == project_id,
             Memory.memory_type == MemoryType.REFLECTION.value
         )
     )
-    
+
     total_strategies = await db.scalar(
         select(func.count(Memory.id)).where(
-            Memory.project_id == project_id, 
+            Memory.project_id == project_id,
             Memory.memory_type == MemoryType.STRATEGY.value
         )
     )
@@ -64,7 +63,7 @@ async def get_dashboard_stats(
     total_features = await db.scalar(
         select(func.count(FeatureTracker.id)).where(FeatureTracker.project_id == project_id)
     )
-    
+
     # 2. Activity in last 24h
     yesterday = datetime.utcnow() - timedelta(hours=24)
     recent_activity = await db.scalar(
@@ -73,7 +72,7 @@ async def get_dashboard_stats(
             Memory.created_at >= yesterday
         )
     )
-    
+
     # 3. Top Agents (by memory count)
     top_agents_result = await db.execute(
         select(Memory.agent_id, func.count(Memory.id).label("count"))
@@ -82,12 +81,12 @@ async def get_dashboard_stats(
         .order_by(desc("count"))
         .limit(5)
     )
-    
+
     top_agents = [
-        {"agent_id": row.agent_id, "memory_count": row.count} 
+        {"agent_id": row.agent_id, "memory_count": row.count}
         for row in top_agents_result
     ]
-    
+
     return DashboardStats(
         total_memories=total_memories or 0,
         total_reflections=total_reflections or 0,
@@ -111,10 +110,10 @@ async def get_activity_feed(
         .order_by(desc(Memory.created_at))
         .limit(limit)
     )
-    
+
     result = await db.execute(query)
     memories = result.scalars().all()
-    
+
     items = []
     for m in memories:
         items.append(ActivityItem(
@@ -128,7 +127,7 @@ async def get_activity_feed(
             created_at=m.created_at,
             error_pattern=m.error_pattern
         ))
-        
+
     return ActivityFeed(items=items)
 
 @router.get("/sessions")

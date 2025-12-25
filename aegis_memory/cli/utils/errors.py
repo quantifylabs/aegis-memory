@@ -5,18 +5,18 @@ Consistent error handling and user-friendly error messages.
 """
 
 import sys
-from typing import Optional, NoReturn
-from rich.console import Console
-from rich.panel import Panel
+from typing import NoReturn
+
 import httpx
+from rich.console import Console
 
 console = Console()
 
 
 class CLIError(Exception):
     """Base CLI error with exit code."""
-    
-    def __init__(self, message: str, exit_code: int = 1, hint: Optional[str] = None):
+
+    def __init__(self, message: str, exit_code: int = 1, hint: str | None = None):
         self.message = message
         self.exit_code = exit_code
         self.hint = hint
@@ -25,39 +25,39 @@ class CLIError(Exception):
 
 class ConnectionError(CLIError):
     """Server connection error."""
-    
-    def __init__(self, url: str, details: Optional[str] = None):
-        hint = f"""Troubleshooting:
+
+    def __init__(self, url: str, details: str | None = None):
+        hint = """Troubleshooting:
   1. Check if server is running: docker-compose ps
   2. Verify URL: aegis config show
   3. Check firewall/network settings"""
-        
+
         message = f"Cannot connect to Aegis server\n  URL: {url}"
         if details:
             message += f"\n  Error: {details}"
-        
+
         super().__init__(message, exit_code=2, hint=hint)
 
 
 class AuthenticationError(CLIError):
     """Authentication failure."""
-    
-    def __init__(self, details: Optional[str] = None):
+
+    def __init__(self, details: str | None = None):
         hint = """Fix:
   1. Check API key: aegis config show
   2. Update key: aegis config init
   3. Or set env: export AEGIS_API_KEY=<key>"""
-        
+
         message = "Authentication failed"
         if details:
             message += f"\n  Error: {details}"
-        
+
         super().__init__(message, exit_code=3, hint=hint)
 
 
 class NotFoundError(CLIError):
     """Resource not found."""
-    
+
     def __init__(self, resource_type: str, resource_id: str):
         message = f"{resource_type} not found: {resource_id}"
         super().__init__(message, exit_code=4)
@@ -65,7 +65,7 @@ class NotFoundError(CLIError):
 
 class ValidationError(CLIError):
     """Input validation error."""
-    
+
     def __init__(self, message: str):
         super().__init__(f"Validation error\n  {message}", exit_code=5)
 
@@ -73,7 +73,7 @@ class ValidationError(CLIError):
 def handle_api_error(error: Exception, context: str = "") -> NoReturn:
     """
     Handle API errors and convert to user-friendly messages.
-    
+
     Args:
         error: The caught exception
         context: Additional context about what operation failed
@@ -83,10 +83,10 @@ def handle_api_error(error: Exception, context: str = "") -> NoReturn:
             url=str(getattr(error, 'request', {}).url if hasattr(error, 'request') else 'unknown'),
             details=str(error)
         )
-    
+
     if isinstance(error, httpx.HTTPStatusError):
         status = error.response.status_code
-        
+
         if status == 401:
             raise AuthenticationError("Invalid API key")
         elif status == 403:
@@ -113,13 +113,13 @@ def handle_api_error(error: Exception, context: str = "") -> NoReturn:
             except Exception:
                 detail = str(error)
             raise CLIError(f"API error ({status}): {detail}")
-    
+
     if isinstance(error, httpx.TimeoutException):
         raise CLIError(
             "Request timed out",
             hint="The server took too long to respond. Try again or check server health."
         )
-    
+
     # Unknown error
     raise CLIError(f"Unexpected error: {str(error)}")
 
@@ -127,28 +127,28 @@ def handle_api_error(error: Exception, context: str = "") -> NoReturn:
 def exit_with_error(error: CLIError) -> NoReturn:
     """Print error and exit with appropriate code."""
     console.print(f"\n[red]✗[/red] {error.message}")
-    
+
     if error.hint:
         console.print(f"\n[dim]{error.hint}[/dim]")
-    
+
     sys.exit(error.exit_code)
 
 
 def require_client():
     """Get client or exit with helpful error."""
-    from aegis_memory.cli.utils.auth import get_client, get_api_url
-    
+    from aegis_memory.cli.utils.auth import get_client
+
     client = get_client()
     if client is None:
         raise AuthenticationError("No API key configured")
-    
+
     return client
 
 
 def wrap_errors(func):
     """Decorator to wrap function with error handling."""
     from functools import wraps
-    
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
@@ -162,5 +162,5 @@ def wrap_errors(func):
             sys.exit(130)
         except Exception as e:
             exit_with_error(CLIError(f"Unexpected error: {str(e)}"))
-    
+
     return wrapper

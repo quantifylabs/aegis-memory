@@ -15,15 +15,14 @@ ACE Enhancements (v1.1):
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from contextlib import asynccontextmanager
-from typing import Callable
 
+from config import get_settings
+from database import check_db_health, init_db
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-
-from config import get_settings
-from database import init_db, check_db_health
 from routes import router as memory_router
 from routes_ace import router as ace_router
 from routes_dashboard import router as dashboard_router
@@ -42,24 +41,24 @@ settings = get_settings()
 async def lifespan(app: FastAPI):
     """
     Lifespan context manager for startup/shutdown.
-    
+
     Replaces deprecated @app.on_event("startup") and @app.on_event("shutdown").
     """
     # Startup
     logger.info("Aegis Memory API starting...")
-    
+
     try:
         await init_db()
         logger.info("Database initialized")
     except Exception as e:
         logger.error(f"Failed to initialize database: {e}")
         raise
-    
+
     # Load genesis playbook if database is empty
     try:
-        from playbook_loader import load_genesis_playbook
         from database import async_session_factory
-        
+        from playbook_loader import load_genesis_playbook
+
         async with async_session_factory() as db:
             stats = await load_genesis_playbook(db)
             if stats["loaded"] > 0:
@@ -69,11 +68,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Could not load genesis playbook: {e}")
         # Non-fatal - continue startup
-    
+
     logger.info("Aegis Memory API ready")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Aegis Memory API shutting down...")
 
@@ -83,28 +82,28 @@ app = FastAPI(
     version="1.2.1",
     description="""
     # Aegis Memory
-    
+
     **Production-grade multi-agent memory layer with ACE enhancements.**
-    
+
     ## Features
-    
+
     - **Semantic Search**: pgvector HNSW index for fast similarity search
     - **Multi-Agent Support**: Scope-aware access control, cross-agent queries, handoffs
     - **ACE Patterns**: Memory voting, incremental updates, reflections, progress tracking
     - **Production Ready**: Connection pooling, caching, rate limiting, observability
-    
+
     ## Quick Start
-    
+
     ```python
     from aegis_memory import AegisClient
-    
+
     client = AegisClient(api_key="your-key")
     client.add("User prefers dark mode", agent_id="assistant")
     memories = client.query("user preferences", agent_id="assistant")
     ```
-    
+
     ## Links
-    
+
     - [Documentation](https://github.com/quantifylabs/aegis-memory)
     - [ACE Patterns Guide](https://github.com/quantifylabs/aegis-memory/blob/main/docs/ACE-PATTERNS.md)
     """,
@@ -130,14 +129,14 @@ app.add_middleware(
 async def add_request_id(request: Request, call_next: Callable) -> Response:
     """Add request ID for tracing."""
     request_id = request.headers.get("X-Request-ID", uuid.uuid4().hex[:16])
-    
+
     start = time.monotonic()
     response = await call_next(request)
     elapsed = time.monotonic() - start
-    
+
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Response-Time"] = f"{elapsed:.3f}s"
-    
+
     # Log request
     logger.info(
         f"{request.method} {request.url.path} "
@@ -145,7 +144,7 @@ async def add_request_id(request: Request, call_next: Callable) -> Response:
         f"time={elapsed:.3f}s "
         f"request_id={request_id}"
     )
-    
+
     return response
 
 
@@ -180,7 +179,7 @@ async def root():
 async def health():
     """Health check endpoint."""
     db_health = await check_db_health()
-    
+
     return {
         "status": "healthy" if db_health["status"] == "healthy" else "degraded",
         "version": "1.2.0",
@@ -193,13 +192,13 @@ async def health():
 async def ready():
     """Readiness probe for Kubernetes."""
     db_health = await check_db_health()
-    
+
     if db_health["status"] != "healthy":
         return JSONResponse(
             status_code=503,
             content={"status": "not ready", "reason": "database unhealthy"}
         )
-    
+
     return {"status": "ready"}
 
 
@@ -207,7 +206,7 @@ async def ready():
 async def metrics():
     """
     Prometheus metrics endpoint.
-    
+
     Exposes:
     - HTTP request counts and latencies
     - Memory operation metrics
@@ -239,7 +238,7 @@ app.include_router(dashboard_router)  # Already has prefix="/memories/ace/dashbo
 
 if __name__ == "__main__":
     import uvicorn
-    
+
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
