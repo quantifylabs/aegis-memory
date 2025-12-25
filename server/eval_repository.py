@@ -10,17 +10,18 @@ Aggregation logic for 'Confidence Metrics' and 'Evaluation Harness':
 """
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, List, Optional, Dict
-from sqlalchemy import select, func, and_, or_, cast, Float
+from typing import Any
+
+from models import FeatureTracker, Memory, VoteHistory
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from models import Memory, FeatureTracker, SessionProgress, VoteHistory, FeatureStatus
 
 
 class EvalRepository:
     """Repository for evaluation and confidence metrics."""
 
     @staticmethod
-    def _get_window_start(window: str) -> Optional[datetime]:
+    def _get_window_start(window: str) -> datetime | None:
         """Convert window string to start datetime."""
         now = datetime.now(timezone.utc)
         if window == "24h":
@@ -35,10 +36,10 @@ class EvalRepository:
     async def get_metrics(
         db: AsyncSession,
         project_id: str,
-        namespace: Optional[str] = None,
-        agent_id: Optional[str] = None,
+        namespace: str | None = None,
+        agent_id: str | None = None,
         window: str = "global",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Aggregate high-level KPIs for the Evaluation Harness.
         """
@@ -53,9 +54,9 @@ class EvalRepository:
 
         ft_query = select(
             func.count(FeatureTracker.id).label("total"),
-            func.count(FeatureTracker.id).filter(FeatureTracker.passes == True).label("passing"),
+            func.count(FeatureTracker.id).filter(FeatureTracker.passes).label("passing"),
             func.avg(
-                func.extract("epoch", FeatureTracker.completed_at) - 
+                func.extract("epoch", FeatureTracker.completed_at) -
                 func.extract("epoch", FeatureTracker.created_at)
             ).filter(FeatureTracker.completed_at.isnot(None)).label("avg_mttr_sec")
         ).where(and_(*ft_conditions))
@@ -107,10 +108,10 @@ class EvalRepository:
     async def get_vote_utility_correlation(
         db: AsyncSession,
         project_id: str,
-        namespace: Optional[str] = None,
-        agent_id: Optional[str] = None,
+        namespace: str | None = None,
+        agent_id: str | None = None,
         window: str = "global",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Calculate correlation between memory votes and task success.
         Answers: 'Do votes predict actual usefulness?'

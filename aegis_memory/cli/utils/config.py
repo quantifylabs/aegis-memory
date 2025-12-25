@@ -6,7 +6,8 @@ Handles loading/saving config files and credentials.
 
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
+
 import yaml
 
 
@@ -39,13 +40,13 @@ def ensure_config_dir():
         pass  # Windows doesn't support chmod
 
 
-def load_config() -> Dict[str, Any]:
+def load_config() -> dict[str, Any]:
     """Load configuration from file."""
     config_path = get_config_path()
-    
+
     if not config_path.exists():
         return get_default_config()
-    
+
     try:
         with open(config_path) as f:
             config = yaml.safe_load(f) or {}
@@ -54,22 +55,22 @@ def load_config() -> Dict[str, Any]:
         return get_default_config()
 
 
-def save_config(config: Dict[str, Any]):
+def save_config(config: dict[str, Any]):
     """Save configuration to file."""
     ensure_config_dir()
     config_path = get_config_path()
-    
+
     with open(config_path, "w") as f:
         yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
 
-def load_credentials() -> Dict[str, Any]:
+def load_credentials() -> dict[str, Any]:
     """Load credentials from file."""
     creds_path = get_credentials_path()
-    
+
     if not creds_path.exists():
         return {"profiles": {}}
-    
+
     try:
         with open(creds_path) as f:
             return yaml.safe_load(f) or {"profiles": {}}
@@ -77,14 +78,14 @@ def load_credentials() -> Dict[str, Any]:
         return {"profiles": {}}
 
 
-def save_credentials(credentials: Dict[str, Any]):
+def save_credentials(credentials: dict[str, Any]):
     """Save credentials to file with restricted permissions."""
     ensure_config_dir()
     creds_path = get_credentials_path()
-    
+
     with open(creds_path, "w") as f:
         yaml.dump(credentials, f, default_flow_style=False, sort_keys=False)
-    
+
     # Set file permissions to owner only (chmod 600)
     try:
         os.chmod(creds_path, 0o600)
@@ -92,7 +93,7 @@ def save_credentials(credentials: Dict[str, Any]):
         pass  # Windows doesn't support chmod
 
 
-def get_default_config() -> Dict[str, Any]:
+def get_default_config() -> dict[str, Any]:
     """Get default configuration."""
     return {
         "default_profile": "local",
@@ -111,45 +112,45 @@ def get_default_config() -> Dict[str, Any]:
     }
 
 
-def get_active_profile(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def get_active_profile(config: dict[str, Any] | None = None) -> dict[str, Any]:
     """Get the currently active profile configuration."""
     if config is None:
         config = load_config()
-    
+
     # Check for environment override
     profile_name = os.environ.get("AEGIS_PROFILE", config.get("default_profile", "local"))
     profiles = config.get("profiles", {})
-    
+
     if profile_name not in profiles:
         return get_default_config()["profiles"]["local"]
-    
+
     return profiles[profile_name]
 
 
-def get_profile_value(key: str, default: Any = None, config: Optional[Dict[str, Any]] = None) -> Any:
+def get_profile_value(key: str, default: Any = None, config: dict[str, Any] | None = None) -> Any:
     """Get a value from the active profile with environment override."""
     env_map = {
         "api_url": "AEGIS_API_URL",
         "default_namespace": "AEGIS_NAMESPACE",
         "default_agent_id": "AEGIS_AGENT_ID",
     }
-    
+
     # Check environment first
     if key in env_map and os.environ.get(env_map[key]):
         return os.environ[env_map[key]]
-    
+
     profile = get_active_profile(config)
     return profile.get(key, default)
 
 
-def set_nested_value(d: Dict, keys: list, value: Any):
+def set_nested_value(d: dict, keys: list, value: Any):
     """Set a nested dictionary value using a list of keys."""
     for key in keys[:-1]:
         d = d.setdefault(key, {})
     d[keys[-1]] = value
 
 
-def get_nested_value(d: Dict, keys: list, default: Any = None) -> Any:
+def get_nested_value(d: dict, keys: list, default: Any = None) -> Any:
     """Get a nested dictionary value using a list of keys."""
     for key in keys:
         if isinstance(d, dict):

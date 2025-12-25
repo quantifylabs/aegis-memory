@@ -4,20 +4,20 @@ Aegis CLI Main Application
 Entry point for all CLI commands.
 """
 
+
 import typer
-from typing import Optional
 from rich.console import Console
 
 from aegis_memory.cli.commands import (
     config_app,
-    status,
-    stats,
-    memory,
-    vote,
-    progress,
-    features,
-    playbook,
     export_import,
+    features,
+    memory,
+    playbook,
+    progress,
+    stats,
+    status,
+    vote,
 )
 
 # Create main app
@@ -52,21 +52,21 @@ app.command(name="import", help="Import memories from file")(export_import.impor
 def version():
     """Show version information."""
     from aegis_memory import __version__
-    from aegis_memory.cli.utils.config import load_config
     from aegis_memory.cli.utils.auth import get_client
-    
+    from aegis_memory.cli.utils.config import load_config
+
     console.print(f"[bold]aegis-cli[/bold] {__version__}")
     console.print(f"[bold]aegis-memory SDK[/bold] {__version__}")
-    
+
     import sys
     console.print(f"[bold]Python[/bold] {sys.version.split()[0]}")
-    
+
     # Try to get server version
     try:
         config = load_config()
         profile = config.get("profiles", {}).get(config.get("default_profile", "local"), {})
         console.print(f"\n[bold]Server:[/bold] {profile.get('api_url', 'not configured')}")
-        
+
         client = get_client()
         if client:
             health = client.client.get("/health").json()

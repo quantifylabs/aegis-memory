@@ -6,7 +6,7 @@ when the database is empty. This solves the "cold start" problem.
 
 Usage:
     from playbook_loader import load_genesis_playbook
-    
+
     # In startup
     await load_genesis_playbook(db)
 """
@@ -14,13 +14,11 @@ Usage:
 import json
 import logging
 from pathlib import Path
-from typing import Optional
 
-from sqlalchemy import select, func
+from embedding_service import content_hash, get_embedding_service
+from models import Memory, MemoryScope, MemoryType
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from models import Memory, MemoryType, MemoryScope
-from embedding_service import get_embedding_service, content_hash
 
 logger = logging.getLogger("aegis.playbook_loader")
 
@@ -51,7 +49,7 @@ async def count_genesis_memories(db: AsyncSession) -> int:
     return result.scalar() or 0
 
 
-def find_genesis_file() -> Optional[Path]:
+def find_genesis_file() -> Path | None:
     """Find the genesis.json file."""
     for path in GENESIS_PATHS:
         if path.exists():
@@ -62,16 +60,16 @@ def find_genesis_file() -> Optional[Path]:
 async def load_genesis_playbook(
     db: AsyncSession,
     force: bool = False,
-    genesis_path: Optional[Path] = None
+    genesis_path: Path | None = None
 ) -> dict:
     """
     Load genesis playbook entries into the database.
-    
+
     Args:
         db: Database session
         force: If True, load even if genesis entries already exist
         genesis_path: Optional explicit path to genesis.json
-    
+
     Returns:
         Dict with loading statistics
     """
@@ -81,7 +79,7 @@ async def load_genesis_playbook(
         "errors": 0,
         "already_exists": False
     }
-    
+
     # Check if genesis already loaded
     existing_count = await count_genesis_memories(db)
     if existing_count > 0 and not force:
@@ -89,39 +87,39 @@ async def load_genesis_playbook(
         stats["already_exists"] = True
         stats["skipped"] = existing_count
         return stats
-    
+
     # Find genesis file
     genesis_file = genesis_path or find_genesis_file()
     if not genesis_file or not genesis_file.exists():
         logger.warning("Genesis playbook not found. Skipping preload.")
         return stats
-    
+
     logger.info(f"Loading genesis playbook from {genesis_file}")
-    
+
     # Parse genesis file
     try:
-        with open(genesis_file, "r") as f:
+        with open(genesis_file) as f:
             genesis_data = json.load(f)
     except Exception as e:
         logger.error(f"Failed to parse genesis.json: {e}")
         stats["errors"] = 1
         return stats
-    
+
     entries = genesis_data.get("entries", [])
     if not entries:
         logger.warning("Genesis playbook has no entries")
         return stats
-    
+
     logger.info(f"Found {len(entries)} genesis entries to load")
-    
+
     # Get embedding service
     embed_service = get_embedding_service()
-    
+
     # Load entries in batches
     batch_size = 10
     for i in range(0, len(entries), batch_size):
         batch = entries[i:i + batch_size]
-        
+
         # Batch embed
         contents = [e["content"] for e in batch]
         try:
@@ -130,7 +128,7 @@ async def load_genesis_playbook(
             logger.error(f"Failed to embed batch: {e}")
             stats["errors"] += len(batch)
             continue
-        
+
         # Create memories
         for j, entry in enumerate(batch):
             try:
@@ -139,11 +137,11 @@ async def load_genesis_playbook(
                 namespace = entry.get("namespace", "aegis/genesis")
                 metadata = entry.get("metadata", {})
                 error_pattern = entry.get("error_pattern")
-                
+
                 # Add genesis marker to metadata
                 metadata["_genesis"] = True
                 metadata["_genesis_version"] = genesis_data.get("metadata", {}).get("version", "1.0.0")
-                
+
                 # Check for duplicate content
                 c_hash = content_hash(content)
                 existing = await db.execute(
@@ -155,7 +153,7 @@ async def load_genesis_playbook(
                 if existing.scalar_one_or_none():
                     stats["skipped"] += 1
                     continue
-                
+
                 # Create memory
                 from ace_repository import generate_id
                 memory = Memory(
@@ -173,14 +171,14 @@ async def load_genesis_playbook(
                     bullet_helpful=3,
                     bullet_harmful=0,
                 )
-                
+
                 db.add(memory)
                 stats["loaded"] += 1
-                
+
             except Exception as e:
                 logger.error(f"Failed to load genesis entry: {e}")
                 stats["errors"] += 1
-        
+
         # Commit batch
         try:
             await db.commit()
@@ -189,43 +187,43 @@ async def load_genesis_playbook(
             await db.rollback()
             stats["errors"] += len(batch)
             stats["loaded"] -= len(batch)
-    
+
     logger.info(
         f"Genesis playbook loaded: {stats['loaded']} entries, "
         f"{stats['skipped']} skipped, {stats['errors']} errors"
     )
-    
+
     return stats
 
 
 async def get_genesis_entries(
     db: AsyncSession,
-    memory_type: Optional[str] = None,
-    namespace_prefix: Optional[str] = None,
+    memory_type: str | None = None,
+    namespace_prefix: str | None = None,
     limit: int = 100
 ) -> list:
     """
     Query genesis entries.
-    
+
     Useful for debugging and verifying genesis content.
     """
     from sqlalchemy import and_
-    
+
     conditions = [Memory.project_id == GENESIS_PROJECT_ID]
-    
+
     if memory_type:
         conditions.append(Memory.memory_type == memory_type)
-    
+
     if namespace_prefix:
         conditions.append(Memory.namespace.startswith(namespace_prefix))
-    
+
     result = await db.execute(
         select(Memory)
         .where(and_(*conditions))
         .order_by(Memory.namespace, Memory.created_at)
         .limit(limit)
     )
-    
+
     return list(result.scalars().all())
 
 
@@ -233,16 +231,16 @@ async def get_genesis_entries(
 if __name__ == "__main__":
     import asyncio
     import sys
-    
+
     async def main():
-        from database import init_db, async_session_factory
-        
+        from database import async_session_factory, init_db
+
         print("Initializing database...")
         await init_db()
-        
+
         async with async_session_factory() as db:
             force = "--force" in sys.argv
             stats = await load_genesis_playbook(db, force=force)
             print(f"Results: {stats}")
-    
+
     asyncio.run(main())

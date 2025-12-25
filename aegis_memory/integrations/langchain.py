@@ -8,27 +8,27 @@ Usage:
     from aegis_memory.integrations.langchain import AegisMemory
     from langchain.chains import ConversationChain
     from langchain_openai import ChatOpenAI
-    
+
     memory = AegisMemory(
         api_key="your-aegis-key",
         base_url="http://localhost:8000",
         agent_id="conversational-agent",
         namespace="customer-support"
     )
-    
+
     chain = ConversationChain(
         llm=ChatOpenAI(),
         memory=memory
     )
-    
+
     response = chain.predict(input="Hello!")
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     from langchain_core.memory import BaseMemory
-    from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+    from langchain_core.messages import AIMessage, HumanMessage
     LANGCHAIN_AVAILABLE = True
 except ImportError:
     LANGCHAIN_AVAILABLE = False
@@ -40,16 +40,16 @@ from aegis_memory.client import AegisClient
 class AegisMemory(BaseMemory if LANGCHAIN_AVAILABLE else object):
     """
     LangChain Memory backed by Aegis Memory.
-    
+
     This memory class stores conversation history and facts in Aegis Memory,
     enabling persistent, cross-session, and multi-agent memory capabilities.
-    
+
     Features:
     - Persistent memory across sessions
     - Multi-agent memory sharing via scopes
     - Semantic search over memory
     - ACE patterns (voting, reflections) available
-    
+
     Args:
         api_key: Aegis Memory API key
         base_url: Aegis Memory server URL
@@ -63,19 +63,19 @@ class AegisMemory(BaseMemory if LANGCHAIN_AVAILABLE else object):
         scope: Memory scope ("agent-private", "agent-shared", "global")
         k: Number of recent memories to retrieve (default: 10)
     """
-    
+
     # LangChain memory properties
     memory_key: str = "history"
     input_key: str = "input"
     output_key: str = "output"
     return_messages: bool = False
-    
+
     def __init__(
         self,
         api_key: str,
         base_url: str = "http://localhost:8000",
         agent_id: str = "langchain-agent",
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         namespace: str = "default",
         memory_key: str = "history",
         input_key: str = "input",
@@ -89,9 +89,9 @@ class AegisMemory(BaseMemory if LANGCHAIN_AVAILABLE else object):
                 "LangChain is not installed. Install with: "
                 "pip install aegis-memory[langchain]"
             )
-        
+
         super().__init__()
-        
+
         self.client = AegisClient(api_key=api_key, base_url=base_url)
         self.agent_id = agent_id
         self.user_id = user_id
@@ -102,25 +102,25 @@ class AegisMemory(BaseMemory if LANGCHAIN_AVAILABLE else object):
         self.return_messages = return_messages
         self.scope = scope
         self.k = k
-    
+
     @property
-    def memory_variables(self) -> List[str]:
+    def memory_variables(self) -> list[str]:
         """Return memory variables."""
         return [self.memory_key]
-    
-    def load_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+
+    def load_memory_variables(self, inputs: dict[str, Any]) -> dict[str, Any]:
         """
         Load memory variables from Aegis Memory.
-        
+
         Performs semantic search based on the input to find relevant memories.
         """
         # Get the input text for semantic search
         input_text = inputs.get(self.input_key, "")
-        
+
         if not input_text:
             # If no input, return empty or recent memories
             return {self.memory_key: "" if not self.return_messages else []}
-        
+
         # Query Aegis Memory for relevant context
         memories = self.client.query(
             query=input_text,
@@ -129,7 +129,7 @@ class AegisMemory(BaseMemory if LANGCHAIN_AVAILABLE else object):
             namespace=self.namespace,
             top_k=self.k,
         )
-        
+
         if self.return_messages:
             # Convert to LangChain messages
             messages = []
@@ -147,14 +147,14 @@ class AegisMemory(BaseMemory if LANGCHAIN_AVAILABLE else object):
                 for mem in memories
             ])
             return {self.memory_key: history_str}
-    
-    def save_context(self, inputs: Dict[str, Any], outputs: Dict[str, str]) -> None:
+
+    def save_context(self, inputs: dict[str, Any], outputs: dict[str, str]) -> None:
         """
         Save context from this conversation turn to Aegis Memory.
         """
         input_text = inputs.get(self.input_key, "")
         output_text = outputs.get(self.output_key, "")
-        
+
         # Save human input
         if input_text:
             self.client.add(
@@ -165,7 +165,7 @@ class AegisMemory(BaseMemory if LANGCHAIN_AVAILABLE else object):
                 scope=self.scope,
                 metadata={"role": "human", "type": "conversation"},
             )
-        
+
         # Save AI output
         if output_text:
             self.client.add(
@@ -176,29 +176,29 @@ class AegisMemory(BaseMemory if LANGCHAIN_AVAILABLE else object):
                 scope=self.scope,
                 metadata={"role": "ai", "type": "conversation"},
             )
-    
+
     def clear(self) -> None:
         """
         Clear memory.
-        
+
         Note: This is a no-op for Aegis Memory as we prefer soft-delete
         via TTL or explicit deletion. Use the client directly if you
         need to delete specific memories.
         """
         pass
-    
+
     def add_memory(
         self,
         content: str,
-        metadata: Optional[Dict[str, Any]] = None,
-        scope: Optional[str] = None,
+        metadata: dict[str, Any] | None = None,
+        scope: str | None = None,
     ) -> str:
         """
         Add a standalone memory (not conversation history).
-        
+
         Useful for storing facts, preferences, or other information
         that should be retrieved semantically.
-        
+
         Returns:
             Memory ID
         """
@@ -211,21 +211,21 @@ class AegisMemory(BaseMemory if LANGCHAIN_AVAILABLE else object):
             metadata=metadata or {},
         )
         return result["id"]
-    
+
     def search(
         self,
         query: str,
-        top_k: Optional[int] = None,
+        top_k: int | None = None,
         min_score: float = 0.0,
-    ) -> List[Any]:
+    ) -> list[Any]:
         """
         Search memories semantically.
-        
+
         Args:
             query: Search query
             top_k: Number of results (default: self.k)
             min_score: Minimum similarity score
-            
+
         Returns:
             List of Memory objects
         """
@@ -242,16 +242,16 @@ class AegisMemory(BaseMemory if LANGCHAIN_AVAILABLE else object):
 class AegisConversationMemory(AegisMemory):
     """
     Convenience class for conversation memory.
-    
+
     Pre-configured for typical conversation chain use.
     """
-    
+
     def __init__(
         self,
         api_key: str,
         base_url: str = "http://localhost:8000",
         agent_id: str = "conversational-agent",
-        user_id: Optional[str] = None,
+        user_id: str | None = None,
         namespace: str = "conversations",
         k: int = 5,
         **kwargs
