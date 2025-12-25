@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aegis-memory"
-version = "1.2.0"
+version = "1.2.1"
 description = "Agent-native memory fabric for AI agents. Scoped, multi-agent, self-hosted."
 readme = "README.md"
 license = "Apache-2.0"
