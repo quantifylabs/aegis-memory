@@ -71,7 +71,7 @@ aegis import backup.jsonl        # Import memories
 aegis stats                      # Namespace statistics
 ```
 
-**[→ Full CLI Reference](docs/CLI-REFERENCE.md)**
+**[→ Full CLI Reference](https://github.com/quantifylabs/aegis-memory/blob/main/docs/CLI-REFERENCE.md)**
 
 ## Python SDK
 
@@ -144,7 +144,7 @@ from aegis_memory.integrations.crewai import AegisCrewMemory
 crew = Crew(agents=[...], memory=AegisCrewMemory())
 ```
 
-**[→ Integration Guides](aegis_memory/integrations/)**
+**[→ Integration Guides](https://github.com/quantifylabs/aegis-memory/tree/main/aegis_memory/integrations/)**
 
 ## ACE Patterns
 
@@ -167,7 +167,7 @@ aegis progress update build-dashboard -c auth -i routing
 aegis progress show build-dashboard
 ```
 
-**[→ ACE Patterns Guide](docs/ACE-PATTERNS.md)**
+**[→ ACE Patterns Guide](https://github.com/quantifylabs/aegis-memory/blob/main/docs/ACE-PATTERNS.md)**
 
 ## Performance
 
@@ -180,11 +180,11 @@ aegis progress show build-dashboard
 
 ## Documentation
 
-- **[Quickstart](QUICKSTART.md)** — Get running in 15 minutes
-- **[ACE Patterns](docs/ACE-PATTERNS.md)** — Self-improving agent patterns
-- **[Operations](docs/OPERATIONS.md)** — Backup, monitoring, upgrades
-- **[Design](docs/DESIGN.md)** — Technical deep-dive
-- **[Recipes](docs/Recipes/)** — 10 production-ready patterns
+- **[Quickstart](https://github.com/quantifylabs/aegis-memory/blob/main/QUICKSTART.md)** — Get running in 15 minutes
+- **[ACE Patterns](https://github.com/quantifylabs/aegis-memory/blob/main/docs/ACE-PATTERNS.md)** — Self-improving agent patterns
+- **[Operations](https://github.com/quantifylabs/aegis-memory/blob/main/docs/OPERATIONS.md)** — Backup, monitoring, upgrades
+- **[Design](https://github.com/quantifylabs/aegis-memory/blob/main/docs/DESIGN.md)** — Technical deep-dive
+- **[Recipes](https://github.com/quantifylabs/aegis-memory/tree/main/docs/Recipes/)** — 10 production-ready patterns
 - **[API Reference](http://localhost:8000/docs)** — OpenAPI docs (when running)
 
 ## Deployment
@@ -225,13 +225,13 @@ ruff check server/
 
 ## License
 
-Apache 2.0 — Use it however you want. See [LICENSE](LICENSE).
+Apache 2.0 — Use it however you want. See [LICENSE](https://github.com/quantifylabs/aegis-memory/blob/main/LICENSE).
 
 ## Links
 
 - [GitHub Discussions](https://github.com/quantifylabs/aegis-memory/discussions)
 - [Issue Tracker](https://github.com/quantifylabs/aegis-memory/issues)
-- [Changelog](CHANGELOG.md)
+- [Changelog](https://github.com/quantifylabs/aegis-memory/blob/main/CHANGELOG.md)
 
 ---
 
