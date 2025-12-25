@@ -80,7 +80,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Aegis Memory API",
-    version="1.2.0",
+    version="1.2.1",
     description="""
     # Aegis Memory
     
