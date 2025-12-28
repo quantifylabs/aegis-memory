@@ -50,7 +50,7 @@ You should see:
 Aegis Memory Server
 ───────────────────────────────
 Status:     healthy
-Version:    1.2.0
+Version:    1.2.2
 Database:   connected
 ...
 ```

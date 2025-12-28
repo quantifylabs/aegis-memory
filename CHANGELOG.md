@@ -7,7 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0] - 2025-12-20
+## [1.2.2] - 2025-12-28
+
+### Added
+
+- **Smart Memory** - Intelligent extraction layer that automatically decides what's worth remembering
+  - `SmartMemory` class - Two-stage filter → LLM pipeline for automatic memory extraction
+  - `SmartAgent` class - Full-auto agent with built-in memory (zero config)
+  - Pre-built extraction profiles: conversational, task, coding, research, creative, support
+  - Rule-based pre-filter saves ~70% of LLM extraction costs
+  - Support for OpenAI and Anthropic as extraction LLMs
+
+- **CLI with Interactive Demo**
+  - `aegis demo` - 60-second narrative demo showing core value in 5 acts
+  - `aegis demo --log` - Save demo output to `demo.log` for sharing
+  - `aegis health` - Check server health
+  - `aegis version` - Show version info
+
+- **Enhanced Framework Integrations**
+  - `AegisSmartMemory` for LangChain - Smart extraction built into the memory interface
+  - Automatic noise filtering (greetings, confirmations filtered out)
+  - Context retrieval with `get_context()` for prompt injection
+
+- **New Extraction Components** (for customization)
+  - `MessageFilter` - Fast rule-based pre-filtering
+  - `MemoryExtractor` - LLM-based extraction with customizable prompts
+  - `ExtractionPrompts` - Pre-built prompts for different use cases
+  - `OpenAIAdapter`, `AnthropicAdapter`, `CustomLLMAdapter` - LLM adapters
+
+- **Documentation**
+  - [Smart Memory Guide](docs/SMART-MEMORY.md) - Comprehensive guide for smart extraction
+  - Comparison table with mem0 and Supermemory (when to choose what)
+  - Updated README with demo instructions
+
+### Changed
+
+- SDK version bumped to 1.2.2
+- Added `click` as core dependency for CLI
+- New optional dependencies: `smart` (OpenAI), `smart-anthropic` (Anthropic)
+
+### Fixed
+
+- Framework integrations now properly handle async context
+
+## [1.1.0] - 2025-01-XX
 
 ### Added
 
@@ -50,7 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Connection pool exhaustion under high load
 - Memory not appearing after add (index sync issue)
 
-## [1.0.0] - 2024-11-01
+## [1.0.0] - 2024-XX-XX
 
 ### Added
 
@@ -80,7 +123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 | Batch insert (50) | 10s | 300ms | 30x |
 | Deduplication | 200ms | 1ms | 200x |
 
-## [0.1.0] - 2024-09-01
+## [0.1.0] - 2024-XX-XX
 
 ### Added
 
@@ -91,6 +134,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## Upgrade Notes
+
+### 1.1 → 1.2
+
+1. New CLI available after upgrade:
+   ```bash
+   pip install --upgrade aegis-memory
+   aegis demo  # Try the interactive demo
+   ```
+
+2. Smart Memory (optional, requires OpenAI or Anthropic):
+   ```bash
+   pip install aegis-memory[smart]  # For OpenAI
+   pip install aegis-memory[smart-anthropic]  # For Anthropic
+   ```
+
+3. No database changes required
+
+4. Framework integrations enhanced with `AegisSmartMemory`:
+   ```python
+   # Before (stores everything)
+   from aegis_memory.integrations.langchain import AegisMemory
+   
+   # After (smart extraction)
+   from aegis_memory.integrations.langchain import AegisSmartMemory
+   ```
 
 ### 1.0 → 1.1
 

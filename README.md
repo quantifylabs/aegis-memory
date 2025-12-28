@@ -1,83 +1,50 @@
 # Aegis Memory
 
+[![CI](https://github.com/quantifylabs/aegis-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/quantifylabs/aegis-memory/actions)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-**The memory engine for multi-agent systems.**
+**The open-source memory layer for AI agents.**
 
-Aegis Memory is a production-ready, self-hostable memory engine designed to give AI agents a **persistent learning loop**. By combining **semantic search**, **scope-aware access control**, and **ACE (Agentic Context Engineering)**, Aegis allows agents to share state, vote on strategies, and extract actionable reflections from their failures.
+Aegis Memory is a production-ready, self-hostable memory engine designed for multi-agent systems. It provides semantic search, scope-aware access control, and ACE (Agentic Context Engineering) patterns that help agents learn and improve over time.
 
-## Quick Start
+## Quick Start: Smart Memory (Zero Config)
 
-### 1. Start the Server (2 min)
+```python
+from aegis_memory import SmartMemory
 
-```bash
-git clone https://github.com/quantifylabs/aegis-memory.git
-cd aegis-memory
+memory = SmartMemory(
+    aegis_api_key="your-key",
+    llm_api_key="your-openai-key"
+)
 
-export OPENAI_API_KEY=sk-...
-docker-compose up -d
+# Automatically extracts and stores valuable information
+memory.process_turn(
+    user_input="I'm John, a Python developer from Manchester. I prefer dark mode.",
+    ai_response="Nice to meet you, John!",
+    user_id="user_123"
+)
+# Stores: "User's name is John", "User is a Python developer", 
+#         "User is based in Mnachester", "User prefers dark mode"
 
-# Verify
-curl http://localhost:8000/health
+# Get relevant context for any query
+context = memory.get_context("What theme should I use?", user_id="user_123")
+print(context.context_string)
+# "- User prefers dark mode"
 ```
 
-### 2. Install the CLI + SDK
+**Smart Memory handles the hard part:** deciding what's worth remembering. It filters out greetings and noise, extracts atomic facts, and stores them with proper categorization.
 
-```bash
-pip install aegis-memory
-```
+[📚 Full Smart Memory Guide](docs/SMART-MEMORY.md)
 
-### 3. Configure & Use
+## Manual Control: AegisClient
 
-```bash
-# First-time setup
-aegis config init
-
-# Check connection
-aegis status
-
-# Add your first memory
-aegis add "User prefers concise responses" -a assistant -s global
-
-# Query memories
-aegis query "user preferences"
-
-# View stats
-aegis stats
-```
-
-## CLI Reference
-
-Aegis provides a powerful CLI for all memory operations:
-
-```bash
-# Core Operations
-aegis add "content"              # Add a memory
-aegis query "search text"        # Semantic search
-aegis get <id>                   # Get single memory
-aegis delete <id>                # Delete memory
-aegis vote <id> helpful          # Vote on memory
-
-# ACE Patterns
-aegis playbook "error handling"  # Query proven strategies
-aegis progress show <session>    # View session progress
-aegis features list              # Track feature status
-
-# Data Management
-aegis export -o backup.jsonl     # Export memories
-aegis import backup.jsonl        # Import memories
-aegis stats                      # Namespace statistics
-```
-
-**[→ Full CLI Reference](https://github.com/quantifylabs/aegis-memory/blob/main/docs/CLI-REFERENCE.md)**
-
-## Python SDK
+For full control over what gets stored:
 
 ```python
 from aegis_memory import AegisClient
 
-client = AegisClient(api_key="dev-key", base_url="http://localhost:8000")
+client = AegisClient(api_key="your-key")
 
 # Add a memory
 client.add("User prefers concise responses", agent_id="assistant")
@@ -87,14 +54,6 @@ memories = client.query("user preferences", agent_id="assistant")
 
 # Vote on usefulness (ACE pattern)
 client.vote(memories[0].id, "helpful", voter_agent_id="assistant")
-
-# Cross-agent memory sharing
-client.add(
-    content="Task: Build login. Steps: 1) Form, 2) Validation, 3) API",
-    agent_id="planner",
-    scope="agent-shared",
-    shared_with_agents=["executor"]
-)
 ```
 
 ## Why Aegis Memory?
@@ -106,7 +65,67 @@ client.add(
 | Context window limits | Dump everything in prompt | Semantic search + effectiveness scoring |
 | Learning from mistakes | Manual prompt tuning | Memory voting + reflection patterns |
 
-**Aegis Memory is not just another vector database.** It's an *active strategy engine* with primitives designed to turn agent execution into persistent organizational intelligence.
+**Aegis Memory is not another vector database.** It's an *agent-native memory fabric* with primitives designed for how AI agents actually work.
+
+## Choosing the Right Memory Solution
+
+Different memory solutions excel at different problems. Here's when to choose what:
+
+| Use Case | Best Choice | Why |
+|----------|-------------|-----|
+| **Personal AI assistant** that remembers user preferences across sessions | **mem0** | Optimized for user personalization, graph-based relationships, managed platform with enterprise compliance |
+| **Second brain / knowledge base** with document sync from Drive, Notion | **Supermemory** | Built for personal knowledge management, document integrations, fast RAG retrieval |
+| **Multi-agent systems** where agents need to share knowledge with access control | **Aegis Memory** | Native scopes (private/shared/global), cross-agent queries, structured handoffs |
+| **Long-running agents** that need to track progress across context resets | **Aegis Memory** | Session progress tracking, feature completion tracking, survives context windows |
+| **Self-improving agents** that learn what works over time | **Aegis Memory** | ACE patterns: memory voting, playbooks, reflections |
+| **Enterprise chat** with compliance requirements (SOC 2, HIPAA) | **mem0** | Built-in enterprise controls, managed platform option |
+
+### Quick Feature Comparison
+
+| Capability | mem0 | Supermemory | Aegis Memory |
+|------------|------|-------------|--------------|
+| **Primary Focus** | User personalization | Knowledge management | Multi-agent coordination |
+| **Open Source** | ✓ | ✓ | ✓ |
+| **Self-Hostable** | ✓ | ✓ | ✓ |
+| **Memory Scopes** | User, Session, Agent | Containers, Profiles | Private, Shared, Global + ACL |
+| **Cross-Agent Queries** | — | — | ✓ With access control |
+| **Agent Handoffs** | — | — | ✓ Structured state transfer |
+| **Document Sync** | — | ✓ (Drive, Notion) | — |
+| **Graph Memory** | ✓ (Neo4j) | — | — |
+| **Memory Voting** | — | — | ✓ ACE patterns |
+| **Session Progress** | — | — | ✓ Survives context resets |
+| **Managed Platform** | ✓ | ✓ | Self-host only |
+| **Framework Support** | LangChain, CrewAI, AutoGen | MCP, Various | LangChain, CrewAI, LangGraph |
+
+> **Bottom line:** Choose mem0 for personalization, Supermemory for knowledge bases, Aegis for multi-agent systems.
+
+## 15-Second Demo
+
+See Aegis Memory in action with our interactive demo:
+
+```bash
+# Start the server
+docker compose up -d
+
+# Run the demo
+pip install aegis-memory
+aegis demo
+```
+
+The demo walks through 5 acts showing:
+1. **The Problem** — Agents forget everything between sessions
+2. **Aegis Memory** — Persistent memory that survives context resets
+3. **Smart Extraction** — Automatic extraction of valuable information
+4. **Multi-Agent** — Agents share knowledge with scope control
+5. **Self-Improvement** — Agents learn what works over time
+
+```bash
+# Save demo output to share on social media
+aegis demo --log
+# Creates demo.log file
+```
+
+> **Tip:** Set `OPENAI_API_KEY` for live Smart Extraction, or see simulated output without it.
 
 ## Features
 
@@ -129,6 +148,53 @@ client.add(
 - **Fast** — 30-80ms queries on 1M+ memories
 - **Safe** — Data export, migrations, no vendor lock-in
 
+## Quick Start
+
+### 1. Start the Server (2 min)
+
+```bash
+git clone https://github.com/quantifylabs/aegis-memory.git
+cd aegis-memory
+
+export OPENAI_API_KEY=sk-...
+docker-compose up -d
+
+curl http://localhost:8000/health
+# {"status": "healthy"}
+```
+
+### 2. Install the SDK
+
+```bash
+pip install aegis-memory
+```
+
+### 3. Use It
+
+```python
+from aegis_memory import AegisClient
+
+client = AegisClient(api_key="dev-key", base_url="http://localhost:8000")
+
+# Planner agent stores task breakdown
+client.add(
+    content="Task: Build login. Steps: 1) Form, 2) Validation, 3) API",
+    agent_id="planner",
+    scope="agent-shared",
+    shared_with_agents=["executor"]
+)
+
+# Executor queries planner's memories
+memories = client.query_cross_agent(
+    query="current task",
+    requesting_agent_id="executor",
+    target_agent_ids=["planner"]
+)
+print(memories[0].content)
+```
+
+**[→ Full Quickstart Guide](QUICKSTART.md)**
+
 ## Framework Integrations
 
 Drop-in support for popular agent frameworks:
@@ -138,35 +204,52 @@ Drop-in support for popular agent frameworks:
 from aegis_memory.integrations.langchain import AegisMemory
 chain = ConversationChain(llm=llm, memory=AegisMemory(agent_id="assistant"))
 
+# LangGraph
+from aegis_memory.integrations.langgraph import AegisCheckpointer
+app = workflow.compile(checkpointer=AegisCheckpointer())
+
 # CrewAI
 from aegis_memory.integrations.crewai import AegisCrewMemory
 crew = Crew(agents=[...], memory=AegisCrewMemory())
 ```
 
-**[→ Integration Guides](https://github.com/quantifylabs/aegis-memory/tree/main/aegis_memory/integrations/)**
+**[→ Integration Guides](integrations/)**
 
 ## ACE Patterns
 
 Aegis implements patterns from recent research on self-improving agents:
 
 ### Memory Voting
-```bash
+```python
 # After a memory helped complete a task
-aegis vote <memory-id> helpful -c "Successfully paginated API"
+client.vote(memory.id, "helpful", voter_agent_id="executor")
 
 # Query only effective strategies
-aegis playbook "API pagination" -e 0.3
+strategies = client.playbook("API pagination", agent_id="executor", min_effectiveness=0.3)
 ```
 
 ### Session Progress
-```bash
+```python
 # Track work across context windows
-aegis progress create build-dashboard -a coder
-aegis progress update build-dashboard -c auth -i routing
-aegis progress show build-dashboard
+client.progress.update(
+    session_id="build-dashboard",
+    completed=["auth", "routing"],
+    in_progress="api-client",
+    blocked=[{"item": "payments", "reason": "Waiting for API keys"}]
+)
 ```
 
-**[→ ACE Patterns Guide](https://github.com/quantifylabs/aegis-memory/blob/main/docs/ACE-PATTERNS.md)**
+### Reflections
+```python
+# Store lessons from failures
+client.reflection(
+    content="Always use while True for pagination, not range(n)",
+    agent_id="reflector",
+    error_pattern="pagination_incomplete"
+)
+```
+
+**[→ ACE Patterns Guide](docs/ACE-PATTERNS.md)**
 
 ## Performance
 
@@ -179,11 +262,10 @@ aegis progress show build-dashboard
 
 ## Documentation
 
-- **[Quickstart](https://github.com/quantifylabs/aegis-memory/blob/main/QUICKSTART.md)** — Get running in 15 minutes
-- **[ACE Patterns](https://github.com/quantifylabs/aegis-memory/blob/main/docs/ACE-PATTERNS.md)** — Self-improving agent patterns
-- **[Operations](https://github.com/quantifylabs/aegis-memory/blob/main/docs/OPERATIONS.md)** — Backup, monitoring, upgrades
-- **[Design](https://github.com/quantifylabs/aegis-memory/blob/main/docs/DESIGN.md)** — Technical deep-dive
-- **[Recipes](https://github.com/quantifylabs/aegis-memory/tree/main/docs/Recipes/)** — 10 production-ready patterns
+- **[Quickstart](QUICKSTART.md)** — Get running in 15 minutes
+- **[ACE Patterns](docs/ACE-PATTERNS.md)** — Self-improving agent patterns
+- **[Operations](docs/OPERATIONS.md)** — Backup, monitoring, upgrades
+- **[Design](docs/DESIGN.md)** — Technical deep-dive
 - **[API Reference](http://localhost:8000/docs)** — OpenAPI docs (when running)
 
 ## Deployment
@@ -224,13 +306,13 @@ ruff check server/
 
 ## License
 
-Apache 2.0 — Use it however you want. See [LICENSE](https://github.com/quantifylabs/aegis-memory/blob/main/LICENSE).
+Apache 2.0 — Use it however you want. See [LICENSE](LICENSE).
 
 ## Links
 
 - [GitHub Discussions](https://github.com/quantifylabs/aegis-memory/discussions)
 - [Issue Tracker](https://github.com/quantifylabs/aegis-memory/issues)
-- [Changelog](https://github.com/quantifylabs/aegis-memory/blob/main/CHANGELOG.md)
+- [Changelog](CHANGELOG.md)
 
 ---
 
