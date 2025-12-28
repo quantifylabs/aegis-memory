@@ -203,16 +203,12 @@ Drop-in support for popular agent frameworks:
 from aegis_memory.integrations.langchain import AegisMemory
 chain = ConversationChain(llm=llm, memory=AegisMemory(agent_id="assistant"))
 
-# LangGraph
-from aegis_memory.integrations.langgraph import AegisCheckpointer
-app = workflow.compile(checkpointer=AegisCheckpointer())
-
 # CrewAI
 from aegis_memory.integrations.crewai import AegisCrewMemory
 crew = Crew(agents=[...], memory=AegisCrewMemory())
 ```
 
-**[→ Integration Guides](integrations/)**
+**[→ Integration Guides](docs/INTEGRATIONS.md)**
 
 ## ACE Patterns
 
