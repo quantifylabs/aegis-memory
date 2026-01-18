@@ -1,0 +1,9 @@
+<svg width="180" height="36" viewBox="0 0 180 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Shield icon -->
+  <path d="M18 3L4 9v9c0 7.73 5.97 14.95 14 17 8.03-2.05 14-9.27 14-17V9L18 3z" fill="#6366F1"/>
+  <path d="M18 7l-10 4.5v6.75c0 5.8 4.48 11.21 10 12.75 5.52-1.54 10-6.95 10-12.75V11.5L18 7z" fill="#4F46E5"/>
+  <circle cx="18" cy="18" r="4" fill="#C7D2FE"/>
+
+  <!-- Text: Aegis Memory -->
+  <text x="42" y="25" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="600" fill="#1F2937">Aegis Memory</text>
+</svg>

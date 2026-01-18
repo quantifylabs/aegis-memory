@@ -1,0 +1,6 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Shield icon -->
+  <path d="M16 2L3 8v8c0 8.4 5.54 16.25 13 18.5 7.46-2.25 13-10.1 13-18.5V8L16 2z" fill="#6366F1"/>
+  <path d="M16 6L6 10.5v6c0 6.3 4.16 12.19 10 13.88 5.84-1.69 10-7.58 10-13.88v-6L16 6z" fill="#4F46E5"/>
+  <circle cx="16" cy="16" r="4" fill="#C7D2FE"/>
+</svg>
