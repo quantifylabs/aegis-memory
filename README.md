@@ -1,9 +1,25 @@
-# Aegis Memory
+<p align="center">
+  <img src=".github/banner.svg" alt="Aegis Memory" width="400"/>
+</p>
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+<p align="center">
+  <strong>The open-source memory layer for AI agents.</strong>
+</p>
 
-**The open-source memory layer for AI agents.**
+<p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+"></a>
+  <a href="https://docs.aegismemory.com"><img src="https://img.shields.io/badge/docs-aegismemory.com-6366F1" alt="Docs"></a>
+</p>
+
+<p align="center">
+  <a href="https://docs.aegismemory.com/quickstart/installation">Quickstart</a> •
+  <a href="https://docs.aegismemory.com/guides/smart-memory">Smart Memory</a> •
+  <a href="https://docs.aegismemory.com/guides/ace-patterns">ACE Patterns</a> •
+  <a href="https://docs.aegismemory.com/integrations/crewai">Integrations</a>
+</p>
+
+---
 
 Aegis Memory is a production-ready, self-hostable memory engine designed for multi-agent systems. It provides semantic search, scope-aware access control, and ACE (Agentic Context Engineering) patterns that help agents learn and improve over time.
 
@@ -34,7 +50,7 @@ print(context.context_string)
 
 **Smart Memory handles the hard part:** deciding what's worth remembering. It filters out greetings and noise, extracts atomic facts, and stores them with proper categorization.
 
-[📚 Full Smart Memory Guide](docs/SMART-MEMORY.md)
+[📚 Full Smart Memory Guide](https://docs.aegismemory.com/guides/smart-memory)
 
 ## Manual Control: AegisClient
 
@@ -192,7 +208,7 @@ memories = client.query_cross_agent(
 print(memories[0].content)
 ```
 
-**[→ Full Quickstart Guide](QUICKSTART.md)**
+**[→ Full Quickstart Guide](https://docs.aegismemory.com/quickstart/installation)**
 
 ## Framework Integrations
 
@@ -208,7 +224,7 @@ from aegis_memory.integrations.crewai import AegisCrewMemory
 crew = Crew(agents=[...], memory=AegisCrewMemory())
 ```
 
-**[→ Integration Guides](docs/INTEGRATIONS.md)**
+**[→ Integration Guides](https://docs.aegismemory.com/integrations/crewai)**
 
 ## ACE Patterns
 
@@ -244,7 +260,7 @@ client.reflection(
 )
 ```
 
-**[→ ACE Patterns Guide](docs/ACE-PATTERNS.md)**
+**[→ ACE Patterns Guide](https://docs.aegismemory.com/guides/ace-patterns)**
 
 ## Performance
 
@@ -257,11 +273,13 @@ client.reflection(
 
 ## Documentation
 
-- **[Quickstart](QUICKSTART.md)** — Get running in 15 minutes
-- **[ACE Patterns](docs/ACE-PATTERNS.md)** — Self-improving agent patterns
-- **[Operations](docs/OPERATIONS.md)** — Backup, monitoring, upgrades
-- **[Design](docs/DESIGN.md)** — Technical deep-dive
-- **[API Reference](http://localhost:8000/docs)** — OpenAPI docs (when running)
+**📚 [docs.aegismemory.com](https://docs.aegismemory.com)** — Full documentation
+
+- **[Quickstart](https://docs.aegismemory.com/quickstart/installation)** — Get running in 5 minutes
+- **[Smart Memory](https://docs.aegismemory.com/guides/smart-memory)** — Zero-config memory extraction
+- **[ACE Patterns](https://docs.aegismemory.com/guides/ace-patterns)** — Self-improving agent patterns
+- **[Integrations](https://docs.aegismemory.com/integrations/crewai)** — CrewAI, LangChain guides
+- **[CLI Reference](https://docs.aegismemory.com/api-reference/cli)** — Command-line tools
 
 ## Deployment
 
@@ -285,7 +303,7 @@ kubectl apply -f k8s/
 | `OPENAI_API_KEY` | — | For embeddings |
 | `AEGIS_API_KEY` | `dev-key` | API authentication |
 
-**[→ Full Configuration](docs/OPERATIONS.md#configuration)**
+**[→ Full Configuration](https://docs.aegismemory.com/guides/production-deployment)**
 
 ## Contributing
 
@@ -305,6 +323,7 @@ Apache 2.0 — Use it however you want. See [LICENSE](LICENSE).
 
 ## Links
 
+- [Documentation](https://docs.aegismemory.com)
 - [GitHub Discussions](https://github.com/quantifylabs/aegis-memory/discussions)
 - [Issue Tracker](https://github.com/quantifylabs/aegis-memory/issues)
 - [Changelog](CHANGELOG.md)
