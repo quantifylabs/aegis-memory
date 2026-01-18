@@ -5,5 +5,5 @@
   <circle cx="40" cy="40" r="8" fill="#C7D2FE"/>
 
   <!-- Text: Aegis Memory -->
-  <text x="84" y="52" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="36" font-weight="700" fill="#6366F1">Aegis Memory</text>
+  <text x="84" y="52" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="36" font-weight="700" fill="#FFFFFF">Aegis Memory</text>
 </svg>
