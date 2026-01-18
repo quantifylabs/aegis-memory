@@ -1,0 +1,234 @@
+---
+title: 'ACE Patterns'
+description: 'Self-improving agents with Agentic Context Engineering patterns'
+---
+
+# ACE Patterns Guide
+
+This guide documents how Aegis implements patterns from two breakthrough research papers:
+
+1. **ACE Paper** (Stanford/SambaNova): "Agentic Context Engineering" - treats contexts as evolving playbooks that accumulate strategies over time
+2. **Anthropic's Long-Running Agent Harnesses**: Solving the multi-context-window problem for agents that work across sessions
+
+<Info>
+**Key Insight**: Both papers demonstrate that **structured, incremental context evolution** dramatically outperforms static prompts or monolithic rewrites. ACE achieved +17.1% improvement on agent benchmarks.
+</Info>
+
+## The Problems These Patterns Solve
+
+<AccordionGroup>
+  <Accordion title="Context Collapse">
+    When an LLM rewrites its entire context, it can collapse valuable accumulated knowledge:
+
+    ```
+    Step 60: 18,282 tokens → Accuracy 66.7%
+    Step 61: 122 tokens → Accuracy 57.1% (COLLAPSED!)
+    ```
+
+    **Aegis Solution**: Incremental delta updates that never rewrite the full context.
+  </Accordion>
+
+  <Accordion title="Brevity Bias">
+    Prompt optimizers compress away domain-specific heuristics for "concise" instructions, losing critical task-specific knowledge.
+
+    **Aegis Solution**: Memory types (reflection, strategy) that preserve detailed insights.
+  </Accordion>
+
+  <Accordion title="Premature Victory">
+    Agents declare tasks complete without proper verification.
+
+    **Aegis Solution**: Feature tracking with explicit pass/fail status.
+  </Accordion>
+
+  <Accordion title="Lost Progress Between Sessions">
+    Each new context window starts fresh with no memory of previous work.
+
+    **Aegis Solution**: Session progress tracking that persists between context windows.
+  </Accordion>
+</AccordionGroup>
+
+## Pattern 1: Memory Voting
+
+ACE's key insight: track which memories were helpful vs harmful for completing tasks.
+
+### Why It Works
+
+Memories with positive effectiveness scores consistently improve task performance. By voting on memories, agents learn what strategies actually work.
+
+```python
+from aegis_memory import AegisClient
+
+client = AegisClient(api_key="...")
+
+# After successfully using a strategy
+client.vote(
+    memory_id=strategy.id,
+    vote="helpful",
+    voter_agent_id="executor",
+    context="Successfully paginated through all API results",
+    task_id="task-12345"
+)
+
+# After a strategy caused an error
+client.vote(
+    memory_id=strategy.id,
+    vote="harmful",
+    voter_agent_id="executor",
+    context="Caused infinite loop - range(10) wasn't enough pages",
+    task_id="task-12345"
+)
+```
+
+### Querying by Effectiveness
+
+```python
+# Only get well-rated strategies
+strategies = client.playbook(
+    query="API pagination handling",
+    agent_id="executor",
+    min_effectiveness=0.3  # Filter by (helpful-harmful)/(total+1) > 0.3
+)
+```
+
+## Pattern 2: Incremental Delta Updates
+
+ACE's breakthrough: never rewrite the full context. Use atomic, localized updates.
+
+### Why It Works
+
+Monolithic rewrites cause "context collapse." Delta updates:
+- Only modify what needs to change
+- Preserve accumulated knowledge
+- Enable parallel updates
+- Reduce latency by 86.9%
+
+```python
+result = client.delta([
+    # Add a new strategy
+    {
+        "type": "add",
+        "content": "For pagination, always use while True loop instead of range(n)",
+        "memory_type": "strategy",
+        "agent_id": "reflector",
+        "scope": "global"
+    },
+    # Deprecate outdated strategy (soft delete)
+    {
+        "type": "deprecate",
+        "memory_id": "old-pagination-strategy",
+        "superseded_by": None,
+        "deprecation_reason": "Caused incomplete data collection"
+    }
+])
+```
+
+## Pattern 3: Reflection Memories
+
+Extract actionable insights from task trajectories.
+
+```python
+client.reflection(
+    content="When identifying roommates, always use Phone app contacts. "
+            "Never rely on Venmo transaction descriptions - they are unreliable.",
+    agent_id="reflector",
+    source_trajectory_id="task-12345",
+    error_pattern="identity_resolution",
+    correct_approach="First authenticate with Phone app, use search_contacts() "
+                     "to find contacts with 'roommate' relationship.",
+    applicable_contexts=["financial_tasks", "contact_tasks"],
+    scope="global"
+)
+```
+
+## Pattern 4: Session Progress Tracking
+
+Anthropic's `claude-progress.txt` pattern, structured and queryable.
+
+```python
+# Create session at start of project
+session = client.progress.create(
+    session_id="build-dashboard-v2",
+    agent_id="coding-agent"
+)
+
+# Update as work progresses
+client.progress.update(
+    session_id="build-dashboard-v2",
+    completed=["auth", "routing", "api-client"],
+    in_progress="dashboard-components",
+    next=["data-visualization", "testing"],
+    blocked=[
+        {"item": "payment-integration", "reason": "Waiting for Stripe API keys"}
+    ],
+    summary="Core infrastructure complete. Starting UI components."
+)
+```
+
+## Pattern 5: Feature Tracking
+
+Prevent premature victory with explicit verification.
+
+```python
+# Initialize features at project start
+client.features.create(
+    feature_id="new-chat",
+    description="User can create a new chat and receive AI response",
+    test_steps=[
+        "Navigate to main interface",
+        "Click 'New Chat' button",
+        "Verify new conversation created",
+        "Type message and press Enter",
+        "Verify AI response appears"
+    ]
+)
+
+# Only mark complete after verification
+async def verify_and_complete(feature_id: str):
+    feature = client.features.get(feature_id)
+
+    for step in feature.test_steps:
+        result = await run_test_step(step)
+        if not result.passed:
+            client.features.mark_failed(feature_id, reason=f"Failed: {step}")
+            return False
+
+    client.features.mark_complete(feature_id, verified_by="qa-agent")
+    return True
+```
+
+## Performance Impact
+
+Based on the ACE paper's benchmarks:
+
+| Metric | Without ACE | With ACE | Improvement |
+|--------|-------------|----------|-------------|
+| Agent Tasks (AppWorld) | 42.4% | 59.5% | **+17.1%** |
+| Financial Analysis | 70.7% | 78.3% | **+7.6%** |
+| Adaptation Latency | Baseline | -86.9% | **86.9% faster** |
+| Token Cost | Baseline | -83.6% | **83.6% cheaper** |
+
+## Quick Reference
+
+### Memory Types
+
+| Type | Purpose | Scope Default |
+|------|---------|---------------|
+| `standard` | Facts, preferences | agent-private |
+| `strategy` | Reusable patterns | global |
+| `reflection` | Lessons from failures | global |
+| `progress` | Session state | agent-private |
+| `feature` | Feature tracking | global |
+
+### Effectiveness Score
+
+```python
+score = (helpful - harmful) / (helpful + harmful + 1)
+# Range: -1.0 to 1.0
+# Positive = net helpful
+# Negative = net harmful
+```
+
+## References
+
+1. **ACE Paper**: Zhang et al. "Agentic Context Engineering" (arXiv:2510.04618, Oct 2025)
+2. **Anthropic Blog**: "Effective Harnesses for Long-Running Agents" (2025)

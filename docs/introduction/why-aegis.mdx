@@ -1,0 +1,158 @@
+---
+title: 'Why Aegis Memory?'
+description: 'Understanding the problem space and our approach'
+---
+
+# Why Aegis Memory?
+
+## The Agent Memory Problem
+
+Building production AI agents reveals a harsh truth: **memory is the bottleneck**.
+
+### What Happens Without Proper Memory
+
+<AccordionGroup>
+  <Accordion title="Context Window Limits">
+    LLM context windows are expensive and finite. A 128K context window costs ~$0.50 per call with GPT-4. At scale, this becomes prohibitive.
+
+    **Result**: Developers truncate context, agents forget important details.
+  </Accordion>
+
+  <Accordion title="Session Boundaries">
+    When a context window resets (timeout, crash, new session), all learned context is lost.
+
+    **Result**: Multi-hour agent tasks restart from zero. Users repeat themselves endlessly.
+  </Accordion>
+
+  <Accordion title="Multi-Agent Chaos">
+    When multiple agents work together, they have no shared memory. The planner can't tell the executor what it learned.
+
+    **Result**: Agents duplicate work, contradict each other, or drop tasks.
+  </Accordion>
+
+  <Accordion title="No Learning Loop">
+    Agents make the same mistakes repeatedly because there's no mechanism to remember what worked.
+
+    **Result**: Error patterns repeat. Good strategies aren't reused.
+  </Accordion>
+</AccordionGroup>
+
+## The Current Landscape
+
+### What Others Offer
+
+| Solution | Approach | Limitation |
+|----------|----------|------------|
+| **Vector DBs** (Pinecone, Weaviate) | Store embeddings | No agent coordination, no structure |
+| **Mem0** | Personal AI memory | Single-agent focused, no ACE patterns |
+| **Rolling Context** | Keep recent N messages | Loses important old context |
+| **RAG** | Retrieve documents | Documents aren't agent memories |
+
+### What's Missing
+
+None of these solve the **agent-native** requirements:
+
+1. **Scoped Access Control** - Private vs shared vs global memories
+2. **Effectiveness Tracking** - Which memories actually help?
+3. **Session Continuity** - Resume work after context resets
+4. **Structured Coordination** - Handoffs between agents
+5. **Self-Improvement** - Agents that learn from outcomes
+
+## The Aegis Approach
+
+### ACE Patterns (Agentic Context Engineering)
+
+Based on research from Stanford/SambaNova and Anthropic, we implement patterns that make agents actually useful:
+
+<CardGroup cols={2}>
+  <Card title="Memory Voting" icon="thumbs-up">
+    Agents vote on memory usefulness. Query only effective strategies.
+
+    ```python
+    client.vote(memory_id, "helpful", context="Worked!")
+    ```
+  </Card>
+
+  <Card title="Session Progress" icon="list-check">
+    Track completed/in-progress/blocked items across sessions.
+
+    ```python
+    client.update_session("build-api",
+      completed=["auth"], in_progress="endpoints")
+    ```
+  </Card>
+
+  <Card title="Reflections" icon="brain">
+    Store lessons learned from failures as global knowledge.
+
+    ```python
+    client.add_reflection("Always validate input types",
+      error_pattern="TypeError in API calls")
+    ```
+  </Card>
+
+  <Card title="Playbooks" icon="book-open">
+    Query proven strategies before starting tasks.
+
+    ```python
+    strategies = client.query_playbook("pagination",
+      min_effectiveness=0.5)
+    ```
+  </Card>
+</CardGroup>
+
+### Three-Tier Scoping
+
+```
+┌─────────────────────────────────────────┐
+│              GLOBAL                      │
+│  (Company-wide: style guides, patterns) │
+├─────────────────────────────────────────┤
+│           AGENT-SHARED                   │
+│  (Team-level: project context)           │
+├──────────────────┬──────────────────────┤
+│  AGENT-PRIVATE   │   AGENT-PRIVATE      │
+│  (Planner only)  │   (Executor only)    │
+└──────────────────┴──────────────────────┘
+```
+
+- **agent-private**: Only the creating agent can see it
+- **agent-shared**: Explicitly shared with specific agents
+- **global**: All agents can access (best practices, company knowledge)
+
+### Performance at Scale
+
+| Operation | Aegis | Typical Vector DB |
+|-----------|-------|-------------------|
+| Query 1M memories | 30-80ms | 100-500ms |
+| Semantic dedup | 1ms | 50-200ms |
+| Batch insert 50 | 300ms | 2-5s |
+
+Powered by PostgreSQL + pgvector with HNSW indexing.
+
+## When to Use Aegis
+
+<Check>Multi-agent systems (CrewAI, LangGraph teams)</Check>
+<Check>Long-running agent tasks that span sessions</Check>
+<Check>Agents that need to learn from past interactions</Check>
+<Check>User-facing bots that should remember preferences</Check>
+<Check>Self-hosted requirements (data sovereignty)</Check>
+
+## When NOT to Use Aegis
+
+<Warning>
+- Simple single-turn chatbots (just use context window)
+- Document Q&A (use RAG instead)
+- You need sub-10ms latency (we're 30-80ms)
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/quickstart/installation">
+    Get started in 5 minutes
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/introduction/concepts">
+    Understand the fundamentals
+  </Card>
+</CardGroup>

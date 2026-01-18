@@ -1,0 +1,199 @@
+---
+title: 'CrewAI'
+description: 'Persistent memory for CrewAI multi-agent teams'
+---
+
+# CrewAI Integration
+
+Aegis provides specialized memory for CrewAI that supports multi-agent coordination and ACE patterns (Agentic Context Engineering).
+
+## Installation
+
+```bash
+pip install "aegis-memory[crewai]"
+```
+
+## Crew-Level Memory
+
+Use `AegisCrewMemory` to provide shared long-term storage for an entire crew:
+
+```python
+from aegis_memory.integrations.crewai import AegisCrewMemory
+from crewai import Crew, Agent, Task
+
+# Shared memory for the entire crew
+crew_memory = AegisCrewMemory(
+    api_key="your-aegis-key",
+    namespace="research-project"
+)
+
+researcher = Agent(
+    role="Researcher",
+    goal="Find breakthrough patterns in the data",
+    memory=True
+)
+
+writer = Agent(
+    role="Writer",
+    goal="Create compelling content from research",
+    memory=True
+)
+
+research_task = Task(
+    description="Research AI memory systems",
+    agent=researcher
+)
+
+write_task = Task(
+    description="Write summary of findings",
+    agent=writer
+)
+
+crew = Crew(
+    agents=[researcher, writer],
+    tasks=[research_task, write_task],
+    memory=crew_memory
+)
+
+result = crew.kickoff()
+```
+
+## Agent-Specific Memory (ACE Patterns)
+
+For advanced coordination, use `AegisAgentMemory` to enable scoped memory and self-improvement patterns:
+
+```python
+from aegis_memory.integrations.crewai import AegisAgentMemory, AegisCrewMemory
+
+crew_mem = AegisCrewMemory(api_key="...")
+
+# Memory scoped to a specific agent role
+researcher_mem = AegisAgentMemory(
+    crew_memory=crew_mem,
+    agent_id="Researcher",
+    scope="agent-shared"
+)
+
+# Store a reflection after a task (ACE pattern)
+researcher_mem.add_reflection(
+    content="Always verify data sources from .gov sites first",
+    correct_approach="Start with official government databases"
+)
+
+# Handoff state to another agent
+baton = researcher_mem.handoff_to("Writer", task_context="Data verified")
+```
+
+## Key Capabilities
+
+<CardGroup cols={2}>
+  <Card title="Cross-Agent Queries" icon="magnifying-glass">
+    Agents can search for information stored by other agents if the scope allows.
+  </Card>
+  <Card title="Handoffs" icon="arrow-right-arrow-left">
+    Structured state transfer between agents with context preservation.
+  </Card>
+  <Card title="Playbooks" icon="book">
+    Query for proven strategies and reflections before starting a task.
+  </Card>
+  <Card title="Memory Voting" icon="thumbs-up">
+    Track which memories lead to success vs failure.
+  </Card>
+</CardGroup>
+
+## Scope Hierarchy
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                     GLOBAL SCOPE                         │
+│  "Always use type hints in Python"                       │
+│  Visible to: ALL agents, ALL projects                    │
+├─────────────────────────────────────────────────────────┤
+│                  AGENT-SHARED SCOPE                      │
+│  "Current task: Build user authentication"               │
+│  Visible to: Specified agents in this project            │
+├──────────────┬──────────────┬───────────────────────────┤
+│ AGENT-PRIVATE│ AGENT-PRIVATE│ AGENT-PRIVATE             │
+│  Researcher  │    Writer    │   Reviewer                │
+└──────────────┴──────────────┴───────────────────────────┘
+```
+
+## Example: Research Team with Memory
+
+```python
+from aegis_memory.integrations.crewai import AegisCrewMemory
+from crewai import Crew, Agent, Task
+
+# Initialize persistent memory
+memory = AegisCrewMemory(
+    api_key="your-aegis-key",
+    namespace="market-research"
+)
+
+# Define agents
+researcher = Agent(
+    role="Market Researcher",
+    goal="Gather comprehensive market data",
+    backstory="Expert in market analysis with 10 years experience",
+    memory=True
+)
+
+analyst = Agent(
+    role="Data Analyst",
+    goal="Analyze data and identify trends",
+    backstory="Statistical expert specializing in market trends",
+    memory=True
+)
+
+writer = Agent(
+    role="Report Writer",
+    goal="Create clear, actionable reports",
+    backstory="Business writer with Fortune 500 experience",
+    memory=True
+)
+
+# Define tasks
+research_task = Task(
+    description="Research the AI agent market size and growth",
+    expected_output="Market data with sources",
+    agent=researcher
+)
+
+analysis_task = Task(
+    description="Analyze research data for key insights",
+    expected_output="Top 5 market trends with supporting data",
+    agent=analyst
+)
+
+report_task = Task(
+    description="Write executive summary of findings",
+    expected_output="2-page executive summary",
+    agent=writer
+)
+
+# Create and run crew with memory
+crew = Crew(
+    agents=[researcher, analyst, writer],
+    tasks=[research_task, analysis_task, report_task],
+    memory=memory,
+    verbose=True
+)
+
+result = crew.kickoff()
+
+# Next time you run this crew, it remembers:
+# - What sources were reliable
+# - What analysis approaches worked
+# - What report formats were effective
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="ACE Patterns" icon="brain" href="/guides/ace-patterns">
+    Learn self-improvement patterns
+  </Card>
+  <Card title="Smart Memory" icon="lightbulb" href="/guides/smart-memory">
+    Automatic memory extraction
+  </Card>
+</CardGroup>

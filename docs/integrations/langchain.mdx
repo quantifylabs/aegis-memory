@@ -1,0 +1,111 @@
+---
+title: 'LangChain'
+description: 'Persistent semantic memory for LangChain chains and agents'
+---
+
+# LangChain Integration
+
+Aegis Memory provides a LangChain-compatible memory class that enables semantic search and cross-session persistence.
+
+## Installation
+
+```bash
+pip install "aegis-memory[langchain]"
+```
+
+## Basic Usage
+
+Use `AegisMemory` within any LangChain chain:
+
+```python
+from aegis_memory.integrations.langchain import AegisMemory
+from langchain.chains import ConversationChain
+from langchain_openai import ChatOpenAI
+
+# Initialize Aegis Memory
+memory = AegisMemory(
+    api_key="your-aegis-key",
+    agent_id="support-agent",
+    namespace="customer-service"
+)
+
+# Use in a chain
+chain = ConversationChain(
+    llm=ChatOpenAI(),
+    memory=memory
+)
+
+# Memory is handled automatically
+response = chain.predict(input="My name is John and I'm a Python developer.")
+# Later...
+response = chain.predict(input="What's my name?")
+# Agent remembers: "Your name is John"
+```
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Semantic Retrieval" icon="magnifying-glass">
+    Automatically performs semantic search to retrieve relevant context
+  </Card>
+  <Card title="Cross-Session" icon="clock">
+    Memories persist across sessions and application restarts
+  </Card>
+  <Card title="Scoped Access" icon="lock">
+    Control visibility with agent-private, agent-shared, or global scopes
+  </Card>
+  <Card title="Message Support" icon="message">
+    Return messages or formatted strings based on your needs
+  </Card>
+</CardGroup>
+
+## Advanced Configuration
+
+```python
+memory = AegisMemory(
+    api_key="your-aegis-key",
+    agent_id="assistant",
+    namespace="my-app",
+    scope="agent-private",        # Memory visibility
+    return_messages=True,         # Return message objects
+    k=5,                          # Number of memories to retrieve
+    memory_key="history"          # Key in chain input
+)
+```
+
+## With LangChain Agents
+
+```python
+from langchain.agents import AgentExecutor, create_openai_tools_agent
+from langchain_openai import ChatOpenAI
+from aegis_memory.integrations.langchain import AegisMemory
+
+memory = AegisMemory(
+    api_key="your-aegis-key",
+    agent_id="tool-agent"
+)
+
+llm = ChatOpenAI(model="gpt-4")
+agent = create_openai_tools_agent(llm, tools, prompt)
+
+agent_executor = AgentExecutor(
+    agent=agent,
+    tools=tools,
+    memory=memory,
+    verbose=True
+)
+
+# Agent now has persistent memory across sessions
+result = agent_executor.invoke({"input": "Remember that I prefer Python"})
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Smart Memory" icon="lightbulb" href="/guides/smart-memory">
+    Automatic extraction for conversations
+  </Card>
+  <Card title="ACE Patterns" icon="brain" href="/guides/ace-patterns">
+    Self-improvement patterns
+  </Card>
+</CardGroup>

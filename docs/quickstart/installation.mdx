@@ -1,0 +1,160 @@
+---
+title: 'Installation'
+description: 'Get Aegis Memory running in 5 minutes'
+---
+
+# Installation
+
+## Prerequisites
+
+- Python 3.9+
+- Docker & Docker Compose (for the memory server)
+- OpenAI API key (for embeddings)
+
+## Step 1: Install the SDK
+
+```bash
+pip install aegis-memory
+```
+
+With framework integrations:
+
+```bash
+# For CrewAI
+pip install "aegis-memory[crewai]"
+
+# For LangChain
+pip install "aegis-memory[langchain]"
+
+# All integrations
+pip install "aegis-memory[all]"
+```
+
+## Step 2: Start the Memory Server
+
+<Tabs>
+  <Tab title="Quick Start (Recommended)">
+    ```bash
+    aegis quickstart
+    ```
+
+    This command:
+    - Downloads the Docker Compose configuration
+    - Starts PostgreSQL with pgvector
+    - Starts the Aegis API server
+    - Runs health checks
+  </Tab>
+
+  <Tab title="Manual Setup">
+    Clone and start manually:
+
+    ```bash
+    git clone https://github.com/quantifylabs/aegis-memory.git
+    cd aegis-memory
+    docker-compose up -d
+    ```
+
+    Verify it's running:
+
+    ```bash
+    curl http://localhost:8000/health
+    ```
+  </Tab>
+</Tabs>
+
+## Step 3: Configure Environment
+
+Create a `.env` file or set environment variables:
+
+```bash
+# Required
+export AEGIS_API_KEY="dev-key"  # For local dev, any string works
+export OPENAI_API_KEY="sk-..."  # For embeddings
+
+# Optional
+export AEGIS_BASE_URL="http://localhost:8000"  # Default
+```
+
+## Step 4: Verify Installation
+
+```python
+from aegis_memory import AegisClient
+
+client = AegisClient(
+    api_key="dev-key",
+    base_url="http://localhost:8000"
+)
+
+# Add a test memory
+result = client.add("Test memory - Aegis is working!")
+print(f"Memory stored: {result.id}")
+
+# Query it back
+memories = client.query("test memory")
+print(f"Retrieved: {memories[0].content}")
+```
+
+<Check>You should see your test memory returned!</Check>
+
+## What's Running
+
+After `docker-compose up`, you have:
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| Aegis API | 8000 | REST API for memory operations |
+| PostgreSQL | 5432 | Storage with pgvector extension |
+| (Optional) Redis | 6379 | Caching and rate limiting |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="First Memory" icon="brain" href="/quickstart/first-memory">
+    Store and retrieve your first real memory
+  </Card>
+  <Card title="CrewAI Integration" icon="users" href="/quickstart/with-crewai">
+    Add memory to CrewAI agents
+  </Card>
+</CardGroup>
+
+---
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Docker containers won't start">
+    Check if ports 8000 or 5432 are already in use:
+
+    ```bash
+    lsof -i :8000
+    lsof -i :5432
+    ```
+
+    Kill conflicting processes or change ports in `docker-compose.yml`.
+  </Accordion>
+
+  <Accordion title="Connection refused errors">
+    Wait for PostgreSQL to be ready:
+
+    ```bash
+    docker-compose logs postgres
+    ```
+
+    Look for "database system is ready to accept connections".
+  </Accordion>
+
+  <Accordion title="OpenAI API errors">
+    Ensure your API key is set and has credits:
+
+    ```bash
+    echo $OPENAI_API_KEY
+    ```
+
+    Test directly:
+
+    ```bash
+    curl https://api.openai.com/v1/models \
+      -H "Authorization: Bearer $OPENAI_API_KEY"
+    ```
+  </Accordion>
+</AccordionGroup>

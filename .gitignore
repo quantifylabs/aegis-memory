@@ -149,3 +149,10 @@ temp/
 # Ruff
 .ruff_cache/
 
+# Internal planning files (do not commit)
+ROADMAP.md
+TUTORIALS.md
+aegis-deploy/
+aegis_www/
+tmpclaude-*/
+.claude/

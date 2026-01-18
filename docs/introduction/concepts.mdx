@@ -1,0 +1,195 @@
+---
+title: 'Core Concepts'
+description: 'Understanding the fundamentals of Aegis Memory'
+---
+
+# Core Concepts
+
+Understanding these concepts will help you get the most out of Aegis Memory.
+
+## Memory
+
+A **memory** is a single piece of information stored in Aegis. Each memory has:
+
+```python
+{
+    "id": "abc123",
+    "content": "User prefers dark mode",
+    "memory_type": "standard",
+    "scope": "agent-private",
+    "agent_id": "assistant",
+    "user_id": "user_123",
+    "namespace": "my-app"
+}
+```
+
+### Memory Types
+
+| Type | Purpose | Example |
+|------|---------|---------|
+| `standard` | Facts and preferences | "User's name is John" |
+| `strategy` | Reusable patterns | "For pagination, use while True loop" |
+| `reflection` | Lessons from failures | "Don't use range() for unknown lengths" |
+| `progress` | Session state | "Completed: auth, routing. In progress: API" |
+| `feature` | Feature tracking | "Login feature: 3/5 tests passing" |
+
+## Scope
+
+**Scope** controls who can see a memory:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                      GLOBAL                              │
+│  Visible to ALL agents, ALL projects                    │
+│  Use for: Company-wide best practices                   │
+├─────────────────────────────────────────────────────────┤
+│                   AGENT-SHARED                           │
+│  Visible to specified agents                            │
+│  Use for: Team knowledge, project context               │
+├─────────────────────────────────────────────────────────┤
+│                   AGENT-PRIVATE                          │
+│  Visible only to the creating agent                     │
+│  Use for: Working notes, draft reasoning                │
+└─────────────────────────────────────────────────────────┘
+```
+
+```python
+# Private - only this agent sees it
+client.add("My working notes", scope="agent-private")
+
+# Shared - specific agents can see it
+client.add("Task breakdown", scope="agent-shared",
+           shared_with_agents=["executor", "reviewer"])
+
+# Global - everyone sees it
+client.add("Always use type hints", scope="global")
+```
+
+## Namespace
+
+**Namespace** provides logical separation between projects or tenants:
+
+```python
+# Production app
+client = AegisClient(api_key="...", namespace="production")
+
+# Staging
+client = AegisClient(api_key="...", namespace="staging")
+
+# Different project
+client = AegisClient(api_key="...", namespace="project-alpha")
+```
+
+Memories in different namespaces are completely isolated.
+
+## Agent ID
+
+**Agent ID** identifies which agent created or owns a memory:
+
+```python
+# Planner agent stores its insights
+client.add("User wants simple solution", agent_id="planner")
+
+# Executor queries planner's memories
+memories = client.query("user requirements", agent_id="executor",
+                        cross_agent_ids=["planner"])
+```
+
+## User ID
+
+**User ID** associates memories with specific users:
+
+```python
+# Store user-specific preference
+client.add("Prefers dark mode", user_id="user_123")
+
+# Retrieve for that user
+context = client.query("preferences", user_id="user_123")
+```
+
+## Embeddings
+
+Aegis converts memory content into **embeddings** (vector representations) for semantic search:
+
+```
+"User prefers dark mode" → [0.12, -0.45, 0.78, ...]  (1536 dimensions)
+```
+
+When you query, your query is also embedded, and Aegis finds memories with similar vectors:
+
+```python
+# Query: "What theme does the user like?"
+# Embedding: [0.15, -0.42, 0.81, ...]
+# Matches: "User prefers dark mode" (cosine similarity: 0.94)
+```
+
+## Effectiveness Score
+
+For ACE patterns, memories have an **effectiveness score**:
+
+```python
+score = (helpful_votes - harmful_votes) / (total_votes + 1)
+```
+
+- Score > 0: Memory has been helpful
+- Score < 0: Memory has been harmful
+- Query with `min_effectiveness=0.3` to get only proven strategies
+
+## Sessions
+
+**Sessions** track progress across context windows:
+
+```python
+# Start of work
+session = client.progress.create("build-auth")
+
+# During work
+client.progress.update("build-auth",
+    completed=["login", "logout"],
+    in_progress="password-reset",
+    next=["2fa", "oauth"]
+)
+
+# After context reset, resume
+session = client.progress.get("build-auth")
+print(session.in_progress_item)  # "password-reset"
+```
+
+## Features
+
+**Features** prevent premature task completion:
+
+```python
+# Define what "done" means
+client.features.create("user-auth",
+    test_steps=["Can login", "Can logout", "Token expires correctly"]
+)
+
+# Only mark complete after verification
+client.features.mark_complete("user-auth", verified_by="tester")
+```
+
+## Quick Reference
+
+| Concept | Purpose | Example |
+|---------|---------|---------|
+| Memory | Single piece of information | "User prefers Python" |
+| Scope | Access control | agent-private, agent-shared, global |
+| Namespace | Project/tenant isolation | "production", "staging" |
+| Agent ID | Agent ownership | "planner", "executor" |
+| User ID | User association | "user_123" |
+| Embedding | Vector for semantic search | [0.12, -0.45, ...] |
+| Effectiveness | Vote-based quality score | 0.8 (helpful) |
+| Session | Progress tracking | completed, in_progress, next |
+| Feature | Verification gates | test steps, pass/fail |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart/installation">
+    Install and run your first query
+  </Card>
+  <Card title="ACE Patterns" icon="brain" href="/guides/ace-patterns">
+    Self-improving agent patterns
+  </Card>
+</CardGroup>

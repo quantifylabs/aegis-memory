@@ -1,0 +1,108 @@
+---
+title: 'What is Aegis Memory?'
+description: 'The memory layer for AI agents that actually remember'
+---
+
+# Aegis Memory
+
+**Aegis Memory** is an open-source, agent-native memory engine for multi-agent AI systems. It gives your agents persistent, semantic memory that survives context window resets.
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart/installation">
+    Get running in 5 minutes
+  </Card>
+  <Card title="Why Aegis?" icon="lightbulb" href="/introduction/why-aegis">
+    Understand the problem we solve
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/introduction/concepts">
+    Learn the fundamentals
+  </Card>
+  <Card title="Tutorials" icon="graduation-cap" href="/tutorials">
+    Build real-world examples
+  </Card>
+</CardGroup>
+
+## The Problem
+
+Every AI agent framework promises memory. Few deliver.
+
+```python
+# What happens today
+agent.chat("I'm John, a Python developer")
+# ... context window resets ...
+agent.chat("What's my name?")  # "I don't know your name"
+```
+
+After analyzing 200+ production agent deployments, we found **40-80% fail due to memory coordination issues**—not model capability.
+
+| Problem | Reality |
+|---------|---------|
+| Context loss mid-task | Agents forget what they learned |
+| No shared state | Multi-agent teams can't coordinate |
+| Memory bloat | Everything saved, nothing useful retrieved |
+| Session boundaries | Long tasks restart from zero |
+
+## The Solution
+
+Aegis Memory provides:
+
+<Steps>
+  <Step title="Semantic Memory">
+    Store and retrieve memories by meaning, not just keywords
+  </Step>
+  <Step title="ACE Patterns">
+    Self-improving agents that learn what works (voting, reflections, playbooks)
+  </Step>
+  <Step title="Multi-Agent Coordination">
+    Scoped memory sharing with structured handoffs
+  </Step>
+  <Step title="Session Persistence">
+    Resume work across context window resets
+  </Step>
+</Steps>
+
+## Quick Example
+
+```python
+from aegis_memory import AegisClient
+
+client = AegisClient(api_key="your-key")
+
+# Store a memory
+client.add(
+    content="User prefers dark mode and Python",
+    agent_id="assistant",
+    user_id="john_123"
+)
+
+# Later, retrieve relevant context
+memories = client.query(
+    "What are John's preferences?",
+    user_id="john_123"
+)
+# Returns: "User prefers dark mode and Python"
+```
+
+## Framework Integrations
+
+Aegis works with your existing agent stack:
+
+<CardGroup cols={3}>
+  <Card title="CrewAI" icon="users" href="/integrations/crewai">
+    Multi-agent teams
+  </Card>
+  <Card title="LangChain" icon="link" href="/integrations/langchain">
+    Chains & agents
+  </Card>
+  <Card title="LangGraph" icon="diagram-project" href="/integrations/langgraph">
+    Stateful workflows
+  </Card>
+</CardGroup>
+
+## Open Source
+
+Aegis Memory is fully open source under the Apache 2.0 license.
+
+<Card title="GitHub Repository" icon="github" href="https://github.com/quantifylabs/aegis-memory">
+  Star us on GitHub
+</Card>

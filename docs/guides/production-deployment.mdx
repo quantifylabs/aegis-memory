@@ -1,0 +1,439 @@
+---
+title: 'Production Deployment'
+description: 'Deploy Aegis Memory to production environments'
+sidebarTitle: 'Production'
+---
+
+# Production Deployment Guide
+
+<Warning>
+Production deployment requires significant infrastructure expertise. This guide covers the essentials, but your team should be comfortable with Docker, PostgreSQL operations, and Kubernetes (if using).
+</Warning>
+
+## Architecture Overview
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Agents    │────▶│  Aegis API  │────▶│ PostgreSQL  │
+│  (Clients)  │     │  (FastAPI)  │     │ + pgvector  │
+└─────────────┘     └──────┬──────┘     └─────────────┘
+                           │
+                    ┌──────▼──────┐
+                    │    Redis    │
+                    │  (Optional) │
+                    └─────────────┘
+```
+
+## Deployment Options
+
+<Tabs>
+  <Tab title="Docker Compose">
+    Suitable for: Small teams, single-server deployments
+
+    ### Production docker-compose.yml
+
+    ```yaml
+    version: '3.8'
+
+    services:
+      aegis-api:
+        image: ghcr.io/quantifylabs/aegis-memory:latest
+        ports:
+          - "8000:8000"
+        environment:
+          - DATABASE_URL=postgresql+asyncpg://aegis:${DB_PASSWORD}@postgres:5432/aegis
+          - OPENAI_API_KEY=${OPENAI_API_KEY}
+          - AEGIS_API_KEY=${AEGIS_API_KEY}
+          - RATE_LIMIT_PER_MINUTE=100
+        depends_on:
+          postgres:
+            condition: service_healthy
+        restart: unless-stopped
+        deploy:
+          resources:
+            limits:
+              memory: 1G
+
+      postgres:
+        image: pgvector/pgvector:pg16
+        environment:
+          - POSTGRES_USER=aegis
+          - POSTGRES_PASSWORD=${DB_PASSWORD}
+          - POSTGRES_DB=aegis
+        volumes:
+          - postgres_data:/var/lib/postgresql/data
+        healthcheck:
+          test: ["CMD-SHELL", "pg_isready -U aegis"]
+          interval: 5s
+          timeout: 5s
+          retries: 5
+        restart: unless-stopped
+
+    volumes:
+      postgres_data:
+    ```
+
+    ### Required Environment Variables
+
+    Create a `.env` file:
+
+    ```bash
+    # Generate secure values!
+    DB_PASSWORD=$(openssl rand -base64 32)
+    AEGIS_API_KEY=$(openssl rand -base64 32)
+    OPENAI_API_KEY=sk-your-production-key
+    ```
+
+    <Warning>
+    **Security**: Never commit `.env` files. Use a secrets manager in production.
+    </Warning>
+  </Tab>
+
+  <Tab title="Kubernetes">
+    Suitable for: Teams needing auto-scaling, high availability
+
+    ### Basic Kubernetes Manifests
+
+    You'll need to create:
+    - Deployment for Aegis API
+    - StatefulSet for PostgreSQL (or use managed PostgreSQL)
+    - Services for internal communication
+    - Ingress for external access
+    - Secrets for credentials
+    - PersistentVolumeClaims for data
+
+    <Info>
+    Full Kubernetes manifests are beyond this guide's scope. See our [examples repository](https://github.com/quantifylabs/aegis-memory/tree/main/deploy/kubernetes) for templates.
+    </Info>
+
+    ### Recommended: Managed PostgreSQL
+
+    For production Kubernetes deployments, use managed PostgreSQL:
+    - **AWS**: RDS for PostgreSQL with pgvector
+    - **GCP**: Cloud SQL for PostgreSQL
+    - **Azure**: Azure Database for PostgreSQL
+
+    ```yaml
+    # Example: Using AWS RDS
+    apiVersion: v1
+    kind: Secret
+    metadata:
+      name: aegis-db-credentials
+    stringData:
+      DATABASE_URL: postgresql+asyncpg://aegis:PASSWORD@your-rds-endpoint:5432/aegis
+    ```
+  </Tab>
+
+  <Tab title="Cloud VMs">
+    Suitable for: Simple cloud deployments without containers
+
+    ### Ubuntu/Debian Setup
+
+    ```bash
+    # 1. Install PostgreSQL 16 with pgvector
+    sudo apt update
+    sudo apt install -y postgresql-16 postgresql-16-pgvector
+
+    # 2. Configure PostgreSQL
+    sudo -u postgres psql << EOF
+    CREATE USER aegis WITH PASSWORD 'your-secure-password';
+    CREATE DATABASE aegis OWNER aegis;
+    \c aegis
+    CREATE EXTENSION vector;
+    EOF
+
+    # 3. Install Python and Aegis
+    sudo apt install -y python3.11 python3.11-venv
+    python3.11 -m venv /opt/aegis
+    /opt/aegis/bin/pip install aegis-memory[server]
+
+    # 4. Create systemd service
+    sudo tee /etc/systemd/system/aegis.service << EOF
+    [Unit]
+    Description=Aegis Memory API
+    After=postgresql.service
+
+    [Service]
+    Type=simple
+    User=aegis
+    WorkingDirectory=/opt/aegis
+    ExecStart=/opt/aegis/bin/uvicorn server.main:app --host 0.0.0.0 --port 8000
+    Restart=always
+    EnvironmentFile=/etc/aegis/environment
+
+    [Install]
+    WantedBy=multi-user.target
+    EOF
+
+    # 5. Start service
+    sudo systemctl enable aegis
+    sudo systemctl start aegis
+    ```
+  </Tab>
+</Tabs>
+
+## Production Checklist
+
+### Database
+
+<Steps>
+  <Step title="Enable Connection Pooling">
+    Configure `DB_POOL_SIZE` and `DB_MAX_OVERFLOW`:
+
+    ```bash
+    DB_POOL_SIZE=20
+    DB_MAX_OVERFLOW=10
+    ```
+
+    For high-traffic deployments, consider PgBouncer.
+  </Step>
+
+  <Step title="Set Up Backups">
+    Schedule regular pg_dump backups:
+
+    ```bash
+    # Daily backup cron job
+    0 2 * * * pg_dump -U aegis aegis | gzip > /backups/aegis-$(date +\%Y\%m\%d).sql.gz
+    ```
+
+    <Warning>
+    Test your restore procedure regularly!
+    </Warning>
+  </Step>
+
+  <Step title="Configure Read Replicas (Optional)">
+    For read-heavy workloads, add read replicas:
+
+    ```bash
+    DATABASE_READ_REPLICA_URL=postgresql+asyncpg://aegis:pass@replica:5432/aegis
+    ```
+  </Step>
+
+  <Step title="Monitor Query Performance">
+    Enable slow query logging:
+
+    ```sql
+    ALTER SYSTEM SET log_min_duration_statement = 100;
+    SELECT pg_reload_conf();
+    ```
+  </Step>
+</Steps>
+
+### Security
+
+<Steps>
+  <Step title="Rotate API Keys">
+    Generate strong API keys and rotate regularly:
+
+    ```bash
+    # Generate new key
+    NEW_KEY=$(openssl rand -base64 32)
+
+    # Update environment
+    # Restart service
+    # Update all clients
+    ```
+
+    <Warning>
+    You must update all agent clients when rotating keys. There's no built-in key rotation mechanism.
+    </Warning>
+  </Step>
+
+  <Step title="Enable TLS">
+    Always use HTTPS in production. Configure your reverse proxy (nginx, Traefik, etc.):
+
+    ```nginx
+    server {
+        listen 443 ssl;
+        server_name aegis.yourdomain.com;
+
+        ssl_certificate /etc/ssl/certs/aegis.crt;
+        ssl_certificate_key /etc/ssl/private/aegis.key;
+
+        location / {
+            proxy_pass http://localhost:8000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Network Isolation">
+    - Place PostgreSQL in a private subnet
+    - Use VPC security groups to restrict access
+    - Never expose PostgreSQL to the internet
+  </Step>
+
+  <Step title="Secrets Management">
+    Use a secrets manager instead of environment files:
+    - AWS Secrets Manager
+    - HashiCorp Vault
+    - GCP Secret Manager
+
+    <Info>
+    You'll need to write custom code to fetch secrets at startup.
+    </Info>
+  </Step>
+</Steps>
+
+### Monitoring
+
+<Steps>
+  <Step title="Health Checks">
+    Monitor the `/health` endpoint:
+
+    ```bash
+    curl https://aegis.yourdomain.com/health
+    ```
+
+    Set up alerts for non-200 responses.
+  </Step>
+
+  <Step title="Prometheus Metrics">
+    Scrape `/metrics` endpoint:
+
+    ```yaml
+    # prometheus.yml
+    scrape_configs:
+      - job_name: 'aegis'
+        static_configs:
+          - targets: ['aegis:8000']
+    ```
+
+    Available metrics:
+    - `aegis_memory_add_total`
+    - `aegis_memory_query_total`
+    - `aegis_memory_query_latency_seconds`
+  </Step>
+
+  <Step title="Log Aggregation">
+    Ship logs to your log aggregation system:
+
+    ```bash
+    # Example: Docker with Loki
+    docker run -d \
+      --log-driver=loki \
+      --log-opt loki-url="http://loki:3100/loki/api/v1/push" \
+      aegis-api
+    ```
+  </Step>
+
+  <Step title="Alerting">
+    Set up alerts for:
+    - API error rate > 1%
+    - Query latency p99 > 500ms
+    - Database connections > 80% of pool
+    - Disk usage > 80%
+  </Step>
+</Steps>
+
+### Scaling
+
+<AccordionGroup>
+  <Accordion title="Horizontal Scaling (API)">
+    The Aegis API is stateless and can be horizontally scaled:
+
+    ```yaml
+    # docker-compose scale
+    docker-compose up -d --scale aegis-api=3
+    ```
+
+    Use a load balancer (nginx, HAProxy, cloud LB) in front.
+  </Accordion>
+
+  <Accordion title="Vertical Scaling (Database)">
+    PostgreSQL with pgvector benefits from:
+    - More RAM (for HNSW index caching)
+    - Faster SSDs
+    - More CPU cores for parallel queries
+
+    Start with 4GB RAM, 2 vCPUs minimum.
+  </Accordion>
+
+  <Accordion title="HNSW Index Tuning">
+    For large memory counts (1M+), tune the HNSW index:
+
+    ```sql
+    -- Increase ef_construction for better recall (slower inserts)
+    SET hnsw.ef_construction = 128;
+
+    -- Increase ef_search for better query accuracy (slower queries)
+    SET hnsw.ef_search = 64;
+    ```
+
+    See [pgvector tuning guide](https://github.com/pgvector/pgvector#indexing) for details.
+  </Accordion>
+</AccordionGroup>
+
+## Disaster Recovery
+
+### Backup Strategy
+
+```bash
+#!/bin/bash
+# backup.sh - Run daily via cron
+
+BACKUP_DIR=/backups
+DATE=$(date +%Y%m%d_%H%M%S)
+
+# Full database backup
+pg_dump -U aegis -Fc aegis > $BACKUP_DIR/aegis_$DATE.dump
+
+# Upload to S3 (or your cloud storage)
+aws s3 cp $BACKUP_DIR/aegis_$DATE.dump s3://your-bucket/backups/
+
+# Retain 30 days locally
+find $BACKUP_DIR -name "*.dump" -mtime +30 -delete
+```
+
+### Restore Procedure
+
+```bash
+# 1. Stop the API
+docker-compose stop aegis-api
+
+# 2. Restore database
+pg_restore -U aegis -d aegis --clean /backups/aegis_20250115.dump
+
+# 3. Restart API
+docker-compose start aegis-api
+
+# 4. Verify
+curl http://localhost:8000/health
+```
+
+## Cost Estimation
+
+| Component | Small (Dev) | Medium (Startup) | Large (Enterprise) |
+|-----------|-------------|------------------|-------------------|
+| **Compute** | $20/mo | $100/mo | $500+/mo |
+| **PostgreSQL** | $15/mo | $100/mo | $500+/mo |
+| **OpenAI Embeddings** | $10/mo | $50/mo | $200+/mo |
+| **Total** | ~$45/mo | ~$250/mo | ~$1,200+/mo |
+
+<Info>
+Costs scale primarily with:
+- Number of memories stored (database size)
+- Query volume (compute + embeddings)
+- Embedding calls (OpenAI API costs)
+</Info>
+
+---
+
+## Need Help?
+
+Production deployment requires careful planning. If you're facing challenges:
+
+<CardGroup cols={2}>
+  <Card title="GitHub Issues" icon="github" href="https://github.com/quantifylabs/aegis-memory/issues">
+    Report bugs or ask questions
+  </Card>
+  <Card title="Community Discord" icon="discord" href="https://discord.gg/aegis-memory">
+    Get help from the community
+  </Card>
+</CardGroup>
+
+<Note>
+**Coming Soon**: We're working on a managed platform that handles all of this for you. [Join the waitlist](#) to be notified when it launches.
+</Note>

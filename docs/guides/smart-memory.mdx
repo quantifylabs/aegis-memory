@@ -1,0 +1,233 @@
+---
+title: 'Smart Memory'
+description: 'Zero-config intelligent memory extraction for AI agents'
+---
+
+# Smart Memory Guide
+
+Smart Memory is Aegis's intelligent extraction layer that automatically determines what's worth remembering from conversations. Instead of storing everything (noise) or requiring manual decisions (burden), Smart Memory uses a two-stage process to extract and store only valuable information.
+
+## Quick Start
+
+```python
+from aegis_memory import SmartMemory
+
+# Initialize with your API keys
+memory = SmartMemory(
+    aegis_api_key="your-aegis-key",
+    llm_api_key="your-openai-key"
+)
+
+# After each conversation turn, process it
+memory.process_turn(
+    user_input="I'm John, a Python developer from Chennai. I prefer dark mode.",
+    ai_response="Nice to meet you, John! I'll remember your preferences.",
+    user_id="user_123"
+)
+
+# Later, get relevant context for a new query
+context = memory.get_context(
+    query="What color theme should I use?",
+    user_id="user_123"
+)
+
+print(context.context_string)
+# Output:
+# - User's name is John
+# - User is a Python developer
+# - User is based in Chennai
+# - User prefers dark mode for applications
+```
+
+## How It Works
+
+Smart Memory uses a **two-stage process** to avoid expensive LLM calls while maintaining quality:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  STAGE 1: FAST FILTER (Rule-based, ~0.1ms)                      │
+│                                                                  │
+│  Checks for memory signals:                                      │
+│  ✓ "I'm" → Personal fact signal                                 │
+│  ✓ "developer" → Professional fact signal                       │
+│  ✓ "from Chennai" → Location signal                             │
+│                                                                  │
+│  Decision: WORTH EXTRACTING                                      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  STAGE 2: LLM EXTRACTION (~200ms, only if Stage 1 passes)       │
+│                                                                  │
+│  Extracts atomic facts:                                          │
+│  1. "User's name is John" (confidence: 0.95)                    │
+│  2. "User is a developer" (confidence: 0.90)                    │
+│  3. "User is based in Chennai" (confidence: 0.92)               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Cost Comparison
+
+| Approach | LLM Calls | Cost | Quality |
+|----------|-----------|------|---------|
+| Store everything | 0 | Low | Poor (noisy) |
+| LLM for everything | 100% | High | Good |
+| **Two-stage (Smart)** | ~30% | Low | Good |
+
+The filter catches obvious non-memories (greetings, confirmations) without LLM calls, saving ~70% of extraction costs.
+
+## Use Cases
+
+<Tabs>
+  <Tab title="Conversational">
+    ```python
+    memory = SmartMemory(use_case="conversational", ...)
+    ```
+
+    **Extracts:** Preferences, personal facts, relationships
+
+    **Ignores:** Greetings, one-time questions, temporary states
+  </Tab>
+
+  <Tab title="Coding">
+    ```python
+    memory = SmartMemory(use_case="coding", ...)
+    ```
+
+    **Extracts:** Tech stack decisions, architecture choices, bugs and solutions
+
+    **Ignores:** Syntax questions, one-off debugging
+  </Tab>
+
+  <Tab title="Task">
+    ```python
+    memory = SmartMemory(use_case="task", ...)
+    ```
+
+    **Extracts:** Decisions, constraints, problems solved, strategies
+
+    **Ignores:** Implementation details, debugging steps
+  </Tab>
+
+  <Tab title="Support">
+    ```python
+    memory = SmartMemory(use_case="support", ...)
+    ```
+
+    **Extracts:** User setup, past issues, skill level, account details
+
+    **Ignores:** Troubleshooting steps, generic support talk
+  </Tab>
+</Tabs>
+
+## Configuration
+
+### Sensitivity Levels
+
+```python
+# High sensitivity - extract more, risk some noise
+memory = SmartMemory(sensitivity="high", ...)
+
+# Balanced (default) - good balance
+memory = SmartMemory(sensitivity="balanced", ...)
+
+# Low sensitivity - extract less, only high-confidence
+memory = SmartMemory(sensitivity="low", ...)
+```
+
+### LLM Providers
+
+```python
+# OpenAI (default)
+memory = SmartMemory(
+    llm_provider="openai",
+    llm_api_key="sk-...",
+    llm_model="gpt-4o-mini"
+)
+
+# Anthropic
+memory = SmartMemory(
+    llm_provider="anthropic",
+    llm_api_key="sk-ant-...",
+    llm_model="claude-3-haiku-20240307"
+)
+```
+
+## SmartAgent (Full Auto)
+
+For the simplest experience, use `SmartAgent` which handles everything:
+
+```python
+from aegis_memory import SmartAgent
+
+agent = SmartAgent(
+    aegis_api_key="your-aegis-key",
+    llm_api_key="your-openai-key",
+    system_prompt="You are a helpful coding assistant."
+)
+
+# Memory is completely automatic
+response = agent.chat("I'm John, I prefer Python over JavaScript", user_id="user_123")
+response = agent.chat("What language should I use?", user_id="user_123")
+# Agent automatically knows user prefers Python!
+```
+
+## What Gets Stored
+
+### Categories
+
+| Category | Description | Example |
+|----------|-------------|---------|
+| `preference` | Likes, dislikes, style | "User prefers dark mode" |
+| `fact` | Personal information | "User is a developer in Chennai" |
+| `decision` | Choices made | "User decided to use React" |
+| `constraint` | Limits and requirements | "Budget is $5000" |
+| `goal` | What user wants | "User wants to build a chatbot" |
+| `strategy` | What worked | "Using async improved performance" |
+| `mistake` | What didn't work | "Don't use range() for large pagination" |
+
+## Best Practices
+
+<Steps>
+  <Step title="Choose the Right Use Case">
+    Match use case to your domain. Don't use "conversational" for coding tasks.
+  </Step>
+
+  <Step title="Use Appropriate Sensitivity">
+    High sensitivity for personal assistants. Low sensitivity for task agents.
+  </Step>
+
+  <Step title="Monitor Extraction Stats">
+    ```python
+    stats = memory.get_stats()
+    print(f"Filter rate: {stats['filter_rate']:.1%}")
+    # If filter_rate is too high, increase sensitivity
+    ```
+  </Step>
+
+  <Step title="Combine with Explicit Storage">
+    Use Smart Memory for conversations, explicit storage for known-important info.
+  </Step>
+</Steps>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Nothing is being extracted">
+    1. Check sensitivity: `memory = SmartMemory(sensitivity="high", ...)`
+    2. Use `force_extract=True` to bypass filter
+    3. Check stats: `print(memory.get_stats())`
+  </Accordion>
+
+  <Accordion title="Too much noise being stored">
+    1. Lower sensitivity: `sensitivity="low"`
+    2. Use a more specific use case
+    3. Create custom filter patterns
+  </Accordion>
+
+  <Accordion title="LLM costs too high">
+    1. Use cheaper models: `gpt-4o-mini` or `claude-3-haiku`
+    2. Lower sensitivity to reduce LLM calls
+    3. Use `auto_store=False` for custom storage logic
+  </Accordion>
+</AccordionGroup>

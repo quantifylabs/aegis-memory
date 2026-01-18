@@ -1,0 +1,144 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "Aegis Memory",
+  "logo": {
+    "dark": "/logo/dark.svg",
+    "light": "/logo/light.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#6366F1",
+    "light": "#818CF8",
+    "dark": "#4F46E5",
+    "anchors": {
+      "from": "#6366F1",
+      "to": "#8B5CF6"
+    }
+  },
+  "modeToggle": {
+    "default": "dark"
+  },
+  "topbarLinks": [
+    {
+      "name": "Home",
+      "url": "https://aegismemory.com"
+    },
+    {
+      "name": "GitHub",
+      "url": "https://github.com/quantifylabs/aegis-memory"
+    }
+  ],
+  "topbarCtaButton": {
+    "name": "Get Started",
+    "url": "/quickstart/installation"
+  },
+  "tabs": [
+    {
+      "name": "Guides",
+      "url": "guides"
+    },
+    {
+      "name": "Tutorials",
+      "url": "tutorials"
+    },
+    {
+      "name": "API Reference",
+      "url": "api-reference"
+    }
+  ],
+  "anchors": [
+    {
+      "name": "Community",
+      "icon": "discord",
+      "url": "https://discord.gg/aegis-memory"
+    },
+    {
+      "name": "Blog",
+      "icon": "newspaper",
+      "url": "https://blog.example.com"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": [
+        "introduction/overview",
+        "introduction/why-aegis",
+        "introduction/concepts"
+      ]
+    },
+    {
+      "group": "Quickstart",
+      "pages": [
+        "quickstart/installation",
+        "quickstart/first-memory",
+        "quickstart/with-crewai",
+        "quickstart/with-langchain"
+      ]
+    },
+    {
+      "group": "Guides",
+      "pages": [
+        "guides/smart-memory",
+        "guides/ace-patterns",
+        "guides/multi-agent",
+        "guides/scopes-access",
+        "guides/production-deployment"
+      ]
+    },
+    {
+      "group": "Integrations",
+      "pages": [
+        "integrations/crewai",
+        "integrations/langchain",
+        "integrations/langgraph",
+        "integrations/autogen"
+      ]
+    },
+    {
+      "group": "Tutorials",
+      "pages": [
+        "tutorials/crewai-persistent-memory",
+        "tutorials/self-improving-agents",
+        "tutorials/multi-agent-coordination",
+        "tutorials/production-checklist"
+      ]
+    },
+    {
+      "group": "API Reference",
+      "pages": [
+        "api-reference/client",
+        "api-reference/smart-memory",
+        "api-reference/cli"
+      ]
+    },
+    {
+      "group": "Resources",
+      "pages": [
+        "resources/faq",
+        "resources/troubleshooting",
+        "resources/changelog"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "twitter": "https://twitter.com/aegaborai",
+    "github": "https://github.com/quantifylabs/aegis-memory",
+    "linkedin": "https://linkedin.com/company/quantifylabs",
+    "website": "https://aegismemory.com"
+  },
+  "analytics": {
+    "posthog": {
+      "apiKey": "YOUR_POSTHOG_KEY"
+    }
+  },
+  "feedback": {
+    "thumbsRating": true,
+    "suggestEdit": true,
+    "raiseIssue": true
+  },
+  "seo": {
+    "indexHiddenPages": false
+  },
+  "openapi": "openapi.yaml"
+}

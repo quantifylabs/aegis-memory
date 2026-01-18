@@ -1,0 +1,67 @@
+---
+title: 'With CrewAI'
+description: 'Quick start guide for using Aegis Memory with CrewAI'
+---
+
+# Quick Start: CrewAI
+
+Add persistent memory to your CrewAI agents in minutes.
+
+## Install
+
+```bash
+pip install "aegis-memory[crewai]"
+```
+
+## Basic Setup
+
+```python
+from aegis_memory.integrations.crewai import AegisCrewMemory
+from crewai import Crew, Agent, Task
+
+# Initialize memory
+memory = AegisCrewMemory(
+    api_key="your-aegis-key",
+    namespace="my-crew"
+)
+
+# Create agents
+researcher = Agent(
+    role="Researcher",
+    goal="Find accurate information",
+    memory=True
+)
+
+writer = Agent(
+    role="Writer",
+    goal="Create clear content",
+    memory=True
+)
+
+# Create crew with memory
+crew = Crew(
+    agents=[researcher, writer],
+    tasks=[...],
+    memory=memory
+)
+
+result = crew.kickoff()
+```
+
+## What Gets Remembered
+
+- Research findings across sessions
+- What approaches worked
+- Agent coordination context
+- Lessons from failures
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Full CrewAI Guide" icon="users" href="/integrations/crewai">
+    Complete integration guide
+  </Card>
+  <Card title="ACE Patterns" icon="brain" href="/guides/ace-patterns">
+    Self-improving agents
+  </Card>
+</CardGroup>

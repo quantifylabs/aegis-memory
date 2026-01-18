@@ -1,0 +1,105 @@
+---
+title: 'Your First Memory'
+description: 'Store and retrieve your first memory in 5 minutes'
+---
+
+# Your First Memory
+
+Let's store and retrieve a memory to see Aegis in action.
+
+## Prerequisites
+
+Make sure you've completed the [installation](/quickstart/installation) steps.
+
+## Store a Memory
+
+```python
+from aegis_memory import AegisClient
+
+# Connect to Aegis
+client = AegisClient(
+    api_key="dev-key",
+    base_url="http://localhost:8000"
+)
+
+# Store a memory
+result = client.add(
+    content="User prefers dark mode and Python",
+    agent_id="assistant",
+    user_id="user_123"
+)
+
+print(f"Stored memory: {result.id}")
+```
+
+## Retrieve Memories
+
+```python
+# Query by semantic similarity
+memories = client.query(
+    query="What are the user's preferences?",
+    user_id="user_123",
+    top_k=5
+)
+
+for memory in memories:
+    print(f"- {memory.content} (score: {memory.score:.2f})")
+```
+
+Output:
+```
+- User prefers dark mode and Python (score: 0.94)
+```
+
+## Add More Context
+
+```python
+# Add more memories
+client.add("User is a backend developer", user_id="user_123")
+client.add("User's project uses FastAPI", user_id="user_123")
+client.add("User prefers async/await patterns", user_id="user_123")
+
+# Now query for tech stack
+memories = client.query("What tech stack does the user use?", user_id="user_123")
+for m in memories:
+    print(f"- {m.content}")
+```
+
+Output:
+```
+- User's project uses FastAPI
+- User prefers async/await patterns
+- User is a backend developer
+- User prefers dark mode and Python
+```
+
+## Using Memory in a Prompt
+
+```python
+# Get context for an LLM prompt
+context = client.query(
+    query="user preferences for code generation",
+    user_id="user_123",
+    top_k=3
+)
+
+context_str = "\n".join([f"- {m.content}" for m in context])
+
+prompt = f"""Based on what you know about this user:
+{context_str}
+
+Generate a FastAPI endpoint for user authentication."""
+
+# Now send to your LLM of choice
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="CrewAI Integration" icon="users" href="/quickstart/with-crewai">
+    Add memory to CrewAI agents
+  </Card>
+  <Card title="Smart Memory" icon="lightbulb" href="/guides/smart-memory">
+    Automatic memory extraction
+  </Card>
+</CardGroup>
