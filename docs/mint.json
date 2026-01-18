@@ -38,24 +38,15 @@
       "url": "guides"
     },
     {
-      "name": "Tutorials",
-      "url": "tutorials"
-    },
-    {
       "name": "API Reference",
       "url": "api-reference"
     }
   ],
   "anchors": [
     {
-      "name": "Community",
-      "icon": "discord",
-      "url": "https://discord.gg/aegis-memory"
-    },
-    {
-      "name": "Blog",
-      "icon": "newspaper",
-      "url": "https://blog.example.com"
+      "name": "GitHub",
+      "icon": "github",
+      "url": "https://github.com/quantifylabs/aegis-memory"
     }
   ],
   "navigation": [
@@ -72,8 +63,7 @@
       "pages": [
         "quickstart/installation",
         "quickstart/first-memory",
-        "quickstart/with-crewai",
-        "quickstart/with-langchain"
+        "quickstart/with-crewai"
       ]
     },
     {
@@ -81,8 +71,6 @@
       "pages": [
         "guides/smart-memory",
         "guides/ace-patterns",
-        "guides/multi-agent",
-        "guides/scopes-access",
         "guides/production-deployment"
       ]
     },
@@ -90,34 +78,13 @@
       "group": "Integrations",
       "pages": [
         "integrations/crewai",
-        "integrations/langchain",
-        "integrations/langgraph",
-        "integrations/autogen"
-      ]
-    },
-    {
-      "group": "Tutorials",
-      "pages": [
-        "tutorials/crewai-persistent-memory",
-        "tutorials/self-improving-agents",
-        "tutorials/multi-agent-coordination",
-        "tutorials/production-checklist"
+        "integrations/langchain"
       ]
     },
     {
       "group": "API Reference",
       "pages": [
-        "api-reference/client",
-        "api-reference/smart-memory",
         "api-reference/cli"
-      ]
-    },
-    {
-      "group": "Resources",
-      "pages": [
-        "resources/faq",
-        "resources/troubleshooting",
-        "resources/changelog"
       ]
     }
   ],
@@ -127,11 +94,6 @@
     "linkedin": "https://linkedin.com/company/quantifylabs",
     "website": "https://aegismemory.com"
   },
-  "analytics": {
-    "posthog": {
-      "apiKey": "YOUR_POSTHOG_KEY"
-    }
-  },
   "feedback": {
     "thumbsRating": true,
     "suggestEdit": true,
@@ -139,6 +101,5 @@
   },
   "seo": {
     "indexHiddenPages": false
-  },
-  "openapi": "openapi.yaml"
+  }
 }
