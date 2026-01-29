@@ -5,11 +5,15 @@ description: 'Get Aegis Memory running in 5 minutes'
 
 # Installation
 
+This guide walks you through installing the Aegis Memory SDK and starting the memory server locally.
+
 ## Prerequisites
 
-- Python 3.9+
-- Docker & Docker Compose (for the memory server)
-- OpenAI API key (for embeddings)
+Before you begin, ensure you have:
+
+- **Python 3.9+** — Check with `python --version`
+- **Docker & Docker Compose** — The memory server runs in containers
+- **OpenAI API key** — Used for generating embeddings ([get one here](https://platform.openai.com/api-keys))
 
 ## Step 1: Install the SDK
 
@@ -64,15 +68,24 @@ pip install "aegis-memory[all]"
 
 ## Step 3: Configure Environment
 
-Create a `.env` file or set environment variables:
+Create a `.env` file in your project directory:
+
+```bash .env
+# Required for embeddings
+OPENAI_API_KEY=sk-your-openai-key-here
+
+# For local development, any string works as the API key
+AEGIS_API_KEY=dev-key
+
+# Optional: defaults to localhost
+AEGIS_BASE_URL=http://localhost:8000
+```
+
+Or export them directly in your terminal:
 
 ```bash
-# Required
-export AEGIS_API_KEY="dev-key"  # For local dev, any string works
-export OPENAI_API_KEY="sk-..."  # For embeddings
-
-# Optional
-export AEGIS_BASE_URL="http://localhost:8000"  # Default
+export OPENAI_API_KEY="sk-..."
+export AEGIS_API_KEY="dev-key"
 ```
 
 ## Step 4: Verify Installation
@@ -94,17 +107,7 @@ memories = client.query("test memory")
 print(f"Retrieved: {memories[0].content}")
 ```
 
-<Check>You should see your test memory returned!</Check>
-
-## What's Running
-
-After `docker-compose up`, you have:
-
-| Service | Port | Purpose |
-|---------|------|---------|
-| Aegis API | 8000 | REST API for memory operations |
-| PostgreSQL | 5432 | Storage with pgvector extension |
-| (Optional) Redis | 6379 | Caching and rate limiting |
+<Check>You should see your test memory returned! If so, Aegis is ready to use.</Check>
 
 ## Next Steps
 
@@ -158,3 +161,15 @@ After `docker-compose up`, you have:
     ```
   </Accordion>
 </AccordionGroup>
+
+---
+
+## Reference: What's Running
+
+After starting the server, these services are available:
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| Aegis API | 8000 | REST API for memory operations |
+| PostgreSQL | 5432 | Vector storage with pgvector |
+| Redis (optional) | 6379 | Caching and rate limiting |

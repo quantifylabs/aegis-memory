@@ -7,6 +7,11 @@ description: 'Quick start guide for using Aegis Memory with CrewAI'
 
 Add persistent memory to your CrewAI agents in minutes.
 
+<Note>
+  Ensure the Aegis server is running before proceeding.
+  See the [installation guide](/quickstart/installation) if needed.
+</Note>
+
 ## Install
 
 ```bash
@@ -19,13 +24,13 @@ pip install "aegis-memory[crewai]"
 from aegis_memory.integrations.crewai import AegisCrewMemory
 from crewai import Crew, Agent, Task
 
-# Initialize memory
+# Initialize Aegis memory backend
 memory = AegisCrewMemory(
-    api_key="your-aegis-key",
-    namespace="my-crew"
+    api_key="dev-key",           # Use your API key in production
+    namespace="my-crew"           # Isolates memories for this crew
 )
 
-# Create agents
+# Create agents with memory enabled
 researcher = Agent(
     role="Researcher",
     goal="Find accurate information",
@@ -38,10 +43,23 @@ writer = Agent(
     memory=True
 )
 
-# Create crew with memory
+# Define tasks
+research_task = Task(
+    description="Research the latest trends in AI agents",
+    agent=researcher,
+    expected_output="A summary of key trends"
+)
+
+write_task = Task(
+    description="Write a blog post based on the research",
+    agent=writer,
+    expected_output="A 500-word blog post"
+)
+
+# Create crew with Aegis memory
 crew = Crew(
     agents=[researcher, writer],
-    tasks=[...],
+    tasks=[research_task, write_task],
     memory=memory
 )
 
@@ -50,10 +68,12 @@ result = crew.kickoff()
 
 ## What Gets Remembered
 
-- Research findings across sessions
-- What approaches worked
-- Agent coordination context
-- Lessons from failures
+Aegis automatically persists:
+
+- **Research findings** — Knowledge gathered across sessions
+- **Successful approaches** — What worked for similar tasks
+- **Coordination context** — How agents worked together
+- **Lessons learned** — Insights from failures and successes
 
 ## Next Steps
 
