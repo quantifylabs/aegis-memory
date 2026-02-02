@@ -1,9 +1,15 @@
 <svg width="400" height="80" viewBox="0 0 400 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <!-- Shield icon -->
-  <path d="M40 8L12 20v18c0 15.46 11.94 29.9 28 34 16.06-4.1 28-18.54 28-34V20L40 8z" fill="#6366F1"/>
-  <path d="M40 16L20 24v13.5c0 11.6 8.96 22.42 20 25.5 11.04-3.08 20-13.9 20-25.5V24L40 16z" fill="#4F46E5"/>
-  <circle cx="40" cy="40" r="8" fill="#C7D2FE"/>
+  <rect x="4" y="4" width="64" height="64" rx="16" fill="url(#g)"/>
+  <path d="M36 16L54 52H18L36 16Z" fill="#09090b" opacity="0.9"/>
+  <path d="M36 26L45 48H27L36 26Z" fill="url(#g)"/>
 
   <!-- Text: Aegis Memory -->
   <text x="84" y="52" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="36" font-weight="700" fill="#FFFFFF">Aegis Memory</text>
+
+  <defs>
+    <linearGradient id="g" x1="4" y1="4" x2="68" y2="68" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22d3ee"/>
+      <stop offset="1" stop-color="#a78bfa"/>
+    </linearGradient>
+  </defs>
 </svg>
