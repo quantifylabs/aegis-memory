@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>The open-source memory layer for AI agents.</strong>
+  <strong>The Memory Layer for Multi-Agent Systems</strong>
 </p>
 
 <p align="center">
@@ -13,9 +13,10 @@
 </p>
 
 <p align="center">
+  <a href="https://www.aegismemory.com/">Website</a> •
+  <a href="https://docs.aegismemory.com/introduction/overview">Docs</a> •
+  <a href="https://www.aegismemory.com/blog/">Blog</a> •
   <a href="https://docs.aegismemory.com/quickstart/installation">Quickstart</a> •
-  <a href="https://docs.aegismemory.com/guides/smart-memory">Smart Memory</a> •
-  <a href="https://docs.aegismemory.com/guides/ace-patterns">ACE Patterns</a> •
   <a href="https://docs.aegismemory.com/integrations/crewai">Integrations</a>
 </p>
 
