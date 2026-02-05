@@ -390,7 +390,11 @@ class CustomLLMAdapter(LLMAdapter):
     
     def complete_sync(self, prompt: str, system: str = None) -> str:
         if self._sync_fn is None:
-            raise RuntimeError("No sync completion function provided")
+            raise RuntimeError(
+                "No sync completion function provided to CustomLLMAdapter. "
+                "Pass sync_fn=your_function when creating the adapter, or use "
+                "the async complete() method with async_fn instead."
+            )
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
         return self._sync_fn(full_prompt)
 
@@ -546,8 +550,12 @@ class MemoryExtractor:
                     memories.append(memory)
         
         except (json.JSONDecodeError, KeyError, TypeError) as e:
-            # Log but don't fail
-            pass
+            import sys
+            print(
+                f"[aegis] Warning: failed to parse extraction response: {e}. "
+                f"Raw response (first 200 chars): {raw_response[:200]}",
+                file=sys.stderr,
+            )
         
         return ExtractionResult(
             memories=memories,
@@ -604,6 +612,10 @@ def create_extractor(
     elif provider == "anthropic":
         llm = AnthropicAdapter(api_key=api_key, **kwargs)
     else:
-        raise ValueError(f"Unknown provider: {provider}. Use 'openai' or 'anthropic'")
+        raise ValueError(
+            f"Unknown provider: '{provider}'. "
+            f"Supported providers: 'openai', 'anthropic'. "
+            f"For custom LLMs, create a MemoryExtractor with a CustomLLMAdapter directly."
+        )
     
     return MemoryExtractor(llm=llm, use_case=use_case)

@@ -305,6 +305,96 @@ kubectl apply -f k8s/
 
 **[→ Full Configuration](https://docs.aegismemory.com/guides/production-deployment)**
 
+## Troubleshooting
+
+### Connection Refused / Cannot Connect to Server
+
+```
+Cannot connect to Aegis server
+  URL: http://localhost:8000
+```
+
+**Fix:**
+1. Verify the server is running: `docker compose ps`
+2. Check the server URL in your config: `aegis config show`
+3. Ensure the port is not blocked by a firewall
+4. If using a custom URL, pass it explicitly: `AegisClient(api_key="...", base_url="http://your-host:8000")`
+
+### Authentication Failed / Invalid API Key
+
+```
+Authentication failed: Invalid API key
+```
+
+**Fix:**
+1. Check your configured key: `aegis config show`
+2. Reconfigure: `aegis config init`
+3. Or set via environment variable: `export AEGIS_API_KEY=your-key`
+4. The default development key is `dev-key`
+
+### Missing OPENAI_API_KEY
+
+```
+RuntimeError: OPENAI_API_KEY is required for embeddings
+```
+
+**Fix:**
+1. Set the environment variable: `export OPENAI_API_KEY=sk-...`
+2. Or pass it in your `docker-compose.yml` under the server service environment
+
+### Database Connection Errors
+
+```
+asyncpg.exceptions: could not connect to server
+```
+
+**Fix:**
+1. Ensure PostgreSQL is running: `docker compose ps`
+2. Check `DATABASE_URL` in your environment matches the running database
+3. Verify pgvector extension is installed: `CREATE EXTENSION IF NOT EXISTS vector;`
+4. Run migrations if upgrading: `psql -f migrations/002_ace_tables.sql`
+
+### Smart Memory Returns No Extractions
+
+If `process_turn()` always returns empty results:
+
+1. **Check the filter** — Short or generic messages are filtered out by design. Use `force_extract=True` to bypass:
+   ```python
+   result = memory.process_turn(user_input="...", ai_response="...", force_extract=True)
+   ```
+2. **Check the LLM key** — Extraction requires a valid OpenAI or Anthropic API key
+3. **Lower the sensitivity** — `SmartMemory(..., sensitivity="high")` passes more messages to the LLM
+
+### Import Errors (ModuleNotFoundError)
+
+```
+ModuleNotFoundError: No module named 'aegis_memory.integrations.langchain'
+```
+
+**Fix:** Install the optional dependency group:
+```bash
+pip install aegis-memory[langchain]   # For LangChain
+pip install aegis-memory[crewai]      # For CrewAI
+pip install aegis-memory[server]      # For server components
+pip install aegis-memory[all]         # Everything
+```
+
+### Rate Limit Exceeded (429)
+
+**Fix:**
+1. Wait and retry — the `Retry-After` header indicates how long
+2. Reduce request frequency or batch operations with `add_batch()`
+3. Adjust server-side limits via `RATE_LIMIT_*` environment variables
+
+### Slow Queries on Large Datasets
+
+If queries take longer than expected on 100K+ memories:
+
+1. Verify the HNSW index exists: check `migrations/` scripts were applied
+2. Increase `DB_POOL_SIZE` for concurrent workloads
+3. Use a read replica via `DATABASE_READ_REPLICA_URL` for query-heavy traffic
+4. Filter by `namespace` or `agent_id` to narrow the search space
+
 ## Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.

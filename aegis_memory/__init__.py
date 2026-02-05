@@ -53,7 +53,7 @@ Quick Start (Smart Agent - Full Auto):
 For more examples, see: https://github.com/quantifylabs/aegis-memory/tree/main/examples
 """
 
-__version__ = "1.2.2"
+__version__ = "1.3.0"
 
 # Core client (manual control)
 from aegis_memory.client import (

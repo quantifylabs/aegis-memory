@@ -142,7 +142,7 @@ async def get_project_id(request: Request) -> str:
     if not auth.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization header"
+            detail="Missing or malformed Authorization header. Expected: 'Bearer <api_key>'"
         )
 
     token = auth[7:].strip()
@@ -152,7 +152,7 @@ async def get_project_id(request: Request) -> str:
     if token != settings.aegis_api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key"
+            detail="Invalid API key. Check AEGIS_API_KEY environment variable on the server."
         )
 
     return settings.default_project_id
@@ -489,7 +489,10 @@ async def get_memory(
     """Get a single memory by ID."""
     mem = await MemoryRepository.get_by_id(db, memory_id, project_id)
     if not mem:
-        raise HTTPException(status_code=404, detail="Memory not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Memory not found: {memory_id}. It may have been deleted or the ID is incorrect."
+        )
 
     return MemoryOut(
         id=mem.id,
@@ -516,7 +519,10 @@ async def delete_memory(
     """Delete a memory by ID."""
     deleted = await MemoryRepository.delete(db, memory_id, project_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="Memory not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Memory not found: {memory_id}. It may have been deleted or the ID is incorrect."
+        )
 
 
 # ---------- Data Export (Migration Safety) ----------

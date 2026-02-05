@@ -142,7 +142,11 @@ class SmartMemory:
                 model=llm_model or "claude-3-haiku-20240307"
             )
         else:
-            raise ValueError(f"Unknown llm_provider: {llm_provider}")
+            raise ValueError(
+                f"Unknown llm_provider: '{llm_provider}'. "
+                f"Supported providers: 'openai', 'anthropic'. "
+                f"For other LLMs, pass a custom_llm adapter instead."
+            )
         
         # Extractor
         self.extractor = MemoryExtractor(
@@ -477,8 +481,12 @@ class SmartMemory:
                 )
                 stored_ids.append(result.id)
             except Exception as e:
-                # Log but don't fail
-                pass
+                import sys
+                print(
+                    f"[aegis] Warning: failed to store memory "
+                    f"'{mem.content[:50]}...': {e}",
+                    file=sys.stderr,
+                )
         
         return stored_ids
     

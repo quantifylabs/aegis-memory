@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-02-05
+
+### Added
+
+- **Client `export_json()` method** — Export memories directly to a JSON file from the SDK
+  - Supports namespace, agent_id, and limit filters
+  - Optional embedding inclusion
+  - Returns export stats (total exported, namespaces, agents)
+
+- **Troubleshooting section in README** — Common issues and fixes for:
+  - Connection errors, authentication failures, missing API keys
+  - Database setup, Smart Memory debugging, import errors
+  - Rate limiting and slow query diagnostics
+
+### Changed
+
+- **Dependency versions bumped** to latest stable releases:
+  - Core: httpx >=0.28.0, typer >=0.15.0, rich >=14.0.0, pyyaml >=6.0.2
+  - Server: fastapi >=0.115.0, uvicorn >=0.34.0, sqlalchemy >=2.0.40, asyncpg >=0.30.0, pgvector >=0.3.6, pydantic >=2.10.0, openai >=1.60.0
+  - Integrations: langchain >=0.3.0, langchain-core >=0.3.0, crewai >=0.86.0
+  - Dev: pytest >=8.3.0, pytest-asyncio >=0.24.0, pytest-cov >=6.0.0, ruff >=0.9.0, mypy >=1.14.0
+
+- **Improved error messages across the codebase** for better debugging:
+  - Silent `except: pass` blocks now log warnings to stderr with context
+  - `AsyncAegisClient` error suggests `asyncio.to_thread()` workaround
+  - Delta operation failures include actionable troubleshooting hints
+  - Provider/adapter errors list supported options and alternatives
+  - Extraction parse failures log the raw response for debugging
+  - Server auth errors specify which config to check
+  - 404 errors include the requested memory ID
+
+- SDK version bumped to 1.3.0
+
 ## [1.2.2] - 2025-12-28
 
 ### Added
@@ -134,6 +167,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## Upgrade Notes
+
+### 1.2 → 1.3
+
+1. Upgrade the SDK:
+   ```bash
+   pip install --upgrade aegis-memory
+   ```
+
+2. New `export_json()` method on `AegisClient`:
+   ```python
+   stats = client.export_json("backup.json", namespace="production")
+   ```
+
+3. Dependency minimums raised — if you pin exact versions, update to match:
+   - httpx >=0.28.0, fastapi >=0.115.0, openai >=1.60.0, etc.
+   - See pyproject.toml for full list
+
+4. No database changes required
 
 ### 1.1 → 1.2
 

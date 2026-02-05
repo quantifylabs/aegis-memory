@@ -537,7 +537,10 @@ class AegisClient:
         
         if result.results[0].success:
             return result.results[0].memory_id
-        raise Exception(result.results[0].error)
+        raise Exception(
+            f"Delta add failed: {result.results[0].error}. "
+            f"Check that the server is running and the content is valid."
+        )
     
     def deprecate(
         self,
@@ -949,6 +952,55 @@ class AegisClient:
             in_progress=data["in_progress"],
         )
     
+    # ---------- Export ----------
+
+    def export_json(
+        self,
+        output_path: str,
+        *,
+        namespace: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        include_embeddings: bool = False,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Export memories to a JSON file.
+
+        Args:
+            output_path: Path to write the JSON file
+            namespace: Optional namespace filter
+            agent_id: Optional agent ID filter
+            include_embeddings: Include embedding vectors (default: False)
+            limit: Maximum number of memories to export
+
+        Returns:
+            Export stats dict with total_exported, namespaces, and agents
+
+        Example:
+            stats = client.export_json("backup.json", namespace="production")
+            print(f"Exported {stats['total_exported']} memories")
+        """
+        import json
+
+        body: Dict[str, Any] = {"format": "json"}
+        if namespace:
+            body["namespace"] = namespace
+        if agent_id:
+            body["agent_id"] = agent_id
+        if include_embeddings:
+            body["include_embeddings"] = True
+        if limit:
+            body["limit"] = limit
+
+        resp = self.client.post("/memories/export", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str, ensure_ascii=False)
+
+        return data.get("stats", {"total_exported": len(data.get("memories", []))})
+
     # ---------- Helpers ----------
     
     def _parse_memory(self, data: Dict) -> Memory:
@@ -1018,7 +1070,7 @@ class AsyncAegisClient:
     ):
         raise NotImplementedError(
             "AsyncAegisClient is not yet implemented. "
-            "Please use the sync AegisClient for now. "
-            "Async support is planned for v1.2. "
-            "Track progress: https://github.com/quantifylabs/aegis-memory/issues"
+            "Use the sync AegisClient instead — it works for most use cases. "
+            "For async workflows, wrap sync calls with asyncio.to_thread(). "
+            "Track async support: https://github.com/quantifylabs/aegis-memory/issues"
         )
