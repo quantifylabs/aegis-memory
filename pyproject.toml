@@ -43,6 +43,7 @@ dependencies = [
     "typer[all]>=0.15.0",
     "rich>=14.0.0",
     "pyyaml>=6.0.2",
+    "textual>=0.50.0",
 ]
 
 [project.scripts]

@@ -10,15 +10,19 @@ from rich.console import Console
 
 from aegis_memory.cli.commands import (
     config_app,
+    explore,
     export_import,
     features,
+    init,
     memory,
+    new,
     playbook,
     progress,
     stats,
     status,
     vote,
 )
+from aegis_memory.cli.utils.errors import set_debug_mode
 
 # Create main app
 app = typer.Typer(
@@ -29,6 +33,23 @@ app = typer.Typer(
 )
 
 console = Console()
+
+
+@app.callback()
+def main_callback(
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Show detailed error traces for debugging",
+        is_eager=True,
+    ),
+) -> None:
+    """
+    Aegis Memory CLI - The memory engine for multi-agent systems.
+
+    Use --debug to see full stack traces when errors occur.
+    """
+    set_debug_mode(debug)
 
 # Register command groups
 app.add_typer(config_app, name="config", help="Configuration management")
@@ -46,6 +67,9 @@ app.command(name="vote", help="Vote on memory usefulness")(vote.vote)
 app.command(name="playbook", help="Query playbook for strategies")(playbook.playbook)
 app.command(name="export", help="Export memories to file")(export_import.export)
 app.command(name="import", help="Import memories from file")(export_import.import_memories)
+app.command(name="init", help="Setup wizard with framework detection")(init.init)
+app.command(name="new", help="Generate project from template")(new.new)
+app.command(name="explore", help="Interactive memory browser")(explore.explore)
 
 
 @app.command()
