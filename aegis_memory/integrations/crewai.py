@@ -89,7 +89,7 @@ class AegisCrewMemory:
                 **(metadata or {}),
             },
         )
-        return result["id"]
+        return result.id
 
     def search(
         self,
@@ -186,7 +186,7 @@ class AegisAgentMemory:
                 **(metadata or {}),
             },
         )
-        return result["id"]
+        return result.id
 
     def search(
         self,
@@ -271,14 +271,14 @@ class AegisAgentMemory:
         Returns:
             Memory ID
         """
-        result = self.client.reflection(
+        result_id = self.client.add_reflection(
             content=content,
             agent_id=self.agent_id,
             namespace=self.namespace,
             error_pattern=error_pattern,
             correct_approach=correct_approach,
         )
-        return result["id"]
+        return result_id
 
     def get_playbook(
         self,
@@ -299,7 +299,7 @@ class AegisAgentMemory:
         Returns:
             List of playbook entries
         """
-        entries = self.client.playbook(
+        result = self.client.query_playbook(
             query=query,
             agent_id=self.agent_id,
             namespace=self.namespace,
@@ -314,5 +314,5 @@ class AegisAgentMemory:
                 "error_pattern": e.error_pattern,
                 "memory_type": e.memory_type,
             }
-            for e in entries
+            for e in result.entries
         ]

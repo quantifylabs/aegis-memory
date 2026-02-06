@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Aegis Memory API",
-    version="1.2.1",
+    version="1.2.0",
     description="""
     # Aegis Memory
 
@@ -168,7 +168,7 @@ async def root():
     """API root - returns basic info."""
     return {
         "name": "Aegis Memory API",
-        "version": "1.2.2",
+        "version": "1.2.0",
         "docs": "/docs",
         "health": "/health",
         "metrics": "/metrics",
@@ -182,7 +182,7 @@ async def health():
 
     return {
         "status": "healthy" if db_health["status"] == "healthy" else "degraded",
-        "version": "1.2.2",
+        "version": "1.2.0",
         "features": ["voting", "delta_updates", "progress_tracking", "feature_tracking"],
         "database": db_health,
     }

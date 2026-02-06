@@ -118,6 +118,7 @@ class EmbeddingService:
         stmt = pg_insert(EmbeddingCache).values(values)
         stmt = stmt.on_conflict_do_nothing(index_elements=["content_hash"])
         await db.execute(stmt)
+        await db.commit()
 
     async def embed_single(self, text: str, db: AsyncSession | None = None) -> list[float]:
         """Embed a single text with caching."""
@@ -184,7 +185,7 @@ class EmbeddingService:
 
             # Update caches
             to_cache_db = []
-            for i, emb in zip(uncached_indices, new_embeddings, strict=False):
+            for i, emb in zip(uncached_indices, new_embeddings, strict=True):
                 h = hashes[i]
                 results[h] = emb
                 self._set_cached(h, emb)

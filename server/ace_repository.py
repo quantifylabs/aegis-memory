@@ -23,7 +23,7 @@ from models import (
     SessionProgress,
     VoteHistory,
 )
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, not_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -50,22 +50,11 @@ class ACERepository:
         """
         Record a vote on a memory and update counters.
 
+        Uses atomic SQL increment to prevent race conditions from
+        concurrent votes losing updates.
+
         Returns the updated memory or None if not found.
         """
-        # Get the memory
-        result = await db.execute(
-            select(Memory).where(
-                and_(
-                    Memory.id == memory_id,
-                    Memory.project_id == project_id,
-                )
-            )
-        )
-        memory = result.scalar_one_or_none()
-
-        if not memory:
-            return None
-
         # Create vote history record
         vote_record = VoteHistory(
             id=generate_id(),
@@ -78,18 +67,60 @@ class ACERepository:
         )
         db.add(vote_record)
 
-        # Update memory counters
+        # Atomic update of memory counters to prevent race conditions
+        now = datetime.now(timezone.utc)
         if vote == "helpful":
-            memory.bullet_helpful += 1
+            stmt = (
+                update(Memory)
+                .where(
+                    and_(
+                        Memory.id == memory_id,
+                        Memory.project_id == project_id,
+                    )
+                )
+                .values(
+                    bullet_helpful=Memory.bullet_helpful + 1,
+                    updated_at=now,
+                )
+                .returning(Memory.id)
+            )
         elif vote == "harmful":
-            memory.bullet_harmful += 1
+            stmt = (
+                update(Memory)
+                .where(
+                    and_(
+                        Memory.id == memory_id,
+                        Memory.project_id == project_id,
+                    )
+                )
+                .values(
+                    bullet_harmful=Memory.bullet_harmful + 1,
+                    updated_at=now,
+                )
+                .returning(Memory.id)
+            )
+        else:
+            # Invalid vote type - still check memory exists
+            stmt = select(Memory.id).where(
+                and_(
+                    Memory.id == memory_id,
+                    Memory.project_id == project_id,
+                )
+            )
 
-        memory.updated_at = datetime.now(timezone.utc)
+        result = await db.execute(stmt)
+        updated_id = result.scalar_one_or_none()
+
+        if not updated_id:
+            return None
 
         await db.commit()
-        await db.refresh(memory)
 
-        return memory
+        # Fetch the updated memory to return
+        result = await db.execute(
+            select(Memory).where(Memory.id == memory_id)
+        )
+        return result.scalar_one_or_none()
 
     @staticmethod
     async def get_vote_history(
@@ -290,7 +321,7 @@ class ACERepository:
                     Memory.project_id == project_id,
                     Memory.namespace == namespace,
                     Memory.memory_type.in_(include_types),
-                    not Memory.is_deprecated,
+                    not_(Memory.is_deprecated),
                     access_filter,
                 )
             )

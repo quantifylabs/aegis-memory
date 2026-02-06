@@ -17,7 +17,7 @@ from uuid import uuid4
 
 from embedding_service import content_hash
 from models import Memory, MemoryScope, MemoryType
-from sqlalchemy import and_, cast, delete, or_, select, text
+from sqlalchemy import and_, cast, delete, not_, or_, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -178,7 +178,7 @@ class MemoryRepository:
 
         # ACE Enhancement: Exclude deprecated by default
         if not include_deprecated:
-            conditions.append(not Memory.is_deprecated)
+            conditions.append(not_(Memory.is_deprecated))
 
         # ACE Enhancement: Filter by memory type
         if memory_types:

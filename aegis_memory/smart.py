@@ -438,9 +438,9 @@ class SmartMemory:
             user_id=user_id,
             agent_id=agent_id,
             namespace=self.namespace,
-            memory_type=memory_type,
             metadata={
                 "category": category,
+                "memory_type": memory_type,
                 "source": "explicit",
                 **(metadata or {})
             }
@@ -469,9 +469,9 @@ class SmartMemory:
                     user_id=user_id,
                     agent_id=agent_id,
                     namespace=self.namespace,
-                    memory_type=mem.memory_type,
                     metadata={
                         "category": mem.category,
+                        "memory_type": mem.memory_type,
                         "confidence": mem.confidence,
                         "extracted_by": "smart_memory",
                         "use_case": self.use_case,

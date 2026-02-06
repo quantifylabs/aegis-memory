@@ -32,7 +32,7 @@ def add(
     user: str | None = typer.Option(None, "--user", "-u", help="User ID"),
     namespace: str | None = typer.Option(None, "--namespace", "-n", help="Namespace"),
     scope: str | None = typer.Option(None, "--scope", "-s", help="Scope: agent-private, agent-shared, global"),
-    memory_type: str = typer.Option("standard", "--type", "-t", help="Type: standard, strategy, reflection"),
+    memory_type: str = typer.Option("standard", "--type", "-t", help="Type: standard, strategy, reflection (stored in metadata)"),
     share_with: list[str] | None = typer.Option(None, "--share-with", help="Agent IDs to share with"),
     metadata: str | None = typer.Option(None, "--metadata", "-m", help="JSON metadata"),
     ttl: int | None = typer.Option(None, "--ttl", help="TTL in seconds"),
@@ -69,13 +69,17 @@ def add(
         raise typer.Exit(1)
 
     # Parse metadata
-    meta_dict = None
+    meta_dict = {}
     if metadata:
         try:
             meta_dict = json.loads(metadata)
         except json.JSONDecodeError as e:
             print_error(f"Invalid JSON metadata: {e}")
             raise typer.Exit(1) from e
+
+    # Store memory_type in metadata (server infers type from metadata)
+    if memory_type and memory_type != "standard":
+        meta_dict["memory_type"] = memory_type
 
     # Build request
     resolved_namespace = namespace or get_default_namespace()
@@ -88,15 +92,10 @@ def add(
             user_id=user,
             namespace=resolved_namespace,
             scope=scope,
-            metadata=meta_dict,
+            metadata=meta_dict if meta_dict else None,
             ttl_seconds=ttl,
             shared_with_agents=share_with,
         )
-
-        # Handle memory type by adding to metadata if not standard
-        # Note: The add() method doesn't directly support memory_type,
-        # but the server infers it. For explicit type, use delta endpoint.
-
     except Exception as e:
         handle_api_error(e, "add memory")
 

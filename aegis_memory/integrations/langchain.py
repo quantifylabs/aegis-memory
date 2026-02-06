@@ -210,7 +210,7 @@ class AegisMemory(BaseMemory if LANGCHAIN_AVAILABLE else object):
             scope=scope or self.scope,
             metadata=metadata or {},
         )
-        return result["id"]
+        return result.id
 
     def search(
         self,

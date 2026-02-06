@@ -154,8 +154,8 @@ def import_memories(
             sample = memories[0]
             console.print("\nSample memory:")
             console.print(f"  Content: {sample.get('content', '')[:60]}...")
-            console.print(f"  Agent: {namespace or sample.get('agent_id', '-')}")
-            console.print(f"  Namespace: {agent or sample.get('namespace', 'default')}")
+            console.print(f"  Agent: {agent or sample.get('agent_id', '-')}")
+            console.print(f"  Namespace: {namespace or sample.get('namespace', 'default')}")
 
         return
 

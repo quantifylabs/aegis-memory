@@ -313,6 +313,8 @@ class FeatureTracker(Base):
         Index('ix_feature_project', 'project_id', 'namespace'),
         Index('ix_feature_session', 'session_id'),
         Index('ix_feature_status', 'project_id', 'status'),
+        # Unique constraint to prevent duplicate features in same namespace
+        Index('ix_feature_unique', 'project_id', 'namespace', 'feature_id', unique=True),
     )
 
 

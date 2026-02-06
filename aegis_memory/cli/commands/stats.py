@@ -41,6 +41,8 @@ def stats(
     except Exception:
         # Fallback: construct stats from individual calls
         stats_data = _build_stats_fallback(client, ns, agent)
+        if not json_output:
+            console.print("[dim]Note: Using fallback stats (dashboard endpoint unavailable)[/dim]")
 
     if json_output:
         print_json(stats_data)

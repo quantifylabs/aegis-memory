@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Critical SDK Fixes**
+  - `smart.py`: Fixed `client.add(memory_type=...)` TypeError - `memory_type` now passed via metadata dict
+  - `langchain.py`: Fixed `result["id"]` AttributeError - AddResult is a dataclass, use `result.id`
+  - `crewai.py`: Fixed multiple issues:
+    - `result["id"]` → `result.id` (2 occurrences)
+    - `client.reflection()` → `client.add_reflection()` (method was renamed)
+    - `client.playbook()` → `client.query_playbook()` (method was renamed)
+    - Fixed PlaybookResult iteration - use `result.entries` instead of iterating result directly
+
+- **Server Transaction & Data Integrity Fixes**
+  - `embedding_service.py`: Added missing `await db.commit()` after cache insert - embeddings now persist correctly
+  - `embedding_service.py`: Changed `zip(strict=False)` → `strict=True` to catch API response mismatches
+  - `ace_repository.py`: Fixed vote race condition - concurrent votes no longer lose updates (uses atomic SQL UPDATE)
+  - `memory_repository.py`: Fixed `not Memory.is_deprecated` → `not_(Memory.is_deprecated)` - Python's `not` operator doesn't work for SQLAlchemy column expressions
+  - `ace_repository.py`: Same SQLAlchemy negation fix for playbook queries
+
+- **CLI Fixes**
+  - `memory.py`: `--type` option now properly stores `memory_type` in metadata (was silently ignored)
+  - `export_import.py`: Fixed swapped agent/namespace labels in dry-run output
+  - `stats.py`: Added user feedback when falling back to alternative endpoints
+
+- **Minor Fixes**
+  - `main.py`: Fixed inconsistent version strings (1.2.1 vs 1.2.2 → all now 1.2.0)
+  - `models.py`: Added unique constraint on `feature_tracker(project_id, namespace, feature_id)` to prevent duplicate features
+
 ## [1.3.0] - 2026-02-05
 
 ### Added
