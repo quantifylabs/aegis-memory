@@ -118,31 +118,41 @@ Different memory solutions excel at different problems. Here's when to choose wh
 
 ## 15-Second Demo
 
-See Aegis Memory in action with our interactive demo:
+See Aegis Memory in action with built-in CLI commands:
 
 ```bash
 # Start the server
 docker compose up -d
 
-# Run the demo
+# Configure defaults (creates local profile)
 pip install aegis-memory
-aegis demo
+aegis init --non-interactive
+
+# Check connectivity
+aegis status
+
+# Add and retrieve a memory
+aegis add "User prefers dark mode"
+aegis query "What does the user prefer?" --top-k 3
+
+# Optionally browse results interactively
+aegis explore --query "user preferences" --top-k 5
 ```
 
-The demo walks through 5 acts showing:
-1. **The Problem** — Agents forget everything between sessions
-2. **Aegis Memory** — Persistent memory that survives context resets
-3. **Smart Extraction** — Automatic extraction of valuable information
-4. **Multi-Agent** — Agents share knowledge with scope control
-5. **Self-Improvement** — Agents learn what works over time
+This quick flow shows:
+1. **Initialization** — Configure CLI defaults for your environment
+2. **Connectivity** — Verify server health before writing memories
+3. **Persistence** — Add a memory that survives agent context resets
+4. **Retrieval** — Semantically query what was stored
+5. **Exploration** — Iterate on results from an interactive terminal explorer
 
 ```bash
-# Save demo output to share on social media
-aegis demo --log
-# Creates demo.log file
+# JSON output for scripting / logs
+aegis status --json
+aegis query "What does the user prefer?" --json
 ```
 
-> **Tip:** Set `OPENAI_API_KEY` for live Smart Extraction, or see simulated output without it.
+> **Tip:** Set `OPENAI_API_KEY` to enable embedding-backed semantic retrieval on the server.
 
 ## Features
 
