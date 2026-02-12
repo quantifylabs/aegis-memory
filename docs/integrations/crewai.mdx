@@ -84,6 +84,21 @@ researcher_mem.add_reflection(
 baton = researcher_mem.handoff_to("Writer", task_context="Data verified")
 ```
 
+## Async CrewAI Workflows
+
+When your CrewAI setup runs async tasks/tools, use `AsyncAegisClient` directly:
+
+```python
+from aegis_memory import AsyncAegisClient
+
+async def store_handoff(agent_id: str, note: str):
+    async with AsyncAegisClient(api_key="your-aegis-key") as client:
+        memory = await client.add(note, agent_id=agent_id, scope="agent-shared")
+        await client.vote(memory.id, "helpful", voter_agent_id=agent_id)
+```
+
+This avoids blocking the event loop and matches CrewAI async execution patterns.
+
 ## Key Capabilities
 
 <CardGroup cols={2}>

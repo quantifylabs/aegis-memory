@@ -211,6 +211,25 @@ print(memories[0].content)
 
 **[→ Full Quickstart Guide](https://docs.aegismemory.com/quickstart/installation)**
 
+## Async Usage (FastAPI / LangGraph / CrewAI)
+
+`AsyncAegisClient` mirrors the core `AegisClient` APIs for async applications.
+
+```python
+from aegis_memory import AsyncAegisClient
+
+async def handle_turn(user_id: str, text: str):
+    async with AsyncAegisClient(api_key="dev-key", base_url="http://localhost:8000") as client:
+        await client.add(text, user_id=user_id, agent_id="assistant")
+        memories = await client.query("user preferences", user_id=user_id)
+        return memories
+```
+
+Use this pattern in:
+- **FastAPI** request handlers (`async def` endpoints)
+- **LangGraph** async nodes (`await client.query(...)`)
+- **CrewAI** async tools/callbacks that run in event loops
+
 ## Framework Integrations
 
 Drop-in support for popular agent frameworks:
