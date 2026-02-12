@@ -20,6 +20,8 @@ Usage:
 import json
 import logging
 import time
+from collections import Counter as CollectionCounter
+from collections import deque
 from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime
@@ -262,6 +264,187 @@ if PROMETHEUS_AVAILABLE:
         "aegis_ace_sessions_active",
         "Active ACE sessions"
     )
+
+    # Query analytics metrics
+    QUERY_ATTEMPTS = Counter(
+        "aegis_memory_query_attempts_total",
+        "Total memory query attempts",
+        ["source", "requested_scope", "effective_scope"]
+    )
+
+    QUERY_RESULTS_COUNT = Histogram(
+        "aegis_memory_query_results_count",
+        "Distribution of number of results returned by each query",
+        ["source"],
+        buckets=[0, 1, 2, 5, 10, 20, 50, 100]
+    )
+
+    QUERY_ZERO_RESULTS = Counter(
+        "aegis_memory_query_miss_total",
+        "Total memory queries that returned zero results",
+        ["source", "effective_scope"]
+    )
+
+    QUERY_LATENCY = Histogram(
+        "aegis_memory_query_execution_duration_seconds",
+        "End-to-end query latency",
+        ["source"],
+        buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
+    )
+
+    QUERY_FILTER_USAGE = Counter(
+        "aegis_memory_query_filter_usage_total",
+        "Usage of query filters",
+        ["scope", "memory_type", "min_effectiveness", "target_agent_ids_used"]
+    )
+
+    MEMORY_SCOPE_STORED = Counter(
+        "aegis_memory_scope_stored_total",
+        "Distribution of memory scopes at write time",
+        ["scope"]
+    )
+
+    MEMORY_SCOPE_RETRIEVED = Counter(
+        "aegis_memory_scope_retrieved_total",
+        "Distribution of memory scopes in retrievals",
+        ["scope"]
+    )
+
+
+_QUERY_EVENT_LIMIT = 2000
+_QUERY_EVENTS = deque(maxlen=_QUERY_EVENT_LIMIT)
+
+
+def _safe_scope(value: str | None) -> str:
+    return value or "unspecified"
+
+
+def normalize_query_intent(query: str) -> str:
+    """Normalize free-form query text into a low-cardinality intent key."""
+    normalized = " ".join(query.strip().lower().split())
+    if not normalized:
+        return "empty"
+    tokens = [token.strip(".,!?;:\"'()[]{}") for token in normalized.split(" ")]
+    tokens = [token for token in tokens if token]
+    return " ".join(tokens[:4]) or "empty"
+
+
+def record_memory_stored_scope(scope: str, count: int = 1):
+    """Record distribution of scopes used when storing memories."""
+    if PROMETHEUS_AVAILABLE:
+        MEMORY_SCOPE_STORED.labels(scope=_safe_scope(scope)).inc(count)
+
+
+def record_query_execution(
+    *,
+    source: str,
+    duration_seconds: float,
+    total_returned: int,
+    requested_scope: str | None,
+    effective_scope: str,
+    memory_type: str | None = None,
+    min_effectiveness: float | None = None,
+    target_agent_ids_used: bool = False,
+    query_text: str | None = None,
+    retrieved_scopes: list[str] | None = None,
+    retrieved_agent_ids: list[str] | None = None,
+):
+    """Record query-level metrics and append an event for dashboard analytics."""
+    if PROMETHEUS_AVAILABLE:
+        QUERY_ATTEMPTS.labels(
+            source=source,
+            requested_scope=_safe_scope(requested_scope),
+            effective_scope=effective_scope,
+        ).inc()
+        QUERY_RESULTS_COUNT.labels(source=source).observe(total_returned)
+        QUERY_LATENCY.labels(source=source).observe(duration_seconds)
+        QUERY_FILTER_USAGE.labels(
+            scope=_safe_scope(requested_scope),
+            memory_type=memory_type or "any",
+            min_effectiveness="used" if min_effectiveness is not None else "not_used",
+            target_agent_ids_used="true" if target_agent_ids_used else "false",
+        ).inc()
+
+        if total_returned == 0:
+            QUERY_ZERO_RESULTS.labels(source=source, effective_scope=effective_scope).inc()
+
+        if retrieved_scopes:
+            for scope in retrieved_scopes:
+                MEMORY_SCOPE_RETRIEVED.labels(scope=_safe_scope(scope)).inc()
+
+    _QUERY_EVENTS.append({
+        "timestamp": datetime.utcnow(),
+        "source": source,
+        "intent": normalize_query_intent(query_text or ""),
+        "hit": total_returned > 0,
+        "total_returned": total_returned,
+        "requested_scope": _safe_scope(requested_scope),
+        "effective_scope": effective_scope,
+        "retrieved_agent_ids": retrieved_agent_ids or [],
+    })
+
+
+def get_query_analytics(window_minutes: int = 60, bucket_minutes: int = 10) -> dict:
+    """Aggregate recent query analytics from in-memory query events."""
+    now = datetime.utcnow()
+    window_start = now.timestamp() - (window_minutes * 60)
+
+    events = [event for event in _QUERY_EVENTS if event["timestamp"].timestamp() >= window_start]
+
+    intent_counts = CollectionCounter(event["intent"] for event in events)
+    scope_usage = CollectionCounter(event["requested_scope"] for event in events)
+
+    agent_counts = CollectionCounter()
+    for event in events:
+        for agent_id in event.get("retrieved_agent_ids", []):
+            if agent_id:
+                agent_counts[agent_id] += 1
+
+    bucket_seconds = max(1, bucket_minutes) * 60
+    trend_buckets: dict[int, dict[str, int]] = {}
+    for event in events:
+        ts = int(event["timestamp"].timestamp())
+        bucket = ts - (ts % bucket_seconds)
+        stats = trend_buckets.setdefault(bucket, {"queries": 0, "hits": 0})
+        stats["queries"] += 1
+        if event["hit"]:
+            stats["hits"] += 1
+
+    hit_rate_trend = []
+    for bucket in sorted(trend_buckets):
+        stats = trend_buckets[bucket]
+        queries = stats["queries"]
+        hit_rate_trend.append({
+            "bucket_start": datetime.utcfromtimestamp(bucket),
+            "queries": queries,
+            "hits": stats["hits"],
+            "hit_rate": (stats["hits"] / queries) if queries else 0.0,
+        })
+
+    total_agent_retrievals = sum(agent_counts.values())
+    per_agent_share = [
+        {
+            "agent_id": agent_id,
+            "retrievals": count,
+            "share": (count / total_agent_retrievals) if total_agent_retrievals else 0.0,
+        }
+        for agent_id, count in agent_counts.most_common(10)
+    ]
+
+    return {
+        "window_minutes": window_minutes,
+        "sample_size": len(events),
+        "top_query_intents": [
+            {"intent": intent, "count": count}
+            for intent, count in intent_counts.most_common(10)
+        ],
+        "hit_rate_trend": hit_rate_trend,
+        "scope_usage_breakdown": [
+            {"scope": scope, "count": count}
+            for scope, count in scope_usage.items()
+        ],
+        "per_agent_retrieval_share": per_agent_share,
+    }
 
 
 def record_operation(operation: str, status: str = "success"):

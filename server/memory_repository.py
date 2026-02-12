@@ -12,12 +12,13 @@ ACE Enhancements:
 - Effectiveness score support
 """
 
+import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from embedding_service import content_hash
 from models import Memory, MemoryScope, MemoryType
-from observability import OperationNames, record_operation, track_latency
+from observability import OperationNames, record_operation, record_query_execution, track_latency
 from sqlalchemy import and_, cast, delete, not_, or_, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,7 +160,9 @@ class MemoryRepository:
         min_score: float = 0.0,
         include_deprecated: bool = False,  # ACE Enhancement
         memory_types: list[str] | None = None,  # ACE Enhancement: filter by type
-    ) -> list[tuple[Memory, float]]:
+        requested_scope: str | None = None,
+        min_effectiveness: float | None = None,
+    ) -> tuple[list[tuple[Memory, float]], dict]:
         """
         Semantic search using pgvector's HNSW index.
 
@@ -196,6 +199,10 @@ class MemoryRepository:
         # ACE Enhancement: Filter by memory type
         if memory_types:
             conditions.append(Memory.memory_type.in_(memory_types))
+
+        # Optional explicit scope request
+        if requested_scope is not None:
+            conditions.append(Memory.scope == requested_scope)
 
         # Optional user filter
         if user_id is not None:
@@ -241,6 +248,12 @@ class MemoryRepository:
             # No requesting agent = only global memories
             conditions.append(Memory.scope == MemoryScope.GLOBAL.value)
 
+        effective_scope = "global_only"
+        if requesting_agent_id is not None:
+            effective_scope = "acl_global_private_shared"
+            if target_agent_ids:
+                effective_scope = "acl_targeted_agents"
+
         # Build the query
         # Key: ORDER BY distance LIMIT k uses the HNSW index efficiently
         stmt = (
@@ -250,6 +263,7 @@ class MemoryRepository:
             .limit(top_k)
         )
 
+        query_start = time.monotonic()
         try:
             with track_latency(OperationNames.MEMORY_SEMANTIC_SEARCH):
                 result = await db.execute(stmt)
@@ -267,7 +281,23 @@ class MemoryRepository:
             if score >= min_score:
                 output.append((mem, score))
 
-        return output
+        record_query_execution(
+            source="semantic_search",
+            duration_seconds=time.monotonic() - query_start,
+            total_returned=len(output),
+            requested_scope=requested_scope,
+            effective_scope=effective_scope,
+            memory_type=("multi" if memory_types and len(memory_types) > 1 else (memory_types[0] if memory_types else None)),
+            min_effectiveness=min_effectiveness,
+            target_agent_ids_used=bool(target_agent_ids),
+            retrieved_scopes=[mem.scope for mem, _ in output],
+            retrieved_agent_ids=[mem.agent_id for mem, _ in output if mem.agent_id],
+        )
+
+        return output, {
+            "requested_scope": requested_scope,
+            "effective_scope": effective_scope,
+        }
 
     @staticmethod
     async def find_duplicates(

@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from database import get_read_db
 from fastapi import APIRouter, Depends
 from models import FeatureTracker, Memory, MemoryType, SessionProgress
+from observability import get_query_analytics
 from pydantic import BaseModel
 from routes import check_rate_limit
 from sqlalchemy import desc, func, select
@@ -31,6 +32,38 @@ class ActivityItem(BaseModel):
 
 class ActivityFeed(BaseModel):
     items: list[ActivityItem]
+
+
+class QueryIntentStat(BaseModel):
+    intent: str
+    count: int
+
+
+class HitRateBucket(BaseModel):
+    bucket_start: datetime
+    queries: int
+    hits: int
+    hit_rate: float
+
+
+class ScopeUsageStat(BaseModel):
+    scope: str
+    count: int
+
+
+class AgentRetrievalShare(BaseModel):
+    agent_id: str
+    retrievals: int
+    share: float
+
+
+class DashboardAnalytics(BaseModel):
+    window_minutes: int
+    sample_size: int
+    top_query_intents: list[QueryIntentStat]
+    hit_rate_trend: list[HitRateBucket]
+    scope_usage_breakdown: list[ScopeUsageStat]
+    per_agent_retrieval_share: list[AgentRetrievalShare]
 
 @router.get("/stats", response_model=DashboardStats)
 async def get_dashboard_stats(
@@ -129,6 +162,19 @@ async def get_activity_feed(
         ))
 
     return ActivityFeed(items=items)
+
+
+
+@router.get("/analytics", response_model=DashboardAnalytics)
+async def get_dashboard_analytics(
+    window_minutes: int = 60,
+    bucket_minutes: int = 10,
+    project_id: str = Depends(check_rate_limit),
+):
+    """Return query analytics for ACE dashboard insights."""
+    _ = project_id  # project-scoped auth check already enforced
+    data = get_query_analytics(window_minutes=window_minutes, bucket_minutes=bucket_minutes)
+    return DashboardAnalytics(**data)
 
 @router.get("/sessions")
 async def get_all_sessions(
