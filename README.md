@@ -96,35 +96,41 @@ client.vote(memories[0].id, "helpful", voter_agent_id="assistant")
 
 ## Choosing the Right Memory Solution
 
-Different memory solutions excel at different problems. Here's when to choose what:
+Different memory tools solve different memory problems. This comparison stays focused on capabilities that are clearly documented in public docs/repos.[^comparison]
 
-| Use Case | Best Choice | Why |
-|----------|-------------|-----|
-| **Personal AI assistant** that remembers user preferences across sessions | **mem0** | Optimized for user personalization, graph-based relationships, managed platform with enterprise compliance |
-| **Second brain / knowledge base** with document sync from Drive, Notion | **Supermemory** | Built for personal knowledge management, document integrations, fast RAG retrieval |
-| **Multi-agent systems** where agents need to share knowledge with access control | **Aegis Memory** | Native scopes (`agent-private`/`agent-shared`/`global`), cross-agent queries, structured handoffs |
-| **Long-running agents** that need to track progress across context resets | **Aegis Memory** | Session progress tracking, feature completion tracking, survives context windows |
-| **Self-improving agents** that learn what works over time | **Aegis Memory** | ACE patterns: memory voting, playbooks, reflections |
-| **Enterprise chat** with compliance requirements (SOC 2, HIPAA) | **mem0** | Built-in enterprise controls, managed platform option |
+| If you need... | Usually pick | Reason |
+|---|---|---|
+| Personalized assistant memory (user/profile facts, retrieval) | **mem0** | Designed around persistent user/agent memory for assistants and copilots |
+| Personal/team "second brain" with ingestion + retrieval | **Supermemory** | Knowledge-base style memory with connectors and retrieval workflows |
+| Graph-native episodic memory over agent events | **Graphiti / Zep** | Focused on temporal + knowledge graph memory models |
+| Stateful agent runtime + built-in memory blocks | **Letta** | Agent framework centered on durable state and memory editing |
+| Multi-agent coordination with explicit access boundaries | **Aegis Memory** | Scope-aware ACLs (`agent-private` / `agent-shared` / `global`) plus cross-agent query APIs |
+| Cross-agent handoffs that preserve task context | **Aegis Memory** | Handoff baton primitives for structured state transfer between agents |
+| Self-improving memory loops (what worked / failed) | **Aegis Memory** | ACE patterns: vote, reflection, playbook |
 
 ### Quick Feature Comparison
 
-| Capability | mem0 | Supermemory | Aegis Memory |
-|------------|------|-------------|--------------|
-| **Primary Focus** | User personalization | Knowledge management | Multi-agent coordination |
-| **Open Source** | ✓ | ✓ | ✓ |
-| **Self-Hostable** | ✓ | ✓ | ✓ |
-| **Memory Scopes** | User, Session, Agent | Containers, Profiles | `agent-private`, `agent-shared`, `global` + ACL |
-| **Cross-Agent Queries** | — | — | ✓ With access control |
-| **Agent Handoffs** | — | — | ✓ Structured state transfer |
-| **Document Sync** | — | ✓ (Drive, Notion) | — |
-| **Graph Memory** | ✓ (Neo4j) | — | — |
-| **Memory Voting** | — | — | ✓ ACE patterns |
-| **Session Progress** | — | — | ✓ Survives context resets |
-| **Managed Platform** | ✓ | ✓ | Self-host only |
-| **Framework Support** | LangChain, CrewAI, AutoGen | MCP, Various | LangChain, CrewAI, LangGraph |
+| Capability | mem0 | Supermemory | Graphiti / Zep | Letta | Aegis Memory |
+|---|---|---|---|---|---|
+| **Primary focus** | Assistant personalization memory | Knowledge retrieval + synced context | Graph-based episodic/relational memory | Stateful agents with editable memory | Multi-agent memory coordination |
+| **Open source** | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Self-host posture** | Self-host options available | Self-host options available | Self-host options available | Self-host options available | Self-host-first |
+| **Graph-native memory model** | Partial / optional | — | ✓ | — | — |
+| **Built for multi-agent ACL/scopes** | — | — | — | — | ✓ |
+| **Cross-agent query with policy boundaries** | — | — | — | — | ✓ |
+| **Handoff baton / structured handoff state** | — | — | — | — | ✓ |
+| **ACE loop (vote / reflection / playbook)** | — | — | — | — | ✓ |
 
-> **Bottom line:** Choose mem0 for personalization, Supermemory for knowledge bases, Aegis for multi-agent systems.
+### When to pick Aegis (quick checklist)
+
+Pick **Aegis Memory** when most of these are true:
+
+- You need **multiple agents** to share memory safely with explicit ACL/scopes.
+- You need **handoffs** where one agent passes a reliable baton/state bundle to another.
+- You want **ACE patterns** (vote/reflection/playbook) to continuously improve memory quality.
+- You prefer a **self-host posture** with operational control over storage and deployment.
+
+> Compliance, pricing, and managed-service nuances are intentionally omitted from the main table; keep those in footnotes/docs so the core comparison remains verifiable.[^comparison]
 
 ## 15-Second Demo
 
@@ -478,3 +484,5 @@ Apache 2.0 — Use it however you want. See [LICENSE](LICENSE).
 ---
 
 Built with ❤️ for the agent community
+
+[^comparison]: Sources: [mem0 docs/repo](https://docs.mem0.ai/) · [Supermemory repo/docs](https://github.com/supermemoryai/supermemory) · [Graphiti repo](https://github.com/getzep/graphiti) and [Zep docs](https://help.getzep.com/) · [Letta docs/repo](https://github.com/letta-ai/letta) · [Aegis Memory docs](https://docs.aegismemory.com/).
