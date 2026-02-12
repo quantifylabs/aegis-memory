@@ -21,7 +21,7 @@ from models import Memory, MemoryScope
 from pydantic import BaseModel, Field, field_validator
 from rate_limiter import RateLimiter, RateLimitExceeded
 from scope_inference import ScopeInference
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
@@ -574,17 +574,13 @@ async def export_memories(
     if body.agent_id:
         conditions.append(Memory.agent_id == body.agent_id)
 
-    stmt = (
+    base_stmt = (
         select(Memory)
         .where(and_(*conditions))
-        .order_by(Memory.created_at)
+        .order_by(Memory.created_at, Memory.id)
     )
 
-    if body.limit:
-        stmt = stmt.limit(body.limit)
-
-    result = await db.execute(stmt)
-    memories = result.scalars().all()
+    chunk_size = 1000
 
     # Track stats
     namespaces = set()
@@ -616,22 +612,78 @@ async def export_memories(
 
         return data
 
+    async def iter_memories():
+        """Yield memories in stable chunks to keep memory bounded."""
+        fetched = 0
+        cursor_created_at = None
+        cursor_id = None
+
+        while True:
+            remaining = None
+            if body.limit is not None:
+                remaining = body.limit - fetched
+                if remaining <= 0:
+                    break
+
+            stmt = base_stmt
+            if cursor_created_at is not None and cursor_id is not None:
+                stmt = stmt.where(
+                    or_(
+                        Memory.created_at > cursor_created_at,
+                        and_(Memory.created_at == cursor_created_at, Memory.id > cursor_id),
+                    )
+                )
+
+            batch_limit = chunk_size if remaining is None else min(chunk_size, remaining)
+            stmt = stmt.limit(batch_limit)
+
+            result = await db.execute(stmt)
+            batch = result.scalars().all()
+            if not batch:
+                break
+
+            for mem in batch:
+                yield mem
+
+            fetched += len(batch)
+            last = batch[-1]
+            cursor_created_at = last.created_at
+            cursor_id = last.id
+
+            if len(batch) < batch_limit:
+                break
+
+    async def count_for_export() -> int:
+        """Return total rows honoring filters and optional limit."""
+        count_stmt = select(func.count()).where(and_(*conditions))
+        total = (await db.execute(count_stmt)).scalar_one()
+        if body.limit is not None:
+            return min(total, body.limit)
+        return total
+
     if body.format == "jsonl":
         # Stream JSONL for large exports
-        def generate():
-            for mem in memories:
+        total_exported = await count_for_export()
+
+        async def generate():
+            async for mem in iter_memories():
                 yield json.dumps(serialize_memory(mem)) + "\n"
 
         return StreamingResponse(
             generate(),
             media_type="application/x-ndjson",
             headers={
-                "Content-Disposition": f"attachment; filename=aegis_export_{project_id}.jsonl"
+                "Content-Disposition": f"attachment; filename=aegis_export_{project_id}.jsonl",
+                "X-Export-Total": str(total_exported),
+                "X-Export-Format": body.format,
             }
         )
     else:
         # Return full JSON
-        exported = [serialize_memory(mem) for mem in memories]
+        exported = []
+        async for mem in iter_memories():
+            exported.append(serialize_memory(mem))
+
         return {
             "memories": exported,
             "stats": {
