@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta
+from typing import Any
 
 from database import get_read_db
-from fastapi import APIRouter, Depends
-from models import FeatureTracker, Memory, MemoryType, SessionProgress
+from event_repository import EventRepository
+from fastapi import APIRouter, Depends, Query
+from models import FeatureTracker, Memory, MemoryEvent, MemoryType, SessionProgress
 from observability import get_query_analytics
 from pydantic import BaseModel
 from routes import check_rate_limit
@@ -11,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/memories/ace/dashboard", tags=["dashboard"])
 
+
 class DashboardStats(BaseModel):
     total_memories: int
     total_reflections: int
@@ -18,6 +21,7 @@ class DashboardStats(BaseModel):
     total_features: int
     recent_activity_count: int
     top_agents: list[dict]
+
 
 class ActivityItem(BaseModel):
     id: str
@@ -29,6 +33,7 @@ class ActivityItem(BaseModel):
     bullet_harmful: int
     created_at: datetime
     error_pattern: str | None
+
 
 class ActivityFeed(BaseModel):
     items: list[ActivityItem]
@@ -65,6 +70,24 @@ class DashboardAnalytics(BaseModel):
     scope_usage_breakdown: list[ScopeUsageStat]
     per_agent_retrieval_share: list[AgentRetrievalShare]
 
+
+class TimelineEvent(BaseModel):
+    event_id: str
+    memory_id: str | None
+    project_id: str
+    namespace: str
+    agent_id: str | None
+    event_type: str
+    event_payload: dict[str, Any]
+    created_at: datetime
+
+
+class TimelineResponse(BaseModel):
+    items: list[TimelineEvent]
+    limit: int
+    offset: int
+
+
 @router.get("/stats", response_model=DashboardStats)
 async def get_dashboard_stats(
     namespace: str = "default",
@@ -73,8 +96,6 @@ async def get_dashboard_stats(
 ):
     """Aggregate stats for the 'The Brain' view."""
 
-    # 1. Counts by type
-    # Note: In production, cache these queries or use estimates for scale
     total_memories = await db.scalar(
         select(func.count(Memory.id)).where(Memory.project_id == project_id)
     )
@@ -82,14 +103,14 @@ async def get_dashboard_stats(
     total_reflections = await db.scalar(
         select(func.count(Memory.id)).where(
             Memory.project_id == project_id,
-            Memory.memory_type == MemoryType.REFLECTION.value
+            Memory.memory_type == MemoryType.REFLECTION.value,
         )
     )
 
     total_strategies = await db.scalar(
         select(func.count(Memory.id)).where(
             Memory.project_id == project_id,
-            Memory.memory_type == MemoryType.STRATEGY.value
+            Memory.memory_type == MemoryType.STRATEGY.value,
         )
     )
 
@@ -97,16 +118,14 @@ async def get_dashboard_stats(
         select(func.count(FeatureTracker.id)).where(FeatureTracker.project_id == project_id)
     )
 
-    # 2. Activity in last 24h
     yesterday = datetime.utcnow() - timedelta(hours=24)
     recent_activity = await db.scalar(
         select(func.count(Memory.id)).where(
             Memory.project_id == project_id,
-            Memory.created_at >= yesterday
+            Memory.created_at >= yesterday,
         )
     )
 
-    # 3. Top Agents (by memory count)
     top_agents_result = await db.execute(
         select(Memory.agent_id, func.count(Memory.id).label("count"))
         .where(Memory.project_id == project_id, Memory.agent_id.is_not(None))
@@ -120,14 +139,16 @@ async def get_dashboard_stats(
         for row in top_agents_result
     ]
 
+    _ = namespace
     return DashboardStats(
         total_memories=total_memories or 0,
         total_reflections=total_reflections or 0,
         total_strategies=total_strategies or 0,
         total_features=total_features or 0,
         recent_activity_count=recent_activity or 0,
-        top_agents=top_agents
+        top_agents=top_agents,
     )
+
 
 @router.get("/activity", response_model=ActivityFeed)
 async def get_activity_feed(
@@ -149,20 +170,74 @@ async def get_activity_feed(
 
     items = []
     for m in memories:
-        items.append(ActivityItem(
-            id=m.id,
-            memory_type=m.memory_type,
-            content_preview=m.content[:200] + "..." if len(m.content) > 200 else m.content,
-            agent_id=m.agent_id,
-            effectiveness_score=m.get_effectiveness_score(),
-            bullet_helpful=m.bullet_helpful,
-            bullet_harmful=m.bullet_harmful,
-            created_at=m.created_at,
-            error_pattern=m.error_pattern
-        ))
+        items.append(
+            ActivityItem(
+                id=m.id,
+                memory_type=m.memory_type,
+                content_preview=m.content[:200] + "..." if len(m.content) > 200 else m.content,
+                agent_id=m.agent_id,
+                effectiveness_score=m.get_effectiveness_score(),
+                bullet_helpful=m.bullet_helpful,
+                bullet_harmful=m.bullet_harmful,
+                created_at=m.created_at,
+                error_pattern=m.error_pattern,
+            )
+        )
 
+    _ = namespace
     return ActivityFeed(items=items)
 
+
+@router.get("/timeline", response_model=TimelineResponse)
+async def get_project_timeline(
+    namespace: str | None = None,
+    event_types: list[str] | None = Query(default=None),
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_read_db),
+):
+    events = await EventRepository.get_project_timeline(
+        db,
+        project_id=project_id,
+        namespace=namespace,
+        event_types=event_types,
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+        offset=offset,
+    )
+    return TimelineResponse(
+        items=[_event_to_response(e) for e in events],
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/timeline/memory/{memory_id}", response_model=TimelineResponse)
+async def get_memory_timeline(
+    memory_id: str,
+    event_types: list[str] | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_read_db),
+):
+    events = await EventRepository.get_memory_timeline(
+        db,
+        project_id=project_id,
+        memory_id=memory_id,
+        event_types=event_types,
+        limit=limit,
+        offset=offset,
+    )
+    return TimelineResponse(
+        items=[_event_to_response(e) for e in events],
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.get("/analytics", response_model=DashboardAnalytics)
@@ -172,9 +247,10 @@ async def get_dashboard_analytics(
     project_id: str = Depends(check_rate_limit),
 ):
     """Return query analytics for ACE dashboard insights."""
-    _ = project_id  # project-scoped auth check already enforced
+    _ = project_id
     data = get_query_analytics(window_minutes=window_minutes, bucket_minutes=bucket_minutes)
     return DashboardAnalytics(**data)
+
 
 @router.get("/sessions")
 async def get_all_sessions(
@@ -192,4 +268,18 @@ async def get_all_sessions(
     )
     result = await db.execute(query)
     sessions = result.scalars().all()
+    _ = namespace
     return {"sessions": sessions}
+
+
+def _event_to_response(event: MemoryEvent) -> TimelineEvent:
+    return TimelineEvent(
+        event_id=event.event_id,
+        memory_id=event.memory_id,
+        project_id=event.project_id,
+        namespace=event.namespace,
+        agent_id=event.agent_id,
+        event_type=event.event_type,
+        event_payload=event.event_payload or {},
+        created_at=event.created_at,
+    )

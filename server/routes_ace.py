@@ -18,13 +18,14 @@ from datetime import datetime
 from typing import Any, Literal
 
 from ace_repository import ACERepository
+from event_repository import EventRepository
 from config import get_settings
 from database import get_db, get_read_db
 from embedding_service import get_embedding_service
 from eval_repository import EvalRepository
 from fastapi import APIRouter, Depends, HTTPException
 from memory_repository import MemoryRepository
-from models import FeatureStatus, MemoryScope, MemoryType
+from models import FeatureStatus, MemoryEventType, MemoryScope, MemoryType
 from pydantic import BaseModel, Field
 from routes import check_rate_limit
 from scope_inference import ScopeInference
@@ -246,6 +247,27 @@ class PlaybookResponse(BaseModel):
     query_time_ms: float
 
 
+async def _emit_event(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    namespace: str,
+    event_type: str,
+    memory_id: str | None = None,
+    agent_id: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    await EventRepository.create_event(
+        db,
+        memory_id=memory_id,
+        project_id=project_id,
+        namespace=namespace,
+        agent_id=agent_id,
+        event_type=event_type,
+        event_payload=payload or {},
+    )
+
+
 # ---------- Routes ----------
 
 @router.post("/vote/{memory_id}", response_model=VoteResponse)
@@ -356,6 +378,15 @@ async def apply_delta(
                                 memory_type=op.memory_type,
                             )
 
+                        await _emit_event(
+                            db,
+                            project_id=project_id,
+                            memory_id=mem.id,
+                            namespace=mem.namespace,
+                            agent_id=mem.agent_id,
+                            event_type=MemoryEventType.CREATED.value,
+                            payload={"source": "delta_add", "memory_type": mem.memory_type},
+                        )
                         record_operation(OperationNames.MEMORY_DELTA_ADD, "success")
                         results.append(DeltaResultItem(operation="add", success=True, memory_id=mem.id))
 
@@ -487,7 +518,7 @@ async def create_reflection(
 async def query_playbook(
     body: PlaybookQueryRequest,
     project_id: str = Depends(check_rate_limit),
-    db: AsyncSession = Depends(get_read_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Query the playbook for relevant strategies and reflections.
@@ -516,6 +547,15 @@ async def query_playbook(
     )
 
     elapsed_ms = (time.monotonic() - start) * 1000
+
+    await _emit_event(
+        db,
+        project_id=project_id,
+        namespace=body.namespace,
+        agent_id=body.agent_id,
+        event_type=MemoryEventType.QUERIED.value,
+        payload={"source": "playbook", "query": body.query, "result_count": len(results), "top_k": body.top_k},
+    )
 
     entries = [
         PlaybookEntry(

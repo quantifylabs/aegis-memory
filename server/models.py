@@ -68,6 +68,16 @@ class FeatureStatus(str, Enum):
     FAILED = "failed"
 
 
+class MemoryEventType(str, Enum):
+    CREATED = "created"
+    QUERIED = "queried"
+    VOTED_HELPFUL = "voted_helpful"
+    VOTED_HARMFUL = "voted_harmful"
+    DEPRECATED = "deprecated"
+    DELTA_UPDATED = "delta_updated"
+    REFLECTED = "reflected"
+
+
 class Memory(Base):
     """
     Production memory table with proper indexing strategy.
@@ -330,6 +340,25 @@ class EmbeddingCache(Base):
     model = Column(String(64), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     hit_count = Column(Integer, nullable=False, default=0)
+
+
+class MemoryEvent(Base):
+    """Timeline events for memory operations and ACE workflows."""
+    __tablename__ = "memory_events"
+
+    event_id = Column(String(32), primary_key=True)
+    memory_id = Column(String(32), ForeignKey("memories.id", ondelete="CASCADE"), nullable=True)
+    project_id = Column(String(64), nullable=False)
+    namespace = Column(String(64), nullable=False, default="default")
+    agent_id = Column(String(64), nullable=True)
+    event_type = Column(String(32), nullable=False)
+    event_payload = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index('ix_memory_events_project_created', 'project_id', 'created_at'),
+        Index('ix_memory_events_memory_created', 'memory_id', 'created_at'),
+    )
 
 
 # SQL to run after table creation (for pgvector setup)

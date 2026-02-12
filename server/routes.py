@@ -17,7 +17,8 @@ from database import get_db, get_read_db
 from embedding_service import content_hash, get_embedding_service
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from memory_repository import MemoryRepository
-from models import Memory, MemoryScope
+from event_repository import EventRepository
+from models import Memory, MemoryEventType, MemoryScope
 from pydantic import BaseModel, Field, field_validator
 from rate_limiter import RateLimiter, RateLimitExceeded
 from scope_inference import ScopeInference
@@ -180,6 +181,27 @@ async def check_rate_limit(project_id: str = Depends(get_project_id)):
     return project_id
 
 
+async def _emit_event(
+    db: AsyncSession,
+    *,
+    project_id: str,
+    namespace: str,
+    event_type: str,
+    memory_id: str | None = None,
+    agent_id: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    await EventRepository.create_event(
+        db,
+        memory_id=memory_id,
+        project_id=project_id,
+        namespace=namespace,
+        agent_id=agent_id,
+        event_type=event_type,
+        event_payload=payload or {},
+    )
+
+
 # ---------- Routes ----------
 
 @router.post("/add", response_model=AddResult)
@@ -238,6 +260,15 @@ async def add_memory(
                 coordination_metadata=body.coordination_metadata,
             )
             record_memory_stored_scope(resolved_scope.value)
+            await _emit_event(
+                db,
+                project_id=project_id,
+                memory_id=mem.id,
+                namespace=mem.namespace,
+                agent_id=mem.agent_id,
+                event_type=MemoryEventType.CREATED.value,
+                payload={"source": "add"},
+            )
 
             record_operation(OperationNames.MEMORY_ADD, "success")
             return AddResult(
@@ -323,6 +354,17 @@ async def add_memory_batch(
         for item in to_insert:
             record_memory_stored_scope(item["scope"])
 
+        for mem in memories:
+            await _emit_event(
+                db,
+                project_id=project_id,
+                memory_id=mem.id,
+                namespace=mem.namespace,
+                agent_id=mem.agent_id,
+                event_type=MemoryEventType.CREATED.value,
+                payload={"source": "add_batch"},
+            )
+
         # Fill in results
         mem_iter = iter(memories)
         for i in range(len(results)):
@@ -344,7 +386,7 @@ async def add_memory_batch(
 async def query_memories(
     body: MemoryQuery,
     project_id: str = Depends(check_rate_limit),
-    db: AsyncSession = Depends(get_read_db),  # Use read replica
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Semantic search over memories.
@@ -392,6 +434,19 @@ async def query_memories(
             for mem, score in results
         ]
 
+        await _emit_event(
+            db,
+            project_id=project_id,
+            namespace=body.namespace,
+            agent_id=body.agent_id,
+            event_type=MemoryEventType.QUERIED.value,
+            payload={
+                "query": body.query,
+                "result_count": len(memories),
+                "top_k": body.top_k,
+            },
+        )
+
         record_query_execution(
             source="query",
             duration_seconds=elapsed_ms / 1000,
@@ -415,7 +470,7 @@ async def query_memories(
 async def query_cross_agent(
     body: CrossAgentQuery,
     project_id: str = Depends(check_rate_limit),
-    db: AsyncSession = Depends(get_read_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Cross-agent semantic search with scope-aware access control.
@@ -463,6 +518,21 @@ async def query_cross_agent(
         )
         for mem, score in results
     ]
+
+    await _emit_event(
+        db,
+        project_id=project_id,
+        namespace=body.namespace,
+        agent_id=body.requesting_agent_id,
+        event_type=MemoryEventType.QUERIED.value,
+        payload={
+            "source": "query_cross_agent",
+            "query": body.query,
+            "result_count": len(memories),
+            "top_k": body.top_k,
+            "target_agent_ids": body.target_agent_ids or [],
+        },
+    )
 
     record_query_execution(
         source="query_cross_agent",
