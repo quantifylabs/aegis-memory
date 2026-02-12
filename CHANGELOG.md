@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CLI onboarding and productivity commands:
+  - `aegis init` top-level setup wizard with lightweight framework detection (LangChain/CrewAI) and config bootstrap
+  - `aegis new customer-support` starter template scaffold
+  - `aegis explore` interactive memory browser for terminal workflows
+
+### Changed
+
+- CLI command module wiring updated so top-level `init`, `new`, and `explore` commands load correctly.
+- CLI error utilities now include `set_debug_mode()` used by the Typer entrypoint.
+- CLI reference docs now document `aegis init`, `aegis new`, and `aegis explore`.
+
+
 ## [1.3.0] - 2026-02-06
 
 ### Added
