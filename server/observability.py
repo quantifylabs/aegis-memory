@@ -20,6 +20,7 @@ Usage:
 import json
 import logging
 import time
+import uuid
 from collections import Counter as CollectionCounter
 from collections import deque
 from collections.abc import Callable
@@ -28,6 +29,8 @@ from datetime import datetime
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
+
+from observability_events import EventEnvelope, enqueue_event
 
 # ============================================================================
 # Structured Logging
@@ -500,11 +503,17 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # Generate or extract request ID
+        # Generate or extract request / trace identifiers
         request_id = request.headers.get("X-Request-ID", f"req-{int(time.time() * 1000)}")
+        trace_id = request.headers.get("X-Trace-ID", str(uuid.uuid4()))
+        request.state.request_id = request_id
+        request.state.trace_id = trace_id
 
-        # Extract project ID from auth (if available)
-        project_id = getattr(request.state, "project_id", "unknown")
+        # Extract project and actor identifiers when present
+        project_id = request.headers.get("X-Project-ID") or getattr(request.state, "project_id", "unknown")
+        agent_id = request.headers.get("X-Agent-ID")
+        session_id = request.headers.get("X-Session-ID")
+        task_id = request.headers.get("X-Task-ID")
 
         # Set up logging context
         start = time.monotonic()
@@ -535,8 +544,8 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                 )
 
                 # Record metrics
+                endpoint = self._normalize_path(request.url.path)
                 if PROMETHEUS_AVAILABLE:
-                    endpoint = self._normalize_path(request.url.path)
                     REQUEST_COUNT.labels(
                         method=request.method,
                         endpoint=endpoint,
@@ -547,8 +556,28 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
                         endpoint=endpoint
                     ).observe(duration)
 
+                enqueue_event(
+                    EventEnvelope(
+                        trace_id=trace_id,
+                        request_id=request_id,
+                        project_id=project_id,
+                        agent_id=agent_id,
+                        session_id=session_id,
+                        task_id=task_id,
+                        event_type="http_request.completed",
+                        payload={
+                            "method": request.method,
+                            "path": request.url.path,
+                            "endpoint": endpoint,
+                            "status_code": status,
+                        },
+                        derived_metrics={"duration_ms": round(duration * 1000, 3)},
+                    )
+                )
+
         # Add tracing headers
         response.headers["X-Request-ID"] = request_id
+        response.headers["X-Trace-ID"] = trace_id
         response.headers["X-Response-Time"] = f"{duration * 1000:.2f}ms"
 
         return response

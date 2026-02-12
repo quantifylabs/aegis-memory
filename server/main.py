@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from observability import ObservabilityMiddleware
+from observability_events import get_event_pipeline
 from routes import router as memory_router
 from routes_ace import router as ace_router
 from routes_dashboard import router as dashboard_router
@@ -67,12 +68,18 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Could not load genesis playbook: {e}")
         # Non-fatal - continue startup
 
+    try:
+        await get_event_pipeline().start()
+    except Exception as e:
+        logger.warning(f"Observability event pipeline failed to start: {e}")
+
     logger.info("Aegis Memory API ready")
 
     yield
 
     # Shutdown
     logger.info("Aegis Memory API shutting down...")
+    await get_event_pipeline().stop()
 
 
 app = FastAPI(
