@@ -13,6 +13,16 @@ from rich.console import Console
 console = Console()
 
 
+_DEBUG_MODE = False
+
+
+def set_debug_mode(enabled: bool) -> None:
+    """Toggle debug mode for CLI error handling."""
+    global _DEBUG_MODE
+    _DEBUG_MODE = enabled
+
+
+
 class CLIError(Exception):
     """Base CLI error with exit code."""
 
@@ -161,6 +171,8 @@ def wrap_errors(func):
             console.print("\n[dim]Interrupted[/dim]")
             sys.exit(130)
         except Exception as e:
+            if _DEBUG_MODE:
+                raise
             exit_with_error(CLIError(f"Unexpected error: {str(e)}"))
 
     return wrapper

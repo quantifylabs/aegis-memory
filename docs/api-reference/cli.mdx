@@ -15,6 +15,33 @@ pip install aegis-memory
 
 ## Configuration
 
+### `aegis init`
+
+Top-level setup wizard with lightweight framework detection (LangChain/CrewAI) and config bootstrap.
+
+```bash
+aegis init              # Interactive wizard
+aegis init -y           # Non-interactive defaults
+```
+
+### `aegis new`
+
+Generate starter boilerplate from templates.
+
+```bash
+aegis new customer-support
+aegis new customer-support -o ./examples
+```
+
+### `aegis explore`
+
+Interactive memory browser from your terminal.
+
+```bash
+aegis explore
+aegis explore -q "login failures" -k 10
+```
+
 ### `aegis config init`
 
 Interactive first-run setup.
