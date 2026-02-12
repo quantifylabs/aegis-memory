@@ -3,6 +3,7 @@ from typing import Any
 
 from database import get_read_db
 from event_repository import EventRepository
+from eval_repository import EvalRepository
 from fastapi import APIRouter, Depends, Query
 from models import FeatureTracker, Memory, MemoryEvent, MemoryType, SessionProgress
 from observability import get_query_analytics
@@ -251,6 +252,70 @@ async def get_dashboard_analytics(
     data = get_query_analytics(window_minutes=window_minutes, bucket_minutes=bucket_minutes)
     return DashboardAnalytics(**data)
 
+
+
+
+@router.get("/effectiveness/overview")
+async def get_effectiveness_overview(
+    namespace: str | None = None,
+    window: str = "global",
+    min_samples: int = Query(default=5, ge=1, le=1000),
+    bayes_alpha: float = Query(default=1.0, gt=0.0, le=1000.0),
+    bayes_beta: float = Query(default=1.0, gt=0.0, le=1000.0),
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_read_db),
+):
+    return await EvalRepository.get_effectiveness_overview(
+        db,
+        project_id=project_id,
+        namespace=namespace,
+        window=window,
+        min_samples=min_samples,
+        alpha=bayes_alpha,
+        beta=bayes_beta,
+    )
+
+
+@router.get("/effectiveness/memories")
+async def get_effectiveness_memories(
+    namespace: str | None = None,
+    window: str = "global",
+    min_samples: int = Query(default=5, ge=1, le=1000),
+    bayes_alpha: float = Query(default=1.0, gt=0.0, le=1000.0),
+    bayes_beta: float = Query(default=1.0, gt=0.0, le=1000.0),
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_read_db),
+):
+    return await EvalRepository.get_effectiveness_memories(
+        db,
+        project_id=project_id,
+        namespace=namespace,
+        window=window,
+        min_samples=min_samples,
+        alpha=bayes_alpha,
+        beta=bayes_beta,
+    )
+
+
+@router.get("/effectiveness/segments")
+async def get_effectiveness_segments(
+    namespace: str | None = None,
+    window: str = "global",
+    min_samples: int = Query(default=5, ge=1, le=1000),
+    bayes_alpha: float = Query(default=1.0, gt=0.0, le=1000.0),
+    bayes_beta: float = Query(default=1.0, gt=0.0, le=1000.0),
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_read_db),
+):
+    return await EvalRepository.get_effectiveness_segments(
+        db,
+        project_id=project_id,
+        namespace=namespace,
+        window=window,
+        min_samples=min_samples,
+        alpha=bayes_alpha,
+        beta=bayes_beta,
+    )
 
 @router.get("/sessions")
 async def get_all_sessions(

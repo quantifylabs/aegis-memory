@@ -606,6 +606,9 @@ class ACERepository:
         verified_by: str | None = None,
         implementation_notes: str | None = None,
         failure_reason: str | None = None,
+        task_id: str | None = None,
+        retrieval_event_id: str | None = None,
+        selected_memory_ids: list[str] | None = None,
     ) -> FeatureTracker | None:
         """Update feature status."""
         result = await db.execute(
@@ -654,6 +657,9 @@ class ACERepository:
             agent_id=implemented_by or verified_by,
             event_type=MemoryEventType.DELTA_UPDATED.value,
             event_payload={"source": "feature", "feature_id": feature_id, "status": feature.status, "passes": feature.passes},
+            task_id=task_id or feature_id,
+            retrieval_event_id=retrieval_event_id,
+            selected_memory_ids=selected_memory_ids or [],
         )
 
         with track_latency(OperationNames.MEMORY_FEATURE_UPDATE):

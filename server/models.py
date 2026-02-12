@@ -352,12 +352,17 @@ class MemoryEvent(Base):
     namespace = Column(String(64), nullable=False, default="default")
     agent_id = Column(String(64), nullable=True)
     event_type = Column(String(32), nullable=False)
+    task_id = Column(String(128), nullable=True)
+    retrieval_event_id = Column(String(32), nullable=True)
+    selected_memory_ids = Column(JSON, nullable=False, default=list)
     event_payload = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
         Index('ix_memory_events_project_created', 'project_id', 'created_at'),
         Index('ix_memory_events_memory_created', 'memory_id', 'created_at'),
+        Index('ix_memory_events_project_task', 'project_id', 'task_id'),
+        Index('ix_memory_events_project_retrieval', 'project_id', 'retrieval_event_id'),
     )
 
 
@@ -396,6 +401,10 @@ CREATE INDEX IF NOT EXISTS ix_session_agent ON session_progress (project_id, age
 CREATE INDEX IF NOT EXISTS ix_feature_project ON feature_tracker (project_id, namespace);
 CREATE INDEX IF NOT EXISTS ix_feature_session ON feature_tracker (session_id);
 CREATE INDEX IF NOT EXISTS ix_feature_status ON feature_tracker (project_id, status);
+
+-- Effectiveness analytics linkage indexes
+CREATE INDEX IF NOT EXISTS ix_memory_events_project_task ON memory_events (project_id, task_id);
+CREATE INDEX IF NOT EXISTS ix_memory_events_project_retrieval ON memory_events (project_id, retrieval_event_id);
 """
 
 
@@ -474,4 +483,15 @@ CREATE INDEX IF NOT EXISTS ix_session_agent ON session_progress (project_id, age
 CREATE INDEX IF NOT EXISTS ix_feature_project ON feature_tracker (project_id, namespace);
 CREATE INDEX IF NOT EXISTS ix_feature_session ON feature_tracker (session_id);
 CREATE INDEX IF NOT EXISTS ix_feature_status ON feature_tracker (project_id, status);
+
+-- Effectiveness analytics linkage indexes
+CREATE INDEX IF NOT EXISTS ix_memory_events_project_task ON memory_events (project_id, task_id);
+CREATE INDEX IF NOT EXISTS ix_memory_events_project_retrieval ON memory_events (project_id, retrieval_event_id);
+
+-- Extend memory events with retrieval/task linkage for effectiveness analytics
+ALTER TABLE memory_events ADD COLUMN IF NOT EXISTS task_id VARCHAR(128);
+ALTER TABLE memory_events ADD COLUMN IF NOT EXISTS retrieval_event_id VARCHAR(32);
+ALTER TABLE memory_events ADD COLUMN IF NOT EXISTS selected_memory_ids JSONB DEFAULT '[]';
+CREATE INDEX IF NOT EXISTS ix_memory_events_project_task ON memory_events (project_id, task_id);
+CREATE INDEX IF NOT EXISTS ix_memory_events_project_retrieval ON memory_events (project_id, retrieval_event_id);
 """

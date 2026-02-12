@@ -18,7 +18,7 @@ from embedding_service import content_hash, get_embedding_service
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from memory_repository import MemoryRepository
 from event_repository import EventRepository
-from models import Memory, MemoryEventType, MemoryScope
+from models import Memory, MemoryEvent, MemoryEventType, MemoryScope
 from pydantic import BaseModel, Field, field_validator
 from rate_limiter import RateLimiter, RateLimitExceeded
 from scope_inference import ScopeInference
@@ -69,6 +69,8 @@ class MemoryQuery(BaseModel):
     query: str = Field(..., min_length=1, max_length=10_000)
     user_id: str | None = None
     agent_id: str | None = None
+    task_id: str | None = Field(default=None, max_length=128)
+    selected_memory_ids: list[str] | None = None
     scope: str | None = None
     namespace: str = "default"
     top_k: int = Field(default=10, ge=1, le=100)
@@ -80,6 +82,8 @@ class CrossAgentQuery(BaseModel):
     requesting_agent_id: str = Field(..., min_length=1, max_length=64)
     target_agent_ids: list[str] | None = None
     user_id: str | None = None
+    task_id: str | None = Field(default=None, max_length=128)
+    selected_memory_ids: list[str] | None = None
     scope: str | None = None
     namespace: str = "default"
     top_k: int = Field(default=10, ge=1, le=100)
@@ -128,6 +132,7 @@ class AddBatchResult(BaseModel):
 class QueryResult(BaseModel):
     memories: list[MemoryOut]
     query_time_ms: float
+    retrieval_event_id: str | None = None
 
 
 class HandoffBaton(BaseModel):
@@ -190,8 +195,11 @@ async def _emit_event(
     memory_id: str | None = None,
     agent_id: str | None = None,
     payload: dict[str, Any] | None = None,
-) -> None:
-    await EventRepository.create_event(
+    task_id: str | None = None,
+    retrieval_event_id: str | None = None,
+    selected_memory_ids: list[str] | None = None,
+) -> MemoryEvent:
+    return await EventRepository.create_event(
         db,
         memory_id=memory_id,
         project_id=project_id,
@@ -199,6 +207,9 @@ async def _emit_event(
         agent_id=agent_id,
         event_type=event_type,
         event_payload=payload or {},
+        task_id=task_id,
+        retrieval_event_id=retrieval_event_id,
+        selected_memory_ids=selected_memory_ids,
     )
 
 
@@ -260,7 +271,7 @@ async def add_memory(
                 coordination_metadata=body.coordination_metadata,
             )
             record_memory_stored_scope(resolved_scope.value)
-            await _emit_event(
+            retrieval_event = retrieval_event = await _emit_event(
                 db,
                 project_id=project_id,
                 memory_id=mem.id,
@@ -355,7 +366,7 @@ async def add_memory_batch(
             record_memory_stored_scope(item["scope"])
 
         for mem in memories:
-            await _emit_event(
+            retrieval_event = await _emit_event(
                 db,
                 project_id=project_id,
                 memory_id=mem.id,
@@ -434,7 +445,8 @@ async def query_memories(
             for mem, score in results
         ]
 
-        await _emit_event(
+        retrieved_ids = [mem.id for mem, _ in results]
+        retrieval_event = await _emit_event(
             db,
             project_id=project_id,
             namespace=body.namespace,
@@ -445,6 +457,8 @@ async def query_memories(
                 "result_count": len(memories),
                 "top_k": body.top_k,
             },
+            task_id=body.task_id,
+            selected_memory_ids=body.selected_memory_ids or retrieved_ids,
         )
 
         record_query_execution(
@@ -460,7 +474,7 @@ async def query_memories(
         )
 
         record_operation(OperationNames.MEMORY_QUERY, "success")
-        return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2))
+        return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2), retrieval_event_id=retrieval_event.event_id)
     except Exception:
         record_operation(OperationNames.MEMORY_QUERY, "error")
         raise
@@ -519,7 +533,7 @@ async def query_cross_agent(
         for mem, score in results
     ]
 
-    await _emit_event(
+    retrieval_event = await _emit_event(
         db,
         project_id=project_id,
         namespace=body.namespace,
@@ -532,6 +546,8 @@ async def query_cross_agent(
             "top_k": body.top_k,
             "target_agent_ids": body.target_agent_ids or [],
         },
+        task_id=body.task_id,
+        selected_memory_ids=body.selected_memory_ids or [mem.id for mem, _ in results],
     )
 
     record_query_execution(
@@ -546,7 +562,7 @@ async def query_cross_agent(
         retrieved_agent_ids=[mem.agent_id for mem, _ in results if mem.agent_id],
     )
 
-    return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2))
+    return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2), retrieval_event_id=retrieval_event.event_id)
 
 
 @router.post("/handoff", response_model=HandoffBaton)

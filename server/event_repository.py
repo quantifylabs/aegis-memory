@@ -23,6 +23,9 @@ class EventRepository:
         event_type: str,
         event_payload: dict[str, Any] | None = None,
         event_id: str | None = None,
+        task_id: str | None = None,
+        retrieval_event_id: str | None = None,
+        selected_memory_ids: list[str] | None = None,
     ) -> MemoryEvent:
         event = MemoryEvent(
             event_id=event_id or secrets.token_hex(16),
@@ -31,6 +34,9 @@ class EventRepository:
             namespace=namespace,
             agent_id=agent_id,
             event_type=event_type,
+            task_id=task_id,
+            retrieval_event_id=retrieval_event_id,
+            selected_memory_ids=selected_memory_ids or [],
             event_payload=event_payload or {},
             created_at=datetime.now(timezone.utc),
         )
