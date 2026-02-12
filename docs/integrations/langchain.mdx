@@ -42,6 +42,22 @@ response = chain.predict(input="What's my name?")
 # Agent remembers: "Your name is John"
 ```
 
+## Async (LangGraph / FastAPI)
+
+For async orchestration (LangGraph async nodes, FastAPI endpoints), use `AsyncAegisClient`:
+
+```python
+from aegis_memory import AsyncAegisClient
+
+async def graph_node(state):
+    async with AsyncAegisClient(api_key="your-aegis-key") as client:
+        await client.add(state["message"], agent_id="planner")
+        memories = await client.query("plan context", agent_id="planner")
+        return {"memories": [m.content for m in memories]}
+```
+
+The async client keeps API parity for add/query/vote/session/feature workflows while remaining event-loop friendly.
+
 ## Features
 
 <CardGroup cols={2}>
