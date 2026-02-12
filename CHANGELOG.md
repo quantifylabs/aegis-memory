@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `aegis init` top-level setup wizard with lightweight framework detection (LangChain/CrewAI) and config bootstrap
   - `aegis new customer-support` starter template scaffold
   - `aegis explore` interactive memory browser for terminal workflows
+- New observability guide with architecture and phased plan for memory analytics, Prometheus expansion, memory timeline events, effectiveness dashboards, and Langfuse/LangSmith exports (`docs/guides/observability.mdx`).
 
 ### Changed
 
