@@ -25,6 +25,16 @@
 
 Aegis Memory is a production-ready, self-hostable memory engine designed for multi-agent systems. It provides semantic search, scope-aware access control, and ACE (Agentic Context Engineering) patterns that help agents learn and improve over time.
 
+## Get productive in 2 minutes
+
+For first-time setup, starter scaffolding, and debugging memory quality, start with the CLI flow:
+
+1. `aegis init`
+2. `aegis new <template>`
+3. `aegis explore`
+
+See the [CLI API reference](docs/api-reference/cli.mdx) for command details.
+
 ## Quick Start: Smart Memory (Zero Config)
 
 ```python
