@@ -163,13 +163,16 @@ class RedisRateLimiter:
         minute_count = results[2]
         hour_count = results[3]
 
-        if minute_count > self.config.requests_per_minute:
+        projected_minute_count = minute_count + 1
+        projected_hour_count = hour_count + 1
+
+        if projected_minute_count > self.config.requests_per_minute:
             raise RateLimitExceeded(
                 f"Rate limit exceeded: {self.config.requests_per_minute}/minute",
                 retry_after=60
             )
 
-        if hour_count > self.config.requests_per_hour:
+        if projected_hour_count > self.config.requests_per_hour:
             raise RateLimitExceeded(
                 f"Rate limit exceeded: {self.config.requests_per_hour}/hour",
                 retry_after=3600
