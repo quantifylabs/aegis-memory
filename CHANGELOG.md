@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CLI command module wiring updated so top-level `init`, `new`, and `explore` commands load correctly.
 - CLI error utilities now include `set_debug_mode()` used by the Typer entrypoint.
 - CLI reference docs now document `aegis init`, `aegis new`, and `aegis explore`.
+- README now highlights observability surfaces (metrics, evaluation, dashboard APIs) and links directly to the new observability guide.
 
 
 ## [1.3.0] - 2026-02-06

@@ -17,7 +17,8 @@
   <a href="https://docs.aegismemory.com/introduction/overview">Docs</a> •
   <a href="https://www.aegismemory.com/blog/">Blog</a> •
   <a href="https://docs.aegismemory.com/quickstart/installation">Quickstart</a> •
-  <a href="https://docs.aegismemory.com/integrations/crewai">Integrations</a>
+  <a href="https://docs.aegismemory.com/integrations/crewai">Integrations</a> •
+  <a href="https://docs.aegismemory.com/guides/observability">Observability</a>
 </p>
 
 ---
@@ -163,6 +164,14 @@ aegis demo --log
 - **Observable** — Prometheus metrics, structured logging
 - **Fast** — 30-80ms queries on 1M+ memories
 - **Safe** — Data export, migrations, no vendor lock-in
+
+### Observability & Evaluation
+- **Metrics endpoint** — `/metrics` for Prometheus scraping (request, operation, cache, and ACE counters)
+- **Evaluation harness APIs** — `/memories/ace/eval/metrics` and `/memories/ace/eval/correlation`
+- **Dashboard APIs** — `/memories/ace/dashboard/stats`, `/activity`, `/sessions`
+- **Design roadmap** — Memory analytics, timeline events, effectiveness attribution, and Langfuse/LangSmith export plan
+
+**[→ Observability Guide](https://docs.aegismemory.com/guides/observability)**
 
 ## Quick Start
 
