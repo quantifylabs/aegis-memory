@@ -174,6 +174,9 @@ class FeatureUpdate(BaseModel):
     verified_by: str | None = None
     implementation_notes: str | None = None
     failure_reason: str | None = None
+    task_id: str | None = Field(default=None, max_length=128)
+    retrieval_event_id: str | None = Field(default=None, max_length=32)
+    selected_memory_ids: list[str] | None = None
 
 
 class FeatureResponse(BaseModel):
@@ -788,6 +791,9 @@ async def update_feature(
                 verified_by=body.verified_by,
                 implementation_notes=body.implementation_notes,
                 failure_reason=body.failure_reason,
+                task_id=body.task_id,
+                retrieval_event_id=body.retrieval_event_id,
+                selected_memory_ids=body.selected_memory_ids,
             )
 
         if not feature:
