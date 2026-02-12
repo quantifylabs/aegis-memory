@@ -293,6 +293,10 @@ client.reflection(
 
 ## Performance
 
+_Methodology (preliminary): figures below come from local benchmark runs over 1M memories on a 16 vCPU / 64 GB RAM host with top-k=10 semantic queries; see benchmark source/reproduction notes in [`docs/guides/performance-benchmarks.mdx`](docs/guides/performance-benchmarks.mdx), including dataset size, hardware profile, and query parameters._ 
+
+> ⚠️ These latency numbers are provisional until benchmark artifacts are published in the benchmark guide.
+
 | Operation | Latency | Notes |
 |-----------|---------|-------|
 | Query (1M memories) | 30-80ms | HNSW index |
