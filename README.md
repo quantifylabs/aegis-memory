@@ -42,7 +42,7 @@ memory.process_turn(
     user_id="user_123"
 )
 # Stores: "User's name is John", "User is a Python developer", 
-#         "User is based in Mnachester", "User prefers dark mode"
+#         "User is based in Manchester", "User prefers dark mode"
 
 # Get relevant context for any query
 context = memory.get_context("What theme should I use?", user_id="user_123")
@@ -77,7 +77,7 @@ client.vote(memories[0].id, "helpful", voter_agent_id="assistant")
 
 | Challenge | DIY Solution | Aegis Memory |
 |-----------|--------------|--------------|
-| Multi-agent memory sharing | Custom access control | Built-in scopes (private/shared/global) |
+| Multi-agent memory sharing | Custom access control | Built-in scopes (`agent-private`/`agent-shared`/`global`) |
 | Long-running agent state | File-based progress tracking | Structured session & feature tracking |
 | Context window limits | Dump everything in prompt | Semantic search + effectiveness scoring |
 | Learning from mistakes | Manual prompt tuning | Memory voting + reflection patterns |
@@ -92,7 +92,7 @@ Different memory solutions excel at different problems. Here's when to choose wh
 |----------|-------------|-----|
 | **Personal AI assistant** that remembers user preferences across sessions | **mem0** | Optimized for user personalization, graph-based relationships, managed platform with enterprise compliance |
 | **Second brain / knowledge base** with document sync from Drive, Notion | **Supermemory** | Built for personal knowledge management, document integrations, fast RAG retrieval |
-| **Multi-agent systems** where agents need to share knowledge with access control | **Aegis Memory** | Native scopes (private/shared/global), cross-agent queries, structured handoffs |
+| **Multi-agent systems** where agents need to share knowledge with access control | **Aegis Memory** | Native scopes (`agent-private`/`agent-shared`/`global`), cross-agent queries, structured handoffs |
 | **Long-running agents** that need to track progress across context resets | **Aegis Memory** | Session progress tracking, feature completion tracking, survives context windows |
 | **Self-improving agents** that learn what works over time | **Aegis Memory** | ACE patterns: memory voting, playbooks, reflections |
 | **Enterprise chat** with compliance requirements (SOC 2, HIPAA) | **mem0** | Built-in enterprise controls, managed platform option |
@@ -104,7 +104,7 @@ Different memory solutions excel at different problems. Here's when to choose wh
 | **Primary Focus** | User personalization | Knowledge management | Multi-agent coordination |
 | **Open Source** | ✓ | ✓ | ✓ |
 | **Self-Hostable** | ✓ | ✓ | ✓ |
-| **Memory Scopes** | User, Session, Agent | Containers, Profiles | Private, Shared, Global + ACL |
+| **Memory Scopes** | User, Session, Agent | Containers, Profiles | `agent-private`, `agent-shared`, `global` + ACL |
 | **Cross-Agent Queries** | — | — | ✓ With access control |
 | **Agent Handoffs** | — | — | ✓ Structured state transfer |
 | **Document Sync** | — | ✓ (Drive, Notion) | — |
@@ -182,7 +182,7 @@ git clone https://github.com/quantifylabs/aegis-memory.git
 cd aegis-memory
 
 export OPENAI_API_KEY=sk-...
-docker-compose up -d
+docker compose up -d
 
 curl http://localhost:8000/health
 # {"status": "healthy"}
@@ -315,7 +315,7 @@ client.reflection(
 ### Docker Compose
 
 ```bash
-docker-compose up -d
+docker compose up -d
 ```
 
 ### Kubernetes
