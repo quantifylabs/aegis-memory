@@ -319,6 +319,21 @@ class TestAPIEndpoints:
         data = vote_response.json()
         assert data["bullet_helpful"] == 1
 
+    @pytest.mark.asyncio
+    async def test_vote_missing_memory_returns_404(self, test_client, auth_headers):
+        """Test voting on a missing memory returns 404 instead of 500."""
+        response = await test_client.post(
+            "/memories/ace/vote/missing-memory-id",
+            json={
+                "vote": "helpful",
+                "voter_agent_id": "voter-agent",
+                "context": "Should not create vote history",
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 404
+
 
 class TestACEEndpoints:
     """Test ACE-specific endpoints."""
@@ -441,6 +456,8 @@ def test_client():
             elif "query" in url:
                 return MockResponse(200, {"memories": [], "query_time_ms": 10})
             elif "vote" in url:
+                if url.endswith("/missing-memory-id"):
+                    return MockResponse(404, {"detail": "Memory not found"})
                 return MockResponse(200, {"memory_id": "test", "bullet_helpful": 1, "bullet_harmful": 0, "effectiveness_score": 0.5})
             elif "delta" in url:
                 return MockResponse(200, {"results": [{"operation": "add", "success": True, "memory_id": "new-id"}], "total_time_ms": 50})

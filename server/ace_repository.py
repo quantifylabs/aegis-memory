@@ -55,7 +55,19 @@ class ACERepository:
 
         Returns the updated memory or None if not found.
         """
-        # Create vote history record
+        # Validate memory exists in the same transaction before staging vote
+        result = await db.execute(
+            select(Memory.id).where(
+                and_(
+                    Memory.id == memory_id,
+                    Memory.project_id == project_id,
+                )
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            return None
+
+        # Create vote history record only after existence check
         vote_record = VoteHistory(
             id=generate_id(),
             memory_id=memory_id,
@@ -108,11 +120,8 @@ class ACERepository:
                 )
             )
 
-        result = await db.execute(stmt)
-        updated_id = result.scalar_one_or_none()
-
-        if not updated_id:
-            return None
+        if vote in {"helpful", "harmful"}:
+            await db.execute(stmt)
 
         await db.commit()
 
