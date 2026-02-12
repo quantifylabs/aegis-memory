@@ -21,7 +21,13 @@ from models import Memory, MemoryScope
 from pydantic import BaseModel, Field, field_validator
 from rate_limiter import RateLimiter, RateLimitExceeded
 from scope_inference import ScopeInference
-from observability import OperationNames, record_operation, track_latency
+from observability import (
+    OperationNames,
+    record_memory_stored_scope,
+    record_operation,
+    record_query_execution,
+    track_latency,
+)
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,6 +68,7 @@ class MemoryQuery(BaseModel):
     query: str = Field(..., min_length=1, max_length=10_000)
     user_id: str | None = None
     agent_id: str | None = None
+    scope: str | None = None
     namespace: str = "default"
     top_k: int = Field(default=10, ge=1, le=100)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -72,6 +79,7 @@ class CrossAgentQuery(BaseModel):
     requesting_agent_id: str = Field(..., min_length=1, max_length=64)
     target_agent_ids: list[str] | None = None
     user_id: str | None = None
+    scope: str | None = None
     namespace: str = "default"
     top_k: int = Field(default=10, ge=1, le=100)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
@@ -229,6 +237,7 @@ async def add_memory(
                 derived_from_agents=body.derived_from_agents,
                 coordination_metadata=body.coordination_metadata,
             )
+            record_memory_stored_scope(resolved_scope.value)
 
             record_operation(OperationNames.MEMORY_ADD, "success")
             return AddResult(
@@ -311,6 +320,8 @@ async def add_memory_batch(
     # Bulk insert
     if to_insert:
         memories = await MemoryRepository.add_batch(db, to_insert)
+        for item in to_insert:
+            record_memory_stored_scope(item["scope"])
 
         # Fill in results
         mem_iter = iter(memories)
@@ -348,7 +359,7 @@ async def query_memories(
             embed_service = get_embedding_service()
             query_embedding = await embed_service.embed_single(body.query, db)
 
-            results = await MemoryRepository.semantic_search(
+            results, query_meta = await MemoryRepository.semantic_search(
                 db,
                 query_embedding=query_embedding,
                 project_id=project_id,
@@ -358,6 +369,7 @@ async def query_memories(
                 requesting_agent_id=body.agent_id,  # Same agent for single-agent query
                 top_k=body.top_k,
                 min_score=body.min_score,
+                requested_scope=body.scope,
             )
 
         elapsed_ms = (time.monotonic() - start) * 1000
@@ -379,6 +391,18 @@ async def query_memories(
             )
             for mem, score in results
         ]
+
+        record_query_execution(
+            source="query",
+            duration_seconds=elapsed_ms / 1000,
+            total_returned=len(memories),
+            requested_scope=body.scope,
+            effective_scope=query_meta["effective_scope"],
+            target_agent_ids_used=False,
+            query_text=body.query,
+            retrieved_scopes=[mem.scope for mem, _ in results],
+            retrieved_agent_ids=[mem.agent_id for mem, _ in results if mem.agent_id],
+        )
 
         record_operation(OperationNames.MEMORY_QUERY, "success")
         return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2))
@@ -407,7 +431,7 @@ async def query_cross_agent(
     embed_service = get_embedding_service()
     query_embedding = await embed_service.embed_single(body.query, db)
 
-    results = await MemoryRepository.semantic_search(
+    results, query_meta = await MemoryRepository.semantic_search(
         db,
         query_embedding=query_embedding,
         project_id=project_id,
@@ -417,6 +441,7 @@ async def query_cross_agent(
         target_agent_ids=body.target_agent_ids,
         top_k=body.top_k,
         min_score=body.min_score,
+        requested_scope=body.scope,
     )
 
     elapsed_ms = (time.monotonic() - start) * 1000
@@ -438,6 +463,18 @@ async def query_cross_agent(
         )
         for mem, score in results
     ]
+
+    record_query_execution(
+        source="query_cross_agent",
+        duration_seconds=elapsed_ms / 1000,
+        total_returned=len(memories),
+        requested_scope=body.scope,
+        effective_scope=query_meta["effective_scope"],
+        target_agent_ids_used=bool(body.target_agent_ids),
+        query_text=body.query,
+        retrieved_scopes=[mem.scope for mem, _ in results],
+        retrieved_agent_ids=[mem.agent_id for mem, _ in results if mem.agent_id],
+    )
 
     return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2))
 
