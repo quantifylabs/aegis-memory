@@ -1,0 +1,96 @@
+---
+title: "MCP Clients (Claude Code + IDEs)"
+description: "Run Aegis Memory as an MCP server and connect from Claude Code and popular IDE MCP clients."
+---
+
+## Overview
+
+Aegis ships an MCP server entrypoint (`aegis-mcp`) that exposes memory tools and read-only resources.
+
+### Exposed MCP tools
+
+- `add_memory`
+- `query_memory`
+- `cross_agent_query`
+- `vote_memory`
+- `add_reflection`
+- `update_session`
+- `list_features`
+
+### Exposed MCP resources
+
+- `aegis://memories/recent`
+- `aegis://session/state`
+- `aegis://features/status`
+
+## 1) Install and configure
+
+```bash
+pip install "aegis-memory"
+```
+
+Set environment variables for the MCP process:
+
+```bash
+export AEGIS_API_KEY="your-api-key"
+export AEGIS_BASE_URL="http://localhost:8000"
+# optional
+export AEGIS_TIMEOUT_SECONDS="30"
+```
+
+You can sanity-check startup with:
+
+```bash
+aegis-mcp
+```
+
+(Your MCP client should launch this process over stdio, so running it manually should appear idle.)
+
+## 2) Claude Code setup
+
+Add the Aegis MCP server in your Claude Code MCP config (example):
+
+```json
+{
+  "mcpServers": {
+    "aegis-memory": {
+      "command": "aegis-mcp",
+      "env": {
+        "AEGIS_API_KEY": "your-api-key",
+        "AEGIS_BASE_URL": "http://localhost:8000"
+      }
+    }
+  }
+}
+```
+
+After reload, ask Claude to list tools/resources from `aegis-memory` and run a smoke command such as querying memories.
+
+## 3) IDE MCP client setup
+
+Most IDE integrations (Cursor, Continue, Cline, Windsurf, Roo Code) use the same stdio MCP shape: a command and optional env.
+
+Use this generic server block:
+
+```json
+{
+  "name": "aegis-memory",
+  "command": "aegis-mcp",
+  "env": {
+    "AEGIS_API_KEY": "your-api-key",
+    "AEGIS_BASE_URL": "http://localhost:8000"
+  }
+}
+```
+
+### Suggested first checks
+
+1. Call `list_features` for namespace `default`.
+2. Call `query_memory` with a short query and `top_k=3`.
+3. Read `aegis://features/status`.
+
+If checks fail, verify:
+
+- Aegis API server is reachable from the IDE host.
+- `AEGIS_API_KEY` matches server configuration.
+- The MCP client can execute `aegis-mcp` from your active Python environment.
