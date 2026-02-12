@@ -1,22 +1,8 @@
-"""
-Aegis Memory Observability
+"""Aegis Memory observability bridge for OTEL, metrics, and timeline events."""
 
-Structured logging and Prometheus metrics for production monitoring.
+from __future__ import annotations
 
-Features:
-- Structured JSON logging
-- Request tracing with correlation IDs
-- Prometheus metrics endpoint
-- Operation latency tracking
-- Error rate monitoring
-
-Usage:
-    # Logging is automatic via middleware
-
-    # Access metrics at /metrics
-    curl http://localhost:8000/metrics
-"""
-
+import contextvars
 import json
 import logging
 import time
@@ -26,33 +12,24 @@ from collections import deque
 from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime
+from typing import Any
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from observability_events import EventEnvelope, enqueue_event
 
-# ============================================================================
-# Structured Logging
-# ============================================================================
+# Optional OpenTelemetry wiring (migration-safe)
+try:
+    from opentelemetry import metrics, trace
+    from opentelemetry.trace import SpanKind, Status, StatusCode
+
+    OTEL_AVAILABLE = True
+except ImportError:  # pragma: no cover - optional dependency
+    OTEL_AVAILABLE = False
+
 
 class JSONFormatter(logging.Formatter):
-    """
-    JSON log formatter for structured logging.
-
-    Output format:
-    {
-        "timestamp": "2024-01-15T10:30:00.123Z",
-        "level": "INFO",
-        "logger": "aegis.memory",
-        "message": "Memory added",
-        "request_id": "abc-123",
-        "project_id": "proj-1",
-        "duration_ms": 45.2,
-        ...
-    }
-    """
-
     def format(self, record: logging.LogRecord) -> str:
         log_data = {
             "timestamp": datetime.utcnow().isoformat() + "Z",
@@ -60,62 +37,31 @@ class JSONFormatter(logging.Formatter):
             "logger": record.name,
             "message": record.getMessage(),
         }
-
-        # Add extra fields
-        if hasattr(record, "request_id"):
-            log_data["request_id"] = record.request_id
-        if hasattr(record, "project_id"):
-            log_data["project_id"] = record.project_id
-        if hasattr(record, "agent_id"):
-            log_data["agent_id"] = record.agent_id
-        if hasattr(record, "duration_ms"):
-            log_data["duration_ms"] = record.duration_ms
-        if hasattr(record, "operation"):
-            log_data["operation"] = record.operation
-        if hasattr(record, "memory_count"):
-            log_data["memory_count"] = record.memory_count
-
-        # Add exception info if present
+        for field in ("request_id", "project_id", "agent_id", "duration_ms", "operation", "memory_count"):
+            if hasattr(record, field):
+                log_data[field] = getattr(record, field)
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
-
         return json.dumps(log_data)
 
 
 def setup_logging(level: str = "INFO", json_format: bool = True):
-    """
-    Configure logging for Aegis Memory.
-
-    Args:
-        level: Log level (DEBUG, INFO, WARNING, ERROR)
-        json_format: If True, use JSON format for structured logging
-    """
     logger = logging.getLogger("aegis")
     logger.setLevel(getattr(logging, level.upper()))
-
-    # Remove existing handlers
     logger.handlers = []
-
-    # Add handler with appropriate formatter
     handler = logging.StreamHandler()
     if json_format:
         handler.setFormatter(JSONFormatter())
     else:
-        handler.setFormatter(logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        ))
-
+        handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
     logger.addHandler(handler)
     return logger
 
 
-# Create default logger
 logger = setup_logging()
 
 
 class OperationNames:
-    """Stable operation names for metrics/log aggregation."""
-
     MEMORY_ADD = "memory_add"
     MEMORY_ADD_BATCH = "memory_add_batch"
     MEMORY_QUERY = "memory_query"
@@ -125,33 +71,32 @@ class OperationNames:
     MEMORY_SEMANTIC_SEARCH = "memory_semantic_search"
     MEMORY_GET_BY_ID = "memory_get_by_id"
     MEMORY_GET_HANDOFF = "memory_get_handoff"
-
     MEMORY_VOTE = "memory_vote"
     MEMORY_DELTA = "memory_delta"
     MEMORY_DELTA_ADD = "memory_delta_add"
     MEMORY_DELTA_UPDATE = "memory_delta_update"
     MEMORY_DELTA_DEPRECATE = "memory_delta_deprecate"
     MEMORY_REFLECTION = "memory_reflection"
-
     MEMORY_SESSION_CREATE = "memory_session_create"
     MEMORY_SESSION_GET = "memory_session_get"
     MEMORY_SESSION_UPDATE = "memory_session_update"
-
     MEMORY_FEATURE_CREATE = "memory_feature_create"
     MEMORY_FEATURE_GET = "memory_feature_get"
     MEMORY_FEATURE_UPDATE = "memory_feature_update"
     MEMORY_FEATURE_LIST = "memory_feature_list"
 
 
+class SpanNames:
+    HTTP_REQUEST = "aegis.http.request"
+    MEMORY_OPERATION = "aegis.memory.operation"
+
+
+class EventNames:
+    HTTP_COMPLETED = "http_request.completed"
+    MEMORY_OPERATION = "memory.operation"
+
+
 class LogContext:
-    """
-    Context manager for adding fields to log records.
-
-    Usage:
-        with LogContext(request_id="abc", project_id="proj-1"):
-            logger.info("Processing request")  # Includes request_id and project_id
-    """
-
     _context = {}
 
     def __init__(self, **kwargs):
@@ -168,150 +113,144 @@ class LogContext:
 
 
 class ContextFilter(logging.Filter):
-    """Add context fields to log records."""
-
     def filter(self, record):
         for key, value in LogContext._context.items():
             setattr(record, key, value)
         return True
 
 
-# ============================================================================
-# Prometheus Metrics
-# ============================================================================
+_context_request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
+_context_project_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("project_id", default=None)
+_context_agent_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("agent_id", default=None)
+_context_trace_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("trace_id", default=None)
+
+
+class ObservabilityBridge:
+    """Bridge layer that enriches OTEL context and mirrors legacy Prometheus metrics."""
+
+    def __init__(self):
+        if OTEL_AVAILABLE:
+            self.tracer = trace.get_tracer("aegis.observability")
+            self.meter = metrics.get_meter("aegis.observability")
+            self.http_counter = self.meter.create_counter("aegis.http.requests")
+            self.http_latency = self.meter.create_histogram("aegis.http.request.duration", unit="s")
+            self.memory_counter = self.meter.create_counter("aegis.memory.operations")
+            self.memory_latency = self.meter.create_histogram("aegis.memory.operation.duration", unit="s")
+        else:
+            self.tracer = None
+            self.meter = None
+            self.http_counter = None
+            self.http_latency = None
+            self.memory_counter = None
+            self.memory_latency = None
+
+    def current(self) -> dict[str, str | None]:
+        return {
+            "request_id": _context_request_id.get(),
+            "project_id": _context_project_id.get(),
+            "agent_id": _context_agent_id.get(),
+            "trace_id": _context_trace_id.get(),
+        }
+
+    def set_context(self, *, request_id: str, project_id: str, agent_id: str | None, trace_id: str):
+        return (
+            _context_request_id.set(request_id),
+            _context_project_id.set(project_id),
+            _context_agent_id.set(agent_id),
+            _context_trace_id.set(trace_id),
+        )
+
+    def reset_context(self, tokens):
+        _context_request_id.reset(tokens[0])
+        _context_project_id.reset(tokens[1])
+        _context_agent_id.reset(tokens[2])
+        _context_trace_id.reset(tokens[3])
+
+    def active_span(self):
+        if not OTEL_AVAILABLE:
+            return None
+        return trace.get_current_span()
+
+    def emit_span_event(self, name: str, attributes: dict[str, Any] | None = None) -> None:
+        span = self.active_span()
+        if span is not None:
+            span.add_event(name, attributes=attributes or {})
+
+    def emit_timeline_event(
+        self,
+        *,
+        event_type: str,
+        payload: dict[str, Any],
+        derived_metrics: dict[str, Any] | None = None,
+        session_id: str | None = None,
+        task_id: str | None = None,
+    ):
+        ctx = self.current()
+        project_id = ctx["project_id"] or "unknown"
+        enqueue_event(
+            EventEnvelope(
+                trace_id=ctx["trace_id"] or str(uuid.uuid4()),
+                request_id=ctx["request_id"],
+                project_id=project_id,
+                agent_id=ctx["agent_id"],
+                session_id=session_id,
+                task_id=task_id,
+                event_type=event_type,
+                payload=payload,
+                derived_metrics=derived_metrics or {},
+            )
+        )
+
+
+OBS_BRIDGE = ObservabilityBridge()
 
 try:
     from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
 
-
 if PROMETHEUS_AVAILABLE:
-    # Request metrics
-    REQUEST_COUNT = Counter(
-        "aegis_http_requests_total",
-        "Total HTTP requests",
-        ["method", "endpoint", "status"]
-    )
-
+    REQUEST_COUNT = Counter("aegis_http_requests_total", "Total HTTP requests", ["method", "endpoint", "status"])
     REQUEST_LATENCY = Histogram(
         "aegis_http_request_duration_seconds",
         "HTTP request latency",
         ["method", "endpoint"],
-        buckets=[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+        buckets=[0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
     )
-
-    # Memory operation metrics
-    MEMORY_OPERATIONS = Counter(
-        "aegis_memory_operations_total",
-        "Total memory operations",
-        ["operation", "status"]  # operation: add, query, delete, vote
-    )
-
+    MEMORY_OPERATIONS = Counter("aegis_memory_operations_total", "Total memory operations", ["operation", "status"])
     MEMORY_OPERATION_LATENCY = Histogram(
         "aegis_memory_operation_duration_seconds",
         "Memory operation latency",
         ["operation"],
-        buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0]
+        buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0],
     )
-
-    # Embedding metrics
-    EMBEDDING_CACHE_HITS = Counter(
-        "aegis_embedding_cache_hits_total",
-        "Embedding cache hits"
-    )
-
-    EMBEDDING_CACHE_MISSES = Counter(
-        "aegis_embedding_cache_misses_total",
-        "Embedding cache misses"
-    )
-
+    EMBEDDING_CACHE_HITS = Counter("aegis_embedding_cache_hits_total", "Embedding cache hits")
+    EMBEDDING_CACHE_MISSES = Counter("aegis_embedding_cache_misses_total", "Embedding cache misses")
     EMBEDDING_LATENCY = Histogram(
         "aegis_embedding_duration_seconds",
         "Embedding generation latency",
-        buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
+        buckets=[0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
     )
-
-    # Database metrics
-    DB_POOL_SIZE = Gauge(
-        "aegis_db_pool_size",
-        "Database connection pool size"
-    )
-
-    DB_POOL_CHECKED_OUT = Gauge(
-        "aegis_db_pool_checked_out",
-        "Database connections currently in use"
-    )
-
-    # Memory count metrics
-    MEMORY_COUNT = Gauge(
-        "aegis_memories_total",
-        "Total memories stored",
-        ["project_id", "namespace"]
-    )
-
-    # ACE metrics
-    ACE_VOTES = Counter(
-        "aegis_ace_votes_total",
-        "ACE memory votes",
-        ["vote_type"]  # helpful, harmful
-    )
-
-    ACE_REFLECTIONS = Counter(
-        "aegis_ace_reflections_total",
-        "ACE reflections created"
-    )
-
-    ACE_SESSIONS = Gauge(
-        "aegis_ace_sessions_active",
-        "Active ACE sessions"
-    )
-
-    # Query analytics metrics
-    QUERY_ATTEMPTS = Counter(
-        "aegis_memory_query_attempts_total",
-        "Total memory query attempts",
-        ["source", "requested_scope", "effective_scope"]
-    )
-
-    QUERY_RESULTS_COUNT = Histogram(
-        "aegis_memory_query_results_count",
-        "Distribution of number of results returned by each query",
-        ["source"],
-        buckets=[0, 1, 2, 5, 10, 20, 50, 100]
-    )
-
-    QUERY_ZERO_RESULTS = Counter(
-        "aegis_memory_query_miss_total",
-        "Total memory queries that returned zero results",
-        ["source", "effective_scope"]
-    )
-
+    DB_POOL_SIZE = Gauge("aegis_db_pool_size", "Database connection pool size")
+    DB_POOL_CHECKED_OUT = Gauge("aegis_db_pool_checked_out", "Database connections currently in use")
+    MEMORY_COUNT = Gauge("aegis_memories_total", "Total memories stored", ["project_id", "namespace"])
+    ACE_VOTES = Counter("aegis_ace_votes_total", "ACE memory votes", ["vote_type"])
+    ACE_REFLECTIONS = Counter("aegis_ace_reflections_total", "ACE reflections created")
+    ACE_SESSIONS = Gauge("aegis_ace_sessions_active", "Active ACE sessions")
+    QUERY_ATTEMPTS = Counter("aegis_memory_query_attempts_total", "Total memory query attempts", ["source", "requested_scope", "effective_scope"])
+    QUERY_RESULTS_COUNT = Histogram("aegis_memory_query_results_count", "Distribution of number of results returned by each query", ["source"], buckets=[0, 1, 2, 5, 10, 20, 50, 100])
+    QUERY_ZERO_RESULTS = Counter("aegis_memory_query_miss_total", "Total memory queries that returned zero results", ["source", "effective_scope"])
     QUERY_LATENCY = Histogram(
         "aegis_memory_query_execution_duration_seconds",
         "End-to-end query latency",
         ["source"],
-        buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0]
+        buckets=[0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0],
     )
-
-    QUERY_FILTER_USAGE = Counter(
-        "aegis_memory_query_filter_usage_total",
-        "Usage of query filters",
-        ["scope", "memory_type", "min_effectiveness", "target_agent_ids_used"]
-    )
-
-    MEMORY_SCOPE_STORED = Counter(
-        "aegis_memory_scope_stored_total",
-        "Distribution of memory scopes at write time",
-        ["scope"]
-    )
-
-    MEMORY_SCOPE_RETRIEVED = Counter(
-        "aegis_memory_scope_retrieved_total",
-        "Distribution of memory scopes in retrievals",
-        ["scope"]
-    )
+    QUERY_FILTER_USAGE = Counter("aegis_memory_query_filter_usage_total", "Usage of query filters", ["scope", "memory_type", "min_effectiveness", "target_agent_ids_used"])
+    MEMORY_SCOPE_STORED = Counter("aegis_memory_scope_stored_total", "Distribution of memory scopes at write time", ["scope"])
+    MEMORY_SCOPE_RETRIEVED = Counter("aegis_memory_scope_retrieved_total", "Distribution of memory scopes in retrievals", ["scope"])
 
 
 _QUERY_EVENT_LIMIT = 2000
@@ -323,7 +262,6 @@ def _safe_scope(value: str | None) -> str:
 
 
 def normalize_query_intent(query: str) -> str:
-    """Normalize free-form query text into a low-cardinality intent key."""
     normalized = " ".join(query.strip().lower().split())
     if not normalized:
         return "empty"
@@ -333,7 +271,6 @@ def normalize_query_intent(query: str) -> str:
 
 
 def record_memory_stored_scope(scope: str, count: int = 1):
-    """Record distribution of scopes used when storing memories."""
     if PROMETHEUS_AVAILABLE:
         MEMORY_SCOPE_STORED.labels(scope=_safe_scope(scope)).inc(count)
 
@@ -352,13 +289,8 @@ def record_query_execution(
     retrieved_scopes: list[str] | None = None,
     retrieved_agent_ids: list[str] | None = None,
 ):
-    """Record query-level metrics and append an event for dashboard analytics."""
     if PROMETHEUS_AVAILABLE:
-        QUERY_ATTEMPTS.labels(
-            source=source,
-            requested_scope=_safe_scope(requested_scope),
-            effective_scope=effective_scope,
-        ).inc()
+        QUERY_ATTEMPTS.labels(source=source, requested_scope=_safe_scope(requested_scope), effective_scope=effective_scope).inc()
         QUERY_RESULTS_COUNT.labels(source=source).observe(total_returned)
         QUERY_LATENCY.labels(source=source).observe(duration_seconds)
         QUERY_FILTER_USAGE.labels(
@@ -367,36 +299,42 @@ def record_query_execution(
             min_effectiveness="used" if min_effectiveness is not None else "not_used",
             target_agent_ids_used="true" if target_agent_ids_used else "false",
         ).inc()
-
         if total_returned == 0:
             QUERY_ZERO_RESULTS.labels(source=source, effective_scope=effective_scope).inc()
-
         if retrieved_scopes:
             for scope in retrieved_scopes:
                 MEMORY_SCOPE_RETRIEVED.labels(scope=_safe_scope(scope)).inc()
 
-    _QUERY_EVENTS.append({
-        "timestamp": datetime.utcnow(),
-        "source": source,
-        "intent": normalize_query_intent(query_text or ""),
-        "hit": total_returned > 0,
-        "total_returned": total_returned,
-        "requested_scope": _safe_scope(requested_scope),
-        "effective_scope": effective_scope,
-        "retrieved_agent_ids": retrieved_agent_ids or [],
-    })
+    OBS_BRIDGE.emit_span_event(
+        "memory.query.results",
+        {
+            "source": source,
+            "total_returned": total_returned,
+            "requested_scope": _safe_scope(requested_scope),
+            "effective_scope": effective_scope,
+        },
+    )
+
+    _QUERY_EVENTS.append(
+        {
+            "timestamp": datetime.utcnow(),
+            "source": source,
+            "intent": normalize_query_intent(query_text or ""),
+            "hit": total_returned > 0,
+            "total_returned": total_returned,
+            "requested_scope": _safe_scope(requested_scope),
+            "effective_scope": effective_scope,
+            "retrieved_agent_ids": retrieved_agent_ids or [],
+        }
+    )
 
 
 def get_query_analytics(window_minutes: int = 60, bucket_minutes: int = 10) -> dict:
-    """Aggregate recent query analytics from in-memory query events."""
     now = datetime.utcnow()
     window_start = now.timestamp() - (window_minutes * 60)
-
     events = [event for event in _QUERY_EVENTS if event["timestamp"].timestamp() >= window_start]
-
     intent_counts = CollectionCounter(event["intent"] for event in events)
     scope_usage = CollectionCounter(event["requested_scope"] for event in events)
-
     agent_counts = CollectionCounter()
     for event in events:
         for agent_id in event.get("retrieved_agent_ids", []):
@@ -417,12 +355,14 @@ def get_query_analytics(window_minutes: int = 60, bucket_minutes: int = 10) -> d
     for bucket in sorted(trend_buckets):
         stats = trend_buckets[bucket]
         queries = stats["queries"]
-        hit_rate_trend.append({
-            "bucket_start": datetime.utcfromtimestamp(bucket),
-            "queries": queries,
-            "hits": stats["hits"],
-            "hit_rate": (stats["hits"] / queries) if queries else 0.0,
-        })
+        hit_rate_trend.append(
+            {
+                "bucket_start": datetime.utcfromtimestamp(bucket),
+                "queries": queries,
+                "hits": stats["hits"],
+                "hit_rate": (stats["hits"] / queries) if queries else 0.0,
+            }
+        )
 
     total_agent_retrievals = sum(agent_counts.values())
     per_agent_share = [
@@ -437,43 +377,68 @@ def get_query_analytics(window_minutes: int = 60, bucket_minutes: int = 10) -> d
     return {
         "window_minutes": window_minutes,
         "sample_size": len(events),
-        "top_query_intents": [
-            {"intent": intent, "count": count}
-            for intent, count in intent_counts.most_common(10)
-        ],
+        "top_query_intents": [{"intent": intent, "count": count} for intent, count in intent_counts.most_common(10)],
         "hit_rate_trend": hit_rate_trend,
-        "scope_usage_breakdown": [
-            {"scope": scope, "count": count}
-            for scope, count in scope_usage.items()
-        ],
+        "scope_usage_breakdown": [{"scope": scope, "count": count} for scope, count in scope_usage.items()],
         "per_agent_retrieval_share": per_agent_share,
     }
 
 
 def record_operation(operation: str, status: str = "success"):
-    """Record a memory operation."""
+    attrs = {"operation": operation, "status": status}
+    if OTEL_AVAILABLE and OBS_BRIDGE.memory_counter is not None:
+        OBS_BRIDGE.memory_counter.add(1, attributes=attrs)
     if PROMETHEUS_AVAILABLE:
         MEMORY_OPERATIONS.labels(operation=operation, status=status).inc()
+
+    OBS_BRIDGE.emit_span_event("memory.operation.status", attrs)
+    OBS_BRIDGE.emit_timeline_event(
+        event_type=EventNames.MEMORY_OPERATION,
+        payload={"operation": operation, "status": status},
+    )
 
 
 @contextmanager
 def track_latency(operation: str):
-    """Context manager to track operation latency."""
     start = time.monotonic()
+    span_ctx = None
+    if OTEL_AVAILABLE and OBS_BRIDGE.tracer is not None:
+        span_ctx = OBS_BRIDGE.tracer.start_as_current_span(
+            SpanNames.MEMORY_OPERATION,
+            kind=SpanKind.INTERNAL,
+            attributes={
+                "aegis.operation.name": operation,
+                "aegis.request_id": _context_request_id.get() or "",
+                "aegis.project_id": _context_project_id.get() or "unknown",
+                "aegis.agent_id": _context_agent_id.get() or "",
+            },
+        )
+        span_ctx.__enter__()
+
     try:
         yield
+        if OTEL_AVAILABLE and span_ctx is not None:
+            trace.get_current_span().set_status(Status(status_code=StatusCode.OK))
+    except Exception as exc:
+        if OTEL_AVAILABLE and span_ctx is not None:
+            span = trace.get_current_span()
+            span.record_exception(exc)
+            span.set_status(Status(status_code=StatusCode.ERROR, description=str(exc)))
+        raise
     finally:
         duration = time.monotonic() - start
+        if OTEL_AVAILABLE and OBS_BRIDGE.memory_latency is not None:
+            OBS_BRIDGE.memory_latency.record(duration, attributes={"operation": operation})
         if PROMETHEUS_AVAILABLE:
             MEMORY_OPERATION_LATENCY.labels(operation=operation).observe(duration)
-        logger.debug(
-            f"Operation {operation} completed",
-            extra={"operation": operation, "duration_ms": duration * 1000}
-        )
+
+        OBS_BRIDGE.emit_span_event("memory.operation.timing", {"operation": operation, "duration_ms": duration * 1000})
+        logger.debug(f"Operation {operation} completed", extra={"operation": operation, "duration_ms": duration * 1000})
+        if span_ctx is not None:
+            span_ctx.__exit__(None, None, None)
 
 
 def record_embedding_cache(hit: bool):
-    """Record embedding cache hit/miss."""
     if PROMETHEUS_AVAILABLE:
         if hit:
             EMBEDDING_CACHE_HITS.inc()
@@ -482,112 +447,94 @@ def record_embedding_cache(hit: bool):
 
 
 def record_vote(vote_type: str):
-    """Record ACE vote."""
     if PROMETHEUS_AVAILABLE:
         ACE_VOTES.labels(vote_type=vote_type).inc()
 
 
-# ============================================================================
-# FastAPI Middleware
-# ============================================================================
-
 class ObservabilityMiddleware(BaseHTTPMiddleware):
-    """
-    FastAPI middleware for request tracing and metrics.
-
-    Adds:
-    - Request ID tracking
-    - Request/response logging
-    - Prometheus metrics
-    - Latency headers
-    """
-
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # Generate or extract request / trace identifiers
         request_id = request.headers.get("X-Request-ID", f"req-{int(time.time() * 1000)}")
         trace_id = request.headers.get("X-Trace-ID", str(uuid.uuid4()))
         request.state.request_id = request_id
         request.state.trace_id = trace_id
 
-        # Extract project and actor identifiers when present
         project_id = request.headers.get("X-Project-ID") or getattr(request.state, "project_id", "unknown")
         agent_id = request.headers.get("X-Agent-ID")
         session_id = request.headers.get("X-Session-ID")
         task_id = request.headers.get("X-Task-ID")
-
-        # Set up logging context
         start = time.monotonic()
 
-        with LogContext(request_id=request_id, project_id=project_id):
-            logger.info(
-                f"Request started: {request.method} {request.url.path}",
-                extra={"operation": "request_start"}
-            )
+        tokens = OBS_BRIDGE.set_context(request_id=request_id, project_id=project_id, agent_id=agent_id, trace_id=trace_id)
+        span_ctx = None
+        status = 500
+        endpoint = self._normalize_path(request.url.path)
 
+        if OTEL_AVAILABLE and OBS_BRIDGE.tracer is not None:
+            span_ctx = OBS_BRIDGE.tracer.start_as_current_span(
+                SpanNames.HTTP_REQUEST,
+                kind=SpanKind.SERVER,
+                attributes={
+                    "http.method": request.method,
+                    "http.route": endpoint,
+                    "url.path": request.url.path,
+                    "aegis.request_id": request_id,
+                    "aegis.project_id": project_id,
+                    "aegis.agent_id": agent_id or "",
+                },
+            )
+            span_ctx.__enter__()
+
+        with LogContext(request_id=request_id, project_id=project_id, agent_id=agent_id):
             try:
                 response = await call_next(request)
                 status = response.status_code
-            except Exception:
-                status = 500
+            except Exception as exc:
+                if OTEL_AVAILABLE and span_ctx is not None:
+                    span = trace.get_current_span()
+                    span.record_exception(exc)
+                    span.set_status(Status(status_code=StatusCode.ERROR, description=str(exc)))
                 logger.exception("Request failed", extra={"operation": "request_error"})
                 raise
             finally:
                 duration = time.monotonic() - start
+                if OTEL_AVAILABLE and OBS_BRIDGE.http_counter is not None:
+                    attrs = {"http.method": request.method, "http.route": endpoint, "http.status_code": status}
+                    OBS_BRIDGE.http_counter.add(1, attributes=attrs)
+                    OBS_BRIDGE.http_latency.record(duration, attributes={"http.method": request.method, "http.route": endpoint})
 
-                # Log completion
+                if PROMETHEUS_AVAILABLE:
+                    REQUEST_COUNT.labels(method=request.method, endpoint=endpoint, status=status).inc()
+                    REQUEST_LATENCY.labels(method=request.method, endpoint=endpoint).observe(duration)
+
+                OBS_BRIDGE.emit_span_event("http.request.completed", {"status_code": status, "duration_ms": duration * 1000})
+                OBS_BRIDGE.emit_timeline_event(
+                    event_type=EventNames.HTTP_COMPLETED,
+                    payload={"method": request.method, "path": request.url.path, "endpoint": endpoint, "status_code": status},
+                    derived_metrics={"duration_ms": round(duration * 1000, 3)},
+                    session_id=session_id,
+                    task_id=task_id,
+                )
+
                 logger.info(
                     f"Request completed: {request.method} {request.url.path} -> {status}",
-                    extra={
-                        "operation": "request_complete",
-                        "duration_ms": duration * 1000,
-                    }
+                    extra={"operation": "request_complete", "duration_ms": duration * 1000},
                 )
 
-                # Record metrics
-                endpoint = self._normalize_path(request.url.path)
-                if PROMETHEUS_AVAILABLE:
-                    REQUEST_COUNT.labels(
-                        method=request.method,
-                        endpoint=endpoint,
-                        status=status
-                    ).inc()
-                    REQUEST_LATENCY.labels(
-                        method=request.method,
-                        endpoint=endpoint
-                    ).observe(duration)
+                if span_ctx is not None:
+                    if OTEL_AVAILABLE:
+                        trace.get_current_span().set_attribute("http.status_code", status)
+                    span_ctx.__exit__(None, None, None)
+                OBS_BRIDGE.reset_context(tokens)
 
-                enqueue_event(
-                    EventEnvelope(
-                        trace_id=trace_id,
-                        request_id=request_id,
-                        project_id=project_id,
-                        agent_id=agent_id,
-                        session_id=session_id,
-                        task_id=task_id,
-                        event_type="http_request.completed",
-                        payload={
-                            "method": request.method,
-                            "path": request.url.path,
-                            "endpoint": endpoint,
-                            "status_code": status,
-                        },
-                        derived_metrics={"duration_ms": round(duration * 1000, 3)},
-                    )
-                )
-
-        # Add tracing headers
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Trace-ID"] = trace_id
         response.headers["X-Response-Time"] = f"{duration * 1000:.2f}ms"
-
         return response
 
     def _normalize_path(self, path: str) -> str:
-        """Normalize path for metrics (remove IDs)."""
         parts = path.split("/")
         normalized = []
         for part in parts:
-            # Replace UUIDs and hex IDs with placeholder
             if len(part) == 32 and all(c in "0123456789abcdef" for c in part):
                 normalized.append("{id}")
             else:
@@ -595,68 +542,27 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         return "/".join(normalized)
 
 
-# ============================================================================
-# Metrics Endpoint
-# ============================================================================
-
 async def metrics_endpoint():
-    """
-    Prometheus metrics endpoint.
-
-    Returns metrics in Prometheus exposition format.
-    """
     if not PROMETHEUS_AVAILABLE:
-        return Response(
-            content="prometheus_client not installed",
-            status_code=501
-        )
+        return Response(content="prometheus_client not installed", status_code=501)
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
-    return Response(
-        content=generate_latest(),
-        media_type=CONTENT_TYPE_LATEST
-    )
-
-
-# ============================================================================
-# Health Check Helpers
-# ============================================================================
 
 async def check_database_health(db_pool) -> dict:
-    """Check database connection health."""
     try:
-        # Try to get a connection
         async with db_pool.connect() as conn:
             await conn.execute("SELECT 1")
-
-        # Update pool metrics
         if PROMETHEUS_AVAILABLE:
             DB_POOL_SIZE.set(db_pool.pool.size())
             DB_POOL_CHECKED_OUT.set(db_pool.pool.checkedout())
-
-        return {
-            "status": "healthy",
-            "pool_size": db_pool.pool.size(),
-            "checked_out": db_pool.pool.checkedout(),
-        }
+        return {"status": "healthy", "pool_size": db_pool.pool.size(), "checked_out": db_pool.pool.checkedout()}
     except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e),
-        }
+        return {"status": "unhealthy", "error": str(e)}
 
 
 async def check_embedding_service_health(embed_service) -> dict:
-    """Check embedding service health."""
     try:
-        # Try a simple embedding
         await embed_service.embed_single("health check", None)
-        return {
-            "status": "healthy",
-            "model": embed_service.model,
-            "cache_stats": embed_service.get_stats(),
-        }
+        return {"status": "healthy", "model": embed_service.model, "cache_stats": embed_service.get_stats()}
     except Exception as e:
-        return {
-            "status": "unhealthy",
-            "error": str(e),
-        }
+        return {"status": "unhealthy", "error": str(e)}

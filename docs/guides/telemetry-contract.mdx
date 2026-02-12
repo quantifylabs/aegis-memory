@@ -1,0 +1,54 @@
+---
+title: Telemetry Contract
+---
+
+# Telemetry contract (memory lifecycle)
+
+This contract defines stable OpenTelemetry span names, attributes, and span-event names for Aegis memory lifecycle operations.
+
+## Span names
+
+- `aegis.http.request`
+  - Server span for each FastAPI request.
+- `aegis.memory.operation`
+  - Internal span for each memory operation (`memory_add`, `memory_query`, `memory_delete`, etc).
+
+## Common attributes
+
+- `aegis.request_id`
+- `aegis.project_id`
+- `aegis.agent_id`
+
+## HTTP span attributes
+
+- `http.method`
+- `http.route`
+- `url.path`
+- `http.status_code`
+
+## Memory operation span attributes
+
+- `aegis.operation.name`
+- `aegis.request_id`
+- `aegis.project_id`
+- `aegis.agent_id`
+
+## Span events
+
+- `http.request.completed`
+  - Attributes: `status_code`, `duration_ms`
+- `memory.operation.timing`
+  - Attributes: `operation`, `duration_ms`
+- `memory.operation.status`
+  - Attributes: `operation`, `status`
+- `memory.query.results`
+  - Attributes: `source`, `total_returned`, `requested_scope`, `effective_scope`
+
+## Timeline events (derived from spans)
+
+Timeline event envelopes are emitted from observability bridge calls and forwarded to exporter adapters.
+
+- `http_request.completed`
+- `memory.operation`
+
+Each envelope includes trace and request correlation IDs plus `project_id` and optional `agent_id`, `session_id`, `task_id`.

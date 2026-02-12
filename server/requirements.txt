@@ -16,6 +16,10 @@ pydantic-settings>=2.3.0
 # OpenAI
 openai>=1.35.0
 
+# Observability (optional OTEL bridge)
+opentelemetry-api>=1.27.0
+opentelemetry-sdk>=1.27.0
+
 # Optional: Redis for distributed rate limiting
 # redis>=5.0.0
 
