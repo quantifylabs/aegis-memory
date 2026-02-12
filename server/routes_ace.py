@@ -28,6 +28,7 @@ from models import FeatureStatus, MemoryScope, MemoryType
 from pydantic import BaseModel, Field
 from routes import check_rate_limit
 from scope_inference import ScopeInference
+from observability import OperationNames, record_operation, track_latency
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/ace", tags=["ACE"])
@@ -263,25 +264,34 @@ async def vote_memory(
     Votes are tracked in history for analysis and the memory's
     bullet_helpful/bullet_harmful counters are updated.
     """
-    result = await ACERepository.vote_memory(
-        db,
-        memory_id=memory_id,
-        project_id=project_id,
-        voter_agent_id=body.voter_agent_id,
-        vote=body.vote,
-        context=body.context,
-        task_id=body.task_id,
-    )
+    try:
+        with track_latency(OperationNames.MEMORY_VOTE):
+            result = await ACERepository.vote_memory(
+                db,
+                memory_id=memory_id,
+                project_id=project_id,
+                voter_agent_id=body.voter_agent_id,
+                vote=body.vote,
+                context=body.context,
+                task_id=body.task_id,
+            )
 
-    if result is None:
-        raise HTTPException(status_code=404, detail="Memory not found")
+        if result is None:
+            record_operation(OperationNames.MEMORY_VOTE, "error")
+            raise HTTPException(status_code=404, detail="Memory not found")
 
-    return VoteResponse(
-        memory_id=memory_id,
-        bullet_helpful=result.bullet_helpful,
-        bullet_harmful=result.bullet_harmful,
-        effectiveness_score=result.get_effectiveness_score(),
-    )
+        record_operation(OperationNames.MEMORY_VOTE, "success")
+        return VoteResponse(
+            memory_id=memory_id,
+            bullet_helpful=result.bullet_helpful,
+            bullet_harmful=result.bullet_harmful,
+            effectiveness_score=result.get_effectiveness_score(),
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        record_operation(OperationNames.MEMORY_VOTE, "error")
+        raise
 
 
 @router.post("/delta", response_model=DeltaResponse)
@@ -308,126 +318,113 @@ async def apply_delta(
     embed_service = get_embedding_service()
     results = []
 
-    for op in body.operations:
-        try:
-            if op.type == "add":
-                if not op.content:
-                    results.append(DeltaResultItem(
-                        operation="add",
-                        success=False,
-                        error="Content required for add operation"
-                    ))
-                    continue
+    try:
+        with track_latency(OperationNames.MEMORY_DELTA):
+            for op in body.operations:
+                try:
+                    if op.type == "add":
+                        if not op.content:
+                            results.append(DeltaResultItem(
+                                operation="add",
+                                success=False,
+                                error="Content required for add operation"
+                            ))
+                            continue
 
-                # Generate embedding
-                embedding = await embed_service.embed_single(op.content, db)
+                        with track_latency(OperationNames.MEMORY_DELTA_ADD):
+                            embedding = await embed_service.embed_single(op.content, db)
 
-                # Infer scope (reflections default to global)
-                default_scope = MemoryScope.GLOBAL if op.memory_type == MemoryType.REFLECTION.value else None
-                resolved_scope = ScopeInference.infer_scope(
-                    content=op.content,
-                    explicit_scope=op.scope or (default_scope.value if default_scope else None),
-                    agent_id=op.agent_id,
-                    metadata=op.metadata or {},
-                )
+                            default_scope = MemoryScope.GLOBAL if op.memory_type == MemoryType.REFLECTION.value else None
+                            resolved_scope = ScopeInference.infer_scope(
+                                content=op.content,
+                                explicit_scope=op.scope or (default_scope.value if default_scope else None),
+                                agent_id=op.agent_id,
+                                metadata=op.metadata or {},
+                            )
 
-                mem = await MemoryRepository.add(
-                    db,
-                    project_id=project_id,
-                    content=op.content,
-                    embedding=embedding,
-                    user_id=op.user_id,
-                    agent_id=op.agent_id,
-                    namespace=op.namespace,
-                    metadata=op.metadata,
-                    ttl_seconds=op.ttl_seconds,
-                    scope=resolved_scope.value,
-                    memory_type=op.memory_type,
-                )
+                            mem = await MemoryRepository.add(
+                                db,
+                                project_id=project_id,
+                                content=op.content,
+                                embedding=embedding,
+                                user_id=op.user_id,
+                                agent_id=op.agent_id,
+                                namespace=op.namespace,
+                                metadata=op.metadata,
+                                ttl_seconds=op.ttl_seconds,
+                                scope=resolved_scope.value,
+                                memory_type=op.memory_type,
+                            )
 
-                results.append(DeltaResultItem(
-                    operation="add",
-                    success=True,
-                    memory_id=mem.id,
-                ))
+                        record_operation(OperationNames.MEMORY_DELTA_ADD, "success")
+                        results.append(DeltaResultItem(operation="add", success=True, memory_id=mem.id))
 
-            elif op.type == "update":
-                if not op.memory_id:
-                    results.append(DeltaResultItem(
-                        operation="update",
-                        success=False,
-                        error="memory_id required for update operation"
-                    ))
-                    continue
+                    elif op.type == "update":
+                        if not op.memory_id:
+                            results.append(DeltaResultItem(
+                                operation="update",
+                                success=False,
+                                error="memory_id required for update operation"
+                            ))
+                            continue
 
-                updated = await ACERepository.update_memory_metadata(
-                    db,
-                    memory_id=op.memory_id,
-                    project_id=project_id,
-                    metadata_patch=op.metadata_patch,
-                )
+                        with track_latency(OperationNames.MEMORY_DELTA_UPDATE):
+                            updated = await ACERepository.update_memory_metadata(
+                                db,
+                                memory_id=op.memory_id,
+                                project_id=project_id,
+                                metadata_patch=op.metadata_patch,
+                            )
 
-                if updated:
-                    results.append(DeltaResultItem(
-                        operation="update",
-                        success=True,
-                        memory_id=op.memory_id,
-                    ))
-                else:
-                    results.append(DeltaResultItem(
-                        operation="update",
-                        success=False,
-                        memory_id=op.memory_id,
-                        error="Memory not found",
-                    ))
+                        if updated:
+                            record_operation(OperationNames.MEMORY_DELTA_UPDATE, "success")
+                            results.append(DeltaResultItem(operation="update", success=True, memory_id=op.memory_id))
+                        else:
+                            record_operation(OperationNames.MEMORY_DELTA_UPDATE, "error")
+                            results.append(DeltaResultItem(operation="update", success=False, memory_id=op.memory_id, error="Memory not found"))
 
-            elif op.type == "deprecate":
-                if not op.memory_id:
-                    results.append(DeltaResultItem(
-                        operation="deprecate",
-                        success=False,
-                        error="memory_id required for deprecate operation"
-                    ))
-                    continue
+                    elif op.type == "deprecate":
+                        if not op.memory_id:
+                            results.append(DeltaResultItem(
+                                operation="deprecate",
+                                success=False,
+                                error="memory_id required for deprecate operation"
+                            ))
+                            continue
 
-                deprecated = await ACERepository.deprecate_memory(
-                    db,
-                    memory_id=op.memory_id,
-                    project_id=project_id,
-                    deprecated_by=op.agent_id,
-                    superseded_by=op.superseded_by,
-                    reason=op.deprecation_reason,
-                )
+                        with track_latency(OperationNames.MEMORY_DELTA_DEPRECATE):
+                            deprecated = await ACERepository.deprecate_memory(
+                                db,
+                                memory_id=op.memory_id,
+                                project_id=project_id,
+                                deprecated_by=op.agent_id,
+                                superseded_by=op.superseded_by,
+                                reason=op.deprecation_reason,
+                            )
 
-                if deprecated:
-                    results.append(DeltaResultItem(
-                        operation="deprecate",
-                        success=True,
-                        memory_id=op.memory_id,
-                    ))
-                else:
-                    results.append(DeltaResultItem(
-                        operation="deprecate",
-                        success=False,
-                        memory_id=op.memory_id,
-                        error="Memory not found",
-                    ))
+                        if deprecated:
+                            record_operation(OperationNames.MEMORY_DELTA_DEPRECATE, "success")
+                            results.append(DeltaResultItem(operation="deprecate", success=True, memory_id=op.memory_id))
+                        else:
+                            record_operation(OperationNames.MEMORY_DELTA_DEPRECATE, "error")
+                            results.append(DeltaResultItem(operation="deprecate", success=False, memory_id=op.memory_id, error="Memory not found"))
 
-        except Exception as e:
-            results.append(DeltaResultItem(
-                operation=op.type,
-                success=False,
-                memory_id=op.memory_id,
-                error=str(e),
-            ))
+                except Exception as e:
+                    if op.type == "add":
+                        record_operation(OperationNames.MEMORY_DELTA_ADD, "error")
+                    elif op.type == "update":
+                        record_operation(OperationNames.MEMORY_DELTA_UPDATE, "error")
+                    elif op.type == "deprecate":
+                        record_operation(OperationNames.MEMORY_DELTA_DEPRECATE, "error")
+                    results.append(DeltaResultItem(operation=op.type, success=False, memory_id=op.memory_id, error=str(e)))
+
+        record_operation(OperationNames.MEMORY_DELTA, "success")
+    except Exception:
+        record_operation(OperationNames.MEMORY_DELTA, "error")
+        raise
 
     elapsed_ms = (time.monotonic() - start) * 1000
-
-    return DeltaResponse(
-        results=results,
-        total_time_ms=round(elapsed_ms, 2),
-    )
-
+    return DeltaResponse(results=results, total_time_ms=round(elapsed_ms, 2))
 
 @router.post("/reflection", response_model=ReflectionResponse)
 async def create_reflection(
@@ -555,16 +552,21 @@ async def create_session(
     understand state when starting with fresh context. This is the
     structured, queryable version.
     """
-    session = await ACERepository.create_session(
-        db,
-        project_id=project_id,
-        session_id=body.session_id,
-        agent_id=body.agent_id,
-        user_id=body.user_id,
-        namespace=body.namespace,
-    )
-
-    return _session_to_response(session)
+    try:
+        with track_latency(OperationNames.MEMORY_SESSION_CREATE):
+            session = await ACERepository.create_session(
+                db,
+                project_id=project_id,
+                session_id=body.session_id,
+                agent_id=body.agent_id,
+                user_id=body.user_id,
+                namespace=body.namespace,
+            )
+        record_operation(OperationNames.MEMORY_SESSION_CREATE, "success")
+        return _session_to_response(session)
+    except Exception:
+        record_operation(OperationNames.MEMORY_SESSION_CREATE, "error")
+        raise
 
 
 @router.get("/session/{session_id}", response_model=SessionProgressResponse)
@@ -574,12 +576,21 @@ async def get_session(
     db: AsyncSession = Depends(get_read_db),
 ):
     """Get session progress by session_id."""
-    session = await ACERepository.get_session(db, session_id, project_id)
+    try:
+        with track_latency(OperationNames.MEMORY_SESSION_GET):
+            session = await ACERepository.get_session(db, session_id, project_id)
 
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+        if not session:
+            record_operation(OperationNames.MEMORY_SESSION_GET, "error")
+            raise HTTPException(status_code=404, detail="Session not found")
 
-    return _session_to_response(session)
+        record_operation(OperationNames.MEMORY_SESSION_GET, "success")
+        return _session_to_response(session)
+    except HTTPException:
+        raise
+    except Exception:
+        record_operation(OperationNames.MEMORY_SESSION_GET, "error")
+        raise
 
 
 @router.patch("/session/{session_id}", response_model=SessionProgressResponse)
@@ -598,24 +609,33 @@ async def update_session(
     - Queue next items
     - Record blockers
     """
-    session = await ACERepository.update_session(
-        db,
-        session_id=session_id,
-        project_id=project_id,
-        completed_items=body.completed_items,
-        in_progress_item=body.in_progress_item,
-        next_items=body.next_items,
-        blocked_items=body.blocked_items,
-        summary=body.summary,
-        last_action=body.last_action,
-        status=body.status,
-        total_items=body.total_items,
-    )
+    try:
+        with track_latency(OperationNames.MEMORY_SESSION_UPDATE):
+            session = await ACERepository.update_session(
+                db,
+                session_id=session_id,
+                project_id=project_id,
+                completed_items=body.completed_items,
+                in_progress_item=body.in_progress_item,
+                next_items=body.next_items,
+                blocked_items=body.blocked_items,
+                summary=body.summary,
+                last_action=body.last_action,
+                status=body.status,
+                total_items=body.total_items,
+            )
 
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+        if not session:
+            record_operation(OperationNames.MEMORY_SESSION_UPDATE, "error")
+            raise HTTPException(status_code=404, detail="Session not found")
 
-    return _session_to_response(session)
+        record_operation(OperationNames.MEMORY_SESSION_UPDATE, "success")
+        return _session_to_response(session)
+    except HTTPException:
+        raise
+    except Exception:
+        record_operation(OperationNames.MEMORY_SESSION_UPDATE, "error")
+        raise
 
 
 def _session_to_response(session) -> SessionProgressResponse:
@@ -656,18 +676,23 @@ async def create_feature(
     agents from declaring victory prematurely. Each feature must be
     explicitly verified before marking complete.
     """
-    feature = await ACERepository.create_feature(
-        db,
-        project_id=project_id,
-        feature_id=body.feature_id,
-        description=body.description,
-        session_id=body.session_id,
-        namespace=body.namespace,
-        category=body.category,
-        test_steps=body.test_steps,
-    )
-
-    return _feature_to_response(feature)
+    try:
+        with track_latency(OperationNames.MEMORY_FEATURE_CREATE):
+            feature = await ACERepository.create_feature(
+                db,
+                project_id=project_id,
+                feature_id=body.feature_id,
+                description=body.description,
+                session_id=body.session_id,
+                namespace=body.namespace,
+                category=body.category,
+                test_steps=body.test_steps,
+            )
+        record_operation(OperationNames.MEMORY_FEATURE_CREATE, "success")
+        return _feature_to_response(feature)
+    except Exception:
+        record_operation(OperationNames.MEMORY_FEATURE_CREATE, "error")
+        raise
 
 
 @router.get("/feature/{feature_id}", response_model=FeatureResponse)
@@ -678,14 +703,23 @@ async def get_feature(
     db: AsyncSession = Depends(get_read_db),
 ):
     """Get feature by feature_id."""
-    feature = await ACERepository.get_feature(
-        db, feature_id, project_id, namespace
-    )
+    try:
+        with track_latency(OperationNames.MEMORY_FEATURE_GET):
+            feature = await ACERepository.get_feature(
+                db, feature_id, project_id, namespace
+            )
 
-    if not feature:
-        raise HTTPException(status_code=404, detail="Feature not found")
+        if not feature:
+            record_operation(OperationNames.MEMORY_FEATURE_GET, "error")
+            raise HTTPException(status_code=404, detail="Feature not found")
 
-    return _feature_to_response(feature)
+        record_operation(OperationNames.MEMORY_FEATURE_GET, "success")
+        return _feature_to_response(feature)
+    except HTTPException:
+        raise
+    except Exception:
+        record_operation(OperationNames.MEMORY_FEATURE_GET, "error")
+        raise
 
 
 @router.patch("/feature/{feature_id}", response_model=FeatureResponse)
@@ -701,23 +735,32 @@ async def update_feature(
 
     Only mark passes=true after proper verification!
     """
-    feature = await ACERepository.update_feature(
-        db,
-        feature_id=feature_id,
-        project_id=project_id,
-        namespace=namespace,
-        status=body.status,
-        passes=body.passes,
-        implemented_by=body.implemented_by,
-        verified_by=body.verified_by,
-        implementation_notes=body.implementation_notes,
-        failure_reason=body.failure_reason,
-    )
+    try:
+        with track_latency(OperationNames.MEMORY_FEATURE_UPDATE):
+            feature = await ACERepository.update_feature(
+                db,
+                feature_id=feature_id,
+                project_id=project_id,
+                namespace=namespace,
+                status=body.status,
+                passes=body.passes,
+                implemented_by=body.implemented_by,
+                verified_by=body.verified_by,
+                implementation_notes=body.implementation_notes,
+                failure_reason=body.failure_reason,
+            )
 
-    if not feature:
-        raise HTTPException(status_code=404, detail="Feature not found")
+        if not feature:
+            record_operation(OperationNames.MEMORY_FEATURE_UPDATE, "error")
+            raise HTTPException(status_code=404, detail="Feature not found")
 
-    return _feature_to_response(feature)
+        record_operation(OperationNames.MEMORY_FEATURE_UPDATE, "success")
+        return _feature_to_response(feature)
+    except HTTPException:
+        raise
+    except Exception:
+        record_operation(OperationNames.MEMORY_FEATURE_UPDATE, "error")
+        raise
 
 
 @router.get("/features", response_model=FeatureListResponse)
@@ -734,26 +777,32 @@ async def list_features(
     Use this at the start of a session to see what's complete
     and what still needs work.
     """
-    features = await ACERepository.list_features(
-        db,
-        project_id=project_id,
-        namespace=namespace,
-        session_id=session_id,
-        status=status,
-    )
+    try:
+        with track_latency(OperationNames.MEMORY_FEATURE_LIST):
+            features = await ACERepository.list_features(
+                db,
+                project_id=project_id,
+                namespace=namespace,
+                session_id=session_id,
+                status=status,
+            )
 
-    total = len(features)
-    passing = sum(1 for f in features if f.passes)
-    failing = sum(1 for f in features if f.status == FeatureStatus.FAILED.value)
-    in_progress = sum(1 for f in features if f.status == FeatureStatus.IN_PROGRESS.value)
+        total = len(features)
+        passing = sum(1 for f in features if f.passes)
+        failing = sum(1 for f in features if f.status == FeatureStatus.FAILED.value)
+        in_progress = sum(1 for f in features if f.status == FeatureStatus.IN_PROGRESS.value)
 
-    return FeatureListResponse(
-        features=[_feature_to_response(f) for f in features],
-        total=total,
-        passing=passing,
-        failing=failing,
-        in_progress=in_progress,
-    )
+        record_operation(OperationNames.MEMORY_FEATURE_LIST, "success")
+        return FeatureListResponse(
+            features=[_feature_to_response(f) for f in features],
+            total=total,
+            passing=passing,
+            failing=failing,
+            in_progress=in_progress,
+        )
+    except Exception:
+        record_operation(OperationNames.MEMORY_FEATURE_LIST, "error")
+        raise
 
 
 def _feature_to_response(feature) -> FeatureResponse:

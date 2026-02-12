@@ -21,6 +21,7 @@ from models import Memory, MemoryScope
 from pydantic import BaseModel, Field, field_validator
 from rate_limiter import RateLimiter, RateLimitExceeded
 from scope_inference import ScopeInference
+from observability import OperationNames, record_operation, track_latency
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -182,55 +183,62 @@ async def add_memory(
     """
     Add a single memory with automatic scope inference and deduplication.
     """
-    embed_service = get_embedding_service()
+    try:
+        with track_latency(OperationNames.MEMORY_ADD):
+            embed_service = get_embedding_service()
 
-    # Check for duplicates using content hash (fast)
-    hash_val = content_hash(body.content)
-    existing = await MemoryRepository.find_duplicates(
-        db,
-        content_hash=hash_val,
-        project_id=project_id,
-        namespace=body.namespace,
-        user_id=body.user_id,
-        agent_id=body.agent_id,
-    )
+            # Check for duplicates using content hash (fast)
+            hash_val = content_hash(body.content)
+            existing = await MemoryRepository.find_duplicates(
+                db,
+                content_hash=hash_val,
+                project_id=project_id,
+                namespace=body.namespace,
+                user_id=body.user_id,
+                agent_id=body.agent_id,
+            )
 
-    if existing:
-        return AddResult(id=existing.id, deduped_from=existing.id)
+            if existing:
+                record_operation(OperationNames.MEMORY_ADD, "success")
+                return AddResult(id=existing.id, deduped_from=existing.id)
 
-    # Generate embedding
-    embedding = await embed_service.embed_single(body.content, db)
+            # Generate embedding
+            embedding = await embed_service.embed_single(body.content, db)
 
-    # Infer scope if not provided
-    resolved_scope = ScopeInference.infer_scope(
-        content=body.content,
-        explicit_scope=body.scope,
-        agent_id=body.agent_id,
-        metadata=body.metadata or {},
-    )
+            # Infer scope if not provided
+            resolved_scope = ScopeInference.infer_scope(
+                content=body.content,
+                explicit_scope=body.scope,
+                agent_id=body.agent_id,
+                metadata=body.metadata or {},
+            )
 
-    # Create memory
-    mem = await MemoryRepository.add(
-        db,
-        project_id=project_id,
-        content=body.content,
-        embedding=embedding,
-        user_id=body.user_id,
-        agent_id=body.agent_id,
-        namespace=body.namespace,
-        metadata=body.metadata,
-        ttl_seconds=body.ttl_seconds,
-        scope=resolved_scope.value,
-        shared_with_agents=body.shared_with_agents,
-        derived_from_agents=body.derived_from_agents,
-        coordination_metadata=body.coordination_metadata,
-    )
+            # Create memory
+            mem = await MemoryRepository.add(
+                db,
+                project_id=project_id,
+                content=body.content,
+                embedding=embedding,
+                user_id=body.user_id,
+                agent_id=body.agent_id,
+                namespace=body.namespace,
+                metadata=body.metadata,
+                ttl_seconds=body.ttl_seconds,
+                scope=resolved_scope.value,
+                shared_with_agents=body.shared_with_agents,
+                derived_from_agents=body.derived_from_agents,
+                coordination_metadata=body.coordination_metadata,
+            )
 
-    return AddResult(
-        id=mem.id,
-        deduped_from=None,
-        inferred_scope=resolved_scope.value if body.scope is None else None,
-    )
+            record_operation(OperationNames.MEMORY_ADD, "success")
+            return AddResult(
+                id=mem.id,
+                deduped_from=None,
+                inferred_scope=resolved_scope.value if body.scope is None else None,
+            )
+    except Exception:
+        record_operation(OperationNames.MEMORY_ADD, "error")
+        raise
 
 
 @router.post("/add_batch", response_model=AddBatchResult)
@@ -335,42 +343,48 @@ async def query_memories(
     import time
     start = time.monotonic()
 
-    embed_service = get_embedding_service()
-    query_embedding = await embed_service.embed_single(body.query, db)
+    try:
+        with track_latency(OperationNames.MEMORY_QUERY):
+            embed_service = get_embedding_service()
+            query_embedding = await embed_service.embed_single(body.query, db)
 
-    results = await MemoryRepository.semantic_search(
-        db,
-        query_embedding=query_embedding,
-        project_id=project_id,
-        namespace=body.namespace,
-        user_id=body.user_id,
-        agent_id=body.agent_id,
-        requesting_agent_id=body.agent_id,  # Same agent for single-agent query
-        top_k=body.top_k,
-        min_score=body.min_score,
-    )
+            results = await MemoryRepository.semantic_search(
+                db,
+                query_embedding=query_embedding,
+                project_id=project_id,
+                namespace=body.namespace,
+                user_id=body.user_id,
+                agent_id=body.agent_id,
+                requesting_agent_id=body.agent_id,  # Same agent for single-agent query
+                top_k=body.top_k,
+                min_score=body.min_score,
+            )
 
-    elapsed_ms = (time.monotonic() - start) * 1000
+        elapsed_ms = (time.monotonic() - start) * 1000
 
-    memories = [
-        MemoryOut(
-            id=mem.id,
-            content=mem.content,
-            user_id=mem.user_id,
-            agent_id=mem.agent_id,
-            namespace=mem.namespace,
-            metadata=mem.metadata_json or {},
-            created_at=mem.created_at,
-            scope=mem.scope,
-            shared_with_agents=mem.shared_with_agents or [],
-            derived_from_agents=mem.derived_from_agents or [],
-            coordination_metadata=mem.coordination_metadata or {},
-            score=score,
-        )
-        for mem, score in results
-    ]
+        memories = [
+            MemoryOut(
+                id=mem.id,
+                content=mem.content,
+                user_id=mem.user_id,
+                agent_id=mem.agent_id,
+                namespace=mem.namespace,
+                metadata=mem.metadata_json or {},
+                created_at=mem.created_at,
+                scope=mem.scope,
+                shared_with_agents=mem.shared_with_agents or [],
+                derived_from_agents=mem.derived_from_agents or [],
+                coordination_metadata=mem.coordination_metadata or {},
+                score=score,
+            )
+            for mem, score in results
+        ]
 
-    return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2))
+        record_operation(OperationNames.MEMORY_QUERY, "success")
+        return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2))
+    except Exception:
+        record_operation(OperationNames.MEMORY_QUERY, "error")
+        raise
 
 
 @router.post("/query_cross_agent", response_model=QueryResult)
@@ -517,12 +531,21 @@ async def delete_memory(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a memory by ID."""
-    deleted = await MemoryRepository.delete(db, memory_id, project_id)
-    if not deleted:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Memory not found: {memory_id}. It may have been deleted or the ID is incorrect."
-        )
+    try:
+        with track_latency(OperationNames.MEMORY_DELETE):
+            deleted = await MemoryRepository.delete(db, memory_id, project_id)
+        if not deleted:
+            record_operation(OperationNames.MEMORY_DELETE, "error")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Memory not found: {memory_id}. It may have been deleted or the ID is incorrect."
+            )
+        record_operation(OperationNames.MEMORY_DELETE, "success")
+    except HTTPException:
+        raise
+    except Exception:
+        record_operation(OperationNames.MEMORY_DELETE, "error")
+        raise
 
 
 # ---------- Data Export (Migration Safety) ----------

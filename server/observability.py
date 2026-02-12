@@ -108,6 +108,36 @@ def setup_logging(level: str = "INFO", json_format: bool = True):
 logger = setup_logging()
 
 
+class OperationNames:
+    """Stable operation names for metrics/log aggregation."""
+
+    MEMORY_ADD = "memory_add"
+    MEMORY_ADD_BATCH = "memory_add_batch"
+    MEMORY_QUERY = "memory_query"
+    MEMORY_QUERY_CROSS_AGENT = "memory_query_cross_agent"
+    MEMORY_DELETE = "memory_delete"
+    MEMORY_FIND_DUPLICATE = "memory_find_duplicate"
+    MEMORY_SEMANTIC_SEARCH = "memory_semantic_search"
+    MEMORY_GET_BY_ID = "memory_get_by_id"
+    MEMORY_GET_HANDOFF = "memory_get_handoff"
+
+    MEMORY_VOTE = "memory_vote"
+    MEMORY_DELTA = "memory_delta"
+    MEMORY_DELTA_ADD = "memory_delta_add"
+    MEMORY_DELTA_UPDATE = "memory_delta_update"
+    MEMORY_DELTA_DEPRECATE = "memory_delta_deprecate"
+    MEMORY_REFLECTION = "memory_reflection"
+
+    MEMORY_SESSION_CREATE = "memory_session_create"
+    MEMORY_SESSION_GET = "memory_session_get"
+    MEMORY_SESSION_UPDATE = "memory_session_update"
+
+    MEMORY_FEATURE_CREATE = "memory_feature_create"
+    MEMORY_FEATURE_GET = "memory_feature_get"
+    MEMORY_FEATURE_UPDATE = "memory_feature_update"
+    MEMORY_FEATURE_LIST = "memory_feature_list"
+
+
 class LogContext:
     """
     Context manager for adding fields to log records.

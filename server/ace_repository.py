@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from embedding_service import content_hash
+from observability import OperationNames, record_operation, track_latency
 from models import (
     FeatureStatus,
     FeatureTracker,
@@ -55,81 +56,59 @@ class ACERepository:
 
         Returns the updated memory or None if not found.
         """
-        # Validate memory exists in the same transaction before staging vote
-        result = await db.execute(
-            select(Memory.id).where(
-                and_(
-                    Memory.id == memory_id,
-                    Memory.project_id == project_id,
-                )
-            )
-        )
-        if result.scalar_one_or_none() is None:
-            return None
-
-        # Create vote history record only after existence check
-        vote_record = VoteHistory(
-            id=generate_id(),
-            memory_id=memory_id,
-            project_id=project_id,
-            voter_agent_id=voter_agent_id,
-            vote=vote,
-            context=context,
-            task_id=task_id,
-        )
-        db.add(vote_record)
-
-        # Atomic update of memory counters to prevent race conditions
-        now = datetime.now(timezone.utc)
-        if vote == "helpful":
-            stmt = (
-                update(Memory)
-                .where(
-                    and_(
-                        Memory.id == memory_id,
-                        Memory.project_id == project_id,
+        try:
+            with track_latency(OperationNames.MEMORY_VOTE):
+                result = await db.execute(
+                    select(Memory.id).where(
+                        and_(
+                            Memory.id == memory_id,
+                            Memory.project_id == project_id,
+                        )
                     )
                 )
-                .values(
-                    bullet_helpful=Memory.bullet_helpful + 1,
-                    updated_at=now,
+                if result.scalar_one_or_none() is None:
+                    record_operation(OperationNames.MEMORY_VOTE, "error")
+                    return None
+
+                vote_record = VoteHistory(
+                    id=generate_id(),
+                    memory_id=memory_id,
+                    project_id=project_id,
+                    voter_agent_id=voter_agent_id,
+                    vote=vote,
+                    context=context,
+                    task_id=task_id,
                 )
-                .returning(Memory.id)
-            )
-        elif vote == "harmful":
-            stmt = (
-                update(Memory)
-                .where(
-                    and_(
-                        Memory.id == memory_id,
-                        Memory.project_id == project_id,
+                db.add(vote_record)
+
+                now = datetime.now(timezone.utc)
+                if vote == "helpful":
+                    stmt = (
+                        update(Memory)
+                        .where(and_(Memory.id == memory_id, Memory.project_id == project_id))
+                        .values(bullet_helpful=Memory.bullet_helpful + 1, updated_at=now)
+                        .returning(Memory.id)
                     )
-                )
-                .values(
-                    bullet_harmful=Memory.bullet_harmful + 1,
-                    updated_at=now,
-                )
-                .returning(Memory.id)
-            )
-        else:
-            # Invalid vote type - still check memory exists
-            stmt = select(Memory.id).where(
-                and_(
-                    Memory.id == memory_id,
-                    Memory.project_id == project_id,
-                )
-            )
+                    await db.execute(stmt)
+                elif vote == "harmful":
+                    stmt = (
+                        update(Memory)
+                        .where(and_(Memory.id == memory_id, Memory.project_id == project_id))
+                        .values(bullet_harmful=Memory.bullet_harmful + 1, updated_at=now)
+                        .returning(Memory.id)
+                    )
+                    await db.execute(stmt)
 
-        if vote in {"helpful", "harmful"}:
-            await db.execute(stmt)
+                await db.commit()
 
-        await db.commit()
+                result = await db.execute(select(Memory).where(Memory.id == memory_id))
+                memory = result.scalar_one_or_none()
 
-        # Fetch the updated memory to return
-        result = await db.execute(
-            select(Memory).where(Memory.id == memory_id)
-        )
-        return result.scalar_one_or_none()
+            record_operation(OperationNames.MEMORY_VOTE, "success")
+            return memory
+        except Exception:
+            record_operation(OperationNames.MEMORY_VOTE, "error")
+            raise
 
     @staticmethod
     async def get_vote_history(
@@ -186,7 +165,9 @@ class ACERepository:
 
         memory.updated_at = datetime.now(timezone.utc)
 
-        await db.commit()
+        with track_latency(OperationNames.MEMORY_DELTA_UPDATE):
+            await db.commit()
+        record_operation(OperationNames.MEMORY_DELTA_UPDATE, "success")
         return True
 
     @staticmethod
@@ -229,7 +210,9 @@ class ACERepository:
 
         memory.updated_at = datetime.now(timezone.utc)
 
-        await db.commit()
+        with track_latency(OperationNames.MEMORY_DELTA_DEPRECATE):
+            await db.commit()
+        record_operation(OperationNames.MEMORY_DELTA_DEPRECATE, "success")
         return True
 
     # ---------- Reflection Operations ----------
@@ -274,10 +257,12 @@ class ACERepository:
             updated_at=now,
         )
 
-        db.add(memory)
-        await db.commit()
-        await db.refresh(memory)
+        with track_latency(OperationNames.MEMORY_REFLECTION):
+            db.add(memory)
+            await db.commit()
+            await db.refresh(memory)
 
+        record_operation(OperationNames.MEMORY_REFLECTION, "success")
         return memory
 
     # ---------- Playbook Query Operations ----------
@@ -338,8 +323,10 @@ class ACERepository:
             .limit(top_k * 2)  # Over-fetch for post-filtering
         )
 
-        result = await db.execute(query)
-        rows = result.all()
+        with track_latency(OperationNames.MEMORY_QUERY):
+            result = await db.execute(query)
+            rows = result.all()
+        record_operation(OperationNames.MEMORY_QUERY, "success")
 
         # Post-filter by effectiveness score
         filtered = []
@@ -380,10 +367,12 @@ class ACERepository:
             updated_at=now,
         )
 
-        db.add(session)
-        await db.commit()
-        await db.refresh(session)
+        with track_latency(OperationNames.MEMORY_SESSION_CREATE):
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
 
+        record_operation(OperationNames.MEMORY_SESSION_CREATE, "success")
         return session
 
     @staticmethod
@@ -393,14 +382,16 @@ class ACERepository:
         project_id: str,
     ) -> SessionProgress | None:
         """Get session by session_id."""
-        result = await db.execute(
-            select(SessionProgress).where(
-                and_(
-                    SessionProgress.session_id == session_id,
-                    SessionProgress.project_id == project_id,
+        with track_latency(OperationNames.MEMORY_SESSION_GET):
+            result = await db.execute(
+                select(SessionProgress).where(
+                    and_(
+                        SessionProgress.session_id == session_id,
+                        SessionProgress.project_id == project_id,
+                    )
                 )
             )
-        )
+        record_operation(OperationNames.MEMORY_SESSION_GET, "success")
         return result.scalar_one_or_none()
 
     @staticmethod
@@ -462,9 +453,11 @@ class ACERepository:
 
         session.updated_at = datetime.now(timezone.utc)
 
-        await db.commit()
-        await db.refresh(session)
+        with track_latency(OperationNames.MEMORY_SESSION_UPDATE):
+            await db.commit()
+            await db.refresh(session)
 
+        record_operation(OperationNames.MEMORY_SESSION_UPDATE, "success")
         return session
 
     # ---------- Feature Tracking Operations ----------
@@ -498,10 +491,12 @@ class ACERepository:
             updated_at=now,
         )
 
-        db.add(feature)
-        await db.commit()
-        await db.refresh(feature)
+        with track_latency(OperationNames.MEMORY_FEATURE_CREATE):
+            db.add(feature)
+            await db.commit()
+            await db.refresh(feature)
 
+        record_operation(OperationNames.MEMORY_FEATURE_CREATE, "success")
         return feature
 
     @staticmethod
@@ -512,15 +507,17 @@ class ACERepository:
         namespace: str = "default",
     ) -> FeatureTracker | None:
         """Get feature by feature_id."""
-        result = await db.execute(
-            select(FeatureTracker).where(
-                and_(
-                    FeatureTracker.feature_id == feature_id,
-                    FeatureTracker.project_id == project_id,
-                    FeatureTracker.namespace == namespace,
+        with track_latency(OperationNames.MEMORY_FEATURE_GET):
+            result = await db.execute(
+                select(FeatureTracker).where(
+                    and_(
+                        FeatureTracker.feature_id == feature_id,
+                        FeatureTracker.project_id == project_id,
+                        FeatureTracker.namespace == namespace,
+                    )
                 )
             )
-        )
+        record_operation(OperationNames.MEMORY_FEATURE_GET, "success")
         return result.scalar_one_or_none()
 
     @staticmethod
@@ -575,9 +572,11 @@ class ACERepository:
 
         feature.updated_at = now
 
-        await db.commit()
-        await db.refresh(feature)
+        with track_latency(OperationNames.MEMORY_FEATURE_UPDATE):
+            await db.commit()
+            await db.refresh(feature)
 
+        record_operation(OperationNames.MEMORY_FEATURE_UPDATE, "success")
         return feature
 
     @staticmethod
@@ -600,10 +599,12 @@ class ACERepository:
         if status:
             conditions.append(FeatureTracker.status == status)
 
-        result = await db.execute(
-            select(FeatureTracker)
-            .where(and_(*conditions))
-            .order_by(FeatureTracker.created_at)
-        )
+        with track_latency(OperationNames.MEMORY_FEATURE_LIST):
+            result = await db.execute(
+                select(FeatureTracker)
+                .where(and_(*conditions))
+                .order_by(FeatureTracker.created_at)
+            )
 
+        record_operation(OperationNames.MEMORY_FEATURE_LIST, "success")
         return list(result.scalars().all())

@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from embedding_service import content_hash
 from models import Memory, MemoryScope, MemoryType
+from observability import OperationNames, record_operation, track_latency
 from sqlalchemy import and_, cast, delete, not_, or_, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -85,9 +86,15 @@ class MemoryRepository:
             error_pattern=error_pattern,
         )
 
-        db.add(mem)
-        await db.flush()
-        return mem
+        try:
+            with track_latency(OperationNames.MEMORY_ADD):
+                db.add(mem)
+                await db.flush()
+            record_operation(OperationNames.MEMORY_ADD, "success")
+            return mem
+        except Exception:
+            record_operation(OperationNames.MEMORY_ADD, "error")
+            raise
 
     @staticmethod
     async def add_batch(
@@ -127,9 +134,15 @@ class MemoryRepository:
             )
             objs.append(obj)
 
-        db.add_all(objs)
-        await db.flush()
-        return objs
+        try:
+            with track_latency(OperationNames.MEMORY_ADD_BATCH):
+                db.add_all(objs)
+                await db.flush()
+            record_operation(OperationNames.MEMORY_ADD_BATCH, "success")
+            return objs
+        except Exception:
+            record_operation(OperationNames.MEMORY_ADD_BATCH, "error")
+            raise
 
     @staticmethod
     async def semantic_search(
@@ -237,8 +250,14 @@ class MemoryRepository:
             .limit(top_k)
         )
 
-        result = await db.execute(stmt)
-        rows = result.all()
+        try:
+            with track_latency(OperationNames.MEMORY_SEMANTIC_SEARCH):
+                result = await db.execute(stmt)
+                rows = result.all()
+            record_operation(OperationNames.MEMORY_SEMANTIC_SEARCH, "success")
+        except Exception:
+            record_operation(OperationNames.MEMORY_SEMANTIC_SEARCH, "error")
+            raise
 
         # Convert distance to similarity score (1 - distance for cosine)
         # Filter by min_score
@@ -278,8 +297,14 @@ class MemoryRepository:
             conditions.append(Memory.agent_id == agent_id)
 
         stmt = select(Memory).where(and_(*conditions)).limit(1)
-        result = await db.execute(stmt)
-        return result.scalar_one_or_none()
+        try:
+            with track_latency(OperationNames.MEMORY_FIND_DUPLICATE):
+                result = await db.execute(stmt)
+            record_operation(OperationNames.MEMORY_FIND_DUPLICATE, "success")
+            return result.scalar_one_or_none()
+        except Exception:
+            record_operation(OperationNames.MEMORY_FIND_DUPLICATE, "error")
+            raise
 
     @staticmethod
     async def get_by_id(
@@ -292,8 +317,14 @@ class MemoryRepository:
             Memory.id == memory_id,
             Memory.project_id == project_id,
         )
-        result = await db.execute(stmt)
-        return result.scalar_one_or_none()
+        try:
+            with track_latency(OperationNames.MEMORY_GET_BY_ID):
+                result = await db.execute(stmt)
+            record_operation(OperationNames.MEMORY_GET_BY_ID, "success")
+            return result.scalar_one_or_none()
+        except Exception:
+            record_operation(OperationNames.MEMORY_GET_BY_ID, "error")
+            raise
 
     @staticmethod
     async def delete(
@@ -307,8 +338,15 @@ class MemoryRepository:
             Memory.project_id == project_id,
         ).returning(Memory.id)
 
-        result = await db.execute(stmt)
-        return result.scalar_one_or_none() is not None
+        try:
+            with track_latency(OperationNames.MEMORY_DELETE):
+                result = await db.execute(stmt)
+            deleted = result.scalar_one_or_none() is not None
+            record_operation(OperationNames.MEMORY_DELETE, "success" if deleted else "error")
+            return deleted
+        except Exception:
+            record_operation(OperationNames.MEMORY_DELETE, "error")
+            raise
 
     @staticmethod
     async def cleanup_expired(db: AsyncSession, batch_size: int = 1000) -> int:
@@ -384,5 +422,11 @@ class MemoryRepository:
                 .limit(max_memories)
             )
 
-        result = await db.execute(stmt)
-        return [(mem, score) for mem, score in result.all()]
+        try:
+            with track_latency(OperationNames.MEMORY_GET_HANDOFF):
+                result = await db.execute(stmt)
+            record_operation(OperationNames.MEMORY_GET_HANDOFF, "success")
+            return [(mem, score) for mem, score in result.all()]
+        except Exception:
+            record_operation(OperationNames.MEMORY_GET_HANDOFF, "error")
+            raise
