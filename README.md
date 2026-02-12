@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
   <a href="https://docs.aegismemory.com"><img src="https://img.shields.io/badge/docs-aegismemory.com-6366F1" alt="Docs"></a>
 </p>
 
@@ -187,6 +187,8 @@ aegis query "What does the user prefer?" --json
 
 ### 1. Start the Server (2 min)
 
+Requires **Python 3.10+** (matches `pyproject.toml`).
+
 ```bash
 git clone https://github.com/quantifylabs/aegis-memory.git
 cd aegis-memory
@@ -201,6 +203,7 @@ curl http://localhost:8000/health
 ### 2. Install the SDK
 
 ```bash
+# Python 3.10+
 pip install aegis-memory
 ```
 
@@ -412,6 +415,7 @@ ModuleNotFoundError: No module named 'aegis_memory.integrations.langchain'
 
 **Fix:** Install the optional dependency group:
 ```bash
+# Python 3.10+
 pip install aegis-memory[langchain]   # For LangChain
 pip install aegis-memory[crewai]      # For CrewAI
 pip install aegis-memory[server]      # For server components
