@@ -71,7 +71,8 @@
       "pages": [
         "guides/smart-memory",
         "guides/ace-patterns",
-        "guides/production-deployment"
+        "guides/production-deployment",
+        "guides/observability"
       ]
     },
     {

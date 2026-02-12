@@ -13,12 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `aegis init` top-level setup wizard with lightweight framework detection (LangChain/CrewAI) and config bootstrap
   - `aegis new customer-support` starter template scaffold
   - `aegis explore` interactive memory browser for terminal workflows
+- New observability guide with architecture and phased plan for memory analytics, Prometheus expansion, memory timeline events, effectiveness dashboards, and Langfuse/LangSmith exports (`docs/guides/observability.mdx`).
 
 ### Changed
 
 - CLI command module wiring updated so top-level `init`, `new`, and `explore` commands load correctly.
 - CLI error utilities now include `set_debug_mode()` used by the Typer entrypoint.
 - CLI reference docs now document `aegis init`, `aegis new`, and `aegis explore`.
+- README now highlights observability surfaces (metrics, evaluation, dashboard APIs) and links directly to the new observability guide.
 
 
 ## [1.3.0] - 2026-02-06

@@ -1,0 +1,238 @@
+---
+title: "Observability"
+description: "Design and implementation plan for memory analytics, Prometheus metrics, timeline history, effectiveness analysis, and Langfuse/LangSmith exports."
+---
+
+# Observability
+
+Theme: **See what your memories are doing.**
+
+This guide defines the observability architecture and phased rollout for Aegis Memory, with emphasis on:
+
+1. Memory analytics (query patterns, hit rates, scope usage)
+2. Prometheus metrics (latency histograms, memory counts, voting stats)
+3. Memory timeline (how memories evolve)
+4. Effectiveness dashboard (which memories help vs hurt outcomes)
+5. Export to Langfuse/LangSmith
+
+## Current State (Baseline)
+
+Aegis already has:
+
+- `/metrics` endpoint and foundational Prometheus primitives
+- structured logging in `server/observability.py`
+- ACE activity + dashboard routes (`/memories/ace/dashboard/*`)
+- evaluation KPIs via `EvalRepository`
+
+However, telemetry is not yet fully unified across request middleware, repository operations, timeline events, and external tracing providers.
+
+## Goals
+
+- Make memory behavior visible and diagnosable in production.
+- Quantify retrieval quality, not just API uptime.
+- Provide operational feedback loops for ACE memory quality.
+- Export telemetry to existing toolchains (Langfuse/LangSmith) without high coupling.
+
+## Architecture Overview
+
+```text
+Client Request
+    |
+    v
+FastAPI Middleware (request_id, trace context, latency)
+    |
+    +--> Prometheus counters/histograms/gauges
+    |
+    +--> Structured logs
+    |
+    +--> Memory Event Bus (immutable event envelope)
+             |
+             +--> Timeline storage (MemoryEvent table)
+             +--> Async exporters (Langfuse / LangSmith)
+             +--> Dashboard read models
+```
+
+## 1) Memory Analytics
+
+### What to capture
+
+- Query volume and query shape
+  - namespace, agent context, requested scope, filter usage
+- Hit rates
+  - zero-hit ratio, low-hit ratio, average retrieved count
+- Scope usage
+  - distribution of `global`, `agent_private`, `agent_shared` for writes + reads
+- Retrieval quality signals
+  - retrieved memories later voted helpful/harmful
+
+### Suggested metrics
+
+- `aegis_memory_queries_total{namespace,scope,agent_mode}`
+- `aegis_memory_query_hits_total{bucket}` where bucket = `zero|low|medium|high`
+- `aegis_memory_query_results_count` (histogram)
+- `aegis_memory_scope_usage_total{direction,scope}` direction = `write|read`
+
+### Dashboard/API additions
+
+Add `/memories/ace/dashboard/analytics` with:
+
+- hit rate trends (24h/7d/30d)
+- scope usage breakdown
+- top query patterns (normalized)
+- per-agent retrieval and miss rates
+
+## 2) Prometheus Metrics Expansion
+
+### Required dimensions
+
+- Request: method, normalized endpoint, status
+- Memory ops: operation, status, namespace
+- Vote stats: helpful/harmful by agent and memory type
+- Counts: total memories by namespace/scope/type
+
+### Histograms to standardize
+
+- request latency
+- memory query latency
+- memory write latency
+- embedding latency
+- vote update latency
+
+### Notes
+
+- Keep label cardinality bounded (avoid raw query text as labels).
+- Use normalized endpoint paths and bounded enums.
+
+## 3) Memory Timeline
+
+### Why
+
+Current activity endpoints show current rows; they do not represent immutable evolution history.
+
+### Event model
+
+Create a `MemoryEvent` timeline table (append-only):
+
+- identifiers: `event_id`, `memory_id`, `project_id`, `namespace`, `agent_id`
+- event metadata: `event_type`, `created_at`
+- payload: JSON details (delta, vote context, deprecation reason, retrieval metadata)
+
+### Event types
+
+- `created`
+- `queried`
+- `voted_helpful`
+- `voted_harmful`
+- `delta_updated`
+- `deprecated`
+- `reflection_added`
+
+### APIs
+
+- `/memories/ace/dashboard/timeline` (project timeline)
+- `/memories/ace/dashboard/timeline/{memory_id}` (single memory evolution)
+
+## 4) Effectiveness Dashboard
+
+### Core question
+
+Which memories improve completion and which correlate with failures?
+
+### Model
+
+Correlate:
+
+- retrieval events (what memory IDs were returned)
+- vote signals (helpful/harmful)
+- task outcomes (`FeatureTracker.passes`, completion time)
+
+### Outputs
+
+- Memory uplift score (helpful for successful tasks)
+- Memory drag score (associated with failed/slower tasks)
+- Leaderboards by memory type, scope, and agent
+- Confidence-aware ranking (minimum sample and smoothing)
+
+### Endpoints
+
+- `/memories/ace/dashboard/effectiveness/overview`
+- `/memories/ace/dashboard/effectiveness/memories`
+- `/memories/ace/dashboard/effectiveness/segments`
+
+## 5) Export to Langfuse/LangSmith
+
+### Design principles
+
+- provider-agnostic internal envelope first
+- async export queue (do not add latency to write/query paths)
+- retries + dead-letter behavior
+
+### Internal envelope
+
+- trace/request IDs
+- project/agent/session/task identifiers
+- operation + timestamps
+- input/output metadata (bounded)
+- outcome status and latency
+
+### Provider adapters
+
+- `langfuse_exporter` maps events into traces/spans/scores
+- `langsmith_exporter` maps events into runs/feedback artifacts
+
+### Config
+
+- `OBS_EXPORT_LANGFUSE_ENABLED`
+- `OBS_EXPORT_LANGSMITH_ENABLED`
+- provider keys/endpoints
+- queue and retry controls
+
+## Phased Rollout Plan
+
+### Phase 1 — Instrumentation wiring
+
+- Unify middleware + request tracing across API
+- ensure `record_operation` + latency tracking in add/query/vote/delta
+- add bounded labels and metric taxonomy
+
+### Phase 2 — Analytics and timeline
+
+- ship query-hit and scope usage metrics
+- add `MemoryEvent` table and timeline APIs
+
+### Phase 3 — Effectiveness attribution
+
+- join retrieval, votes, and outcomes
+- ship effectiveness views and trend endpoints
+
+### Phase 4 — External exports
+
+- async exporters for Langfuse/LangSmith
+- rollout toggles, retries, and monitoring
+
+### Phase 5 — Unification hardening
+
+- converge metrics/logs/events around shared telemetry schema
+- document compatibility and migration notes
+
+## Success Criteria
+
+- Operators can explain **why** hit rate changed in a given window.
+- Teams can identify top harmful memories and safely deprecate them.
+- Observability data is consumable both in Prometheus/Grafana and Langfuse/LangSmith.
+- Added telemetry has bounded cardinality and low request overhead.
+
+## Risks and Guardrails
+
+- **Cardinality explosion**: constrain labels to enums/normalized values.
+- **Write amplification**: event logging should be append-only and batched where possible.
+- **Attribution bias**: show confidence intervals and sample sizes for effectiveness scoring.
+- **Vendor lock-in**: keep provider adapters behind internal event schema.
+
+## Recommended Next Implementation Ticket Set
+
+1. Middleware + operation taxonomy unification
+2. Query analytics metrics and dashboard endpoint
+3. `MemoryEvent` migration and timeline APIs
+4. Effectiveness attribution joins and endpoints
+5. Langfuse/LangSmith async exporters
