@@ -78,6 +78,23 @@ class Settings(BaseSettings):
     # ---------- CORS ----------
     cors_origins: str = Field(default="*", alias="CORS_ORIGINS")
 
+    # ---------- Observability Exporters ----------
+    obs_langfuse_enabled: bool = Field(default=False, alias="OBS_LANGFUSE_ENABLED")
+    obs_langsmith_enabled: bool = Field(default=False, alias="OBS_LANGSMITH_ENABLED")
+
+    obs_langfuse_api_key: str | None = Field(default=None, alias="OBS_LANGFUSE_API_KEY")
+    obs_langfuse_host: str = Field(default="https://cloud.langfuse.com", alias="OBS_LANGFUSE_HOST")
+
+    obs_langsmith_api_key: str | None = Field(default=None, alias="OBS_LANGSMITH_API_KEY")
+    obs_langsmith_host: str = Field(default="https://api.smith.langchain.com", alias="OBS_LANGSMITH_HOST")
+
+    obs_queue_max_size: int = Field(default=5000, alias="OBS_QUEUE_MAX_SIZE")
+    obs_batch_size: int = Field(default=100, alias="OBS_BATCH_SIZE")
+    obs_batch_flush_interval_ms: int = Field(default=500, alias="OBS_BATCH_FLUSH_INTERVAL_MS")
+    obs_retry_max_attempts: int = Field(default=3, alias="OBS_RETRY_MAX_ATTEMPTS")
+    obs_retry_base_delay_seconds: int = Field(default=2, alias="OBS_RETRY_BASE_DELAY_SECONDS")
+    obs_export_timeout_seconds: int = Field(default=10, alias="OBS_EXPORT_TIMEOUT_SECONDS")
+
     def get_cors_origins(self) -> list[str]:
         raw_origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
