@@ -9,9 +9,11 @@ Requirements:
 
 import pytest
 import asyncio
+import sys
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 import json
+from types import SimpleNamespace
 
 
 # ============================================================================
@@ -318,6 +320,134 @@ class TestAPIEndpoints:
         assert vote_response.status_code == 200
         data = vote_response.json()
         assert data["bullet_helpful"] == 1
+
+
+class TestExportMemories:
+    """Test export streaming behavior for large datasets."""
+
+    @staticmethod
+    def _load_export_route():
+        if "/workspace/aegis-memory/server" not in sys.path:
+            sys.path.insert(0, "/workspace/aegis-memory/server")
+        from routes import ExportRequest, export_memories
+        return ExportRequest, export_memories
+
+    @staticmethod
+    def _memory(idx: int):
+        created = datetime(2024, 1, 1, 0, 0, idx % 60, tzinfo=timezone.utc)
+        return SimpleNamespace(
+            id=f"m-{idx:05d}",
+            content=f"memory {idx}",
+            user_id=None,
+            agent_id="agent-a" if idx % 2 == 0 else None,
+            namespace="default",
+            scope="agent-private",
+            metadata_json={"n": idx},
+            memory_type="standard",
+            created_at=created,
+            updated_at=created,
+            bullet_helpful=0,
+            bullet_harmful=0,
+            embedding=[0.1, 0.2],
+        )
+
+    @pytest.mark.asyncio
+    async def test_export_jsonl_uses_chunked_iteration(self):
+        """JSONL export should iterate DB in batches and stream lines."""
+        ExportRequest, export_memories = self._load_export_route()
+
+        class MockScalarResult:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def all(self):
+                return self._rows
+
+        class MockExecuteResult:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def scalars(self):
+                return MockScalarResult(self._rows)
+
+            def scalar_one(self):
+                return 1500
+
+        class MockDB:
+            def __init__(self):
+                self.offset = 0
+                self.call_count = 0
+
+            async def execute(self, _stmt):
+                self.call_count += 1
+                if self.call_count == 1:
+                    # count_for_export query
+                    return MockExecuteResult([])
+
+                if self.offset >= 1500:
+                    return MockExecuteResult([])
+
+                batch_size = 1000
+                start = self.offset
+                end = min(self.offset + batch_size, 1500)
+                rows = [TestExportMemories._memory(i) for i in range(start, end)]
+                self.offset = end
+                return MockExecuteResult(rows)
+
+        db = MockDB()
+        response = await export_memories(
+            ExportRequest(format="jsonl"),
+            project_id="proj-1",
+            db=db,
+        )
+
+        lines = []
+        async for chunk in response.body_iterator:
+            lines.append(chunk)
+
+        assert len(lines) == 1500
+        assert db.call_count == 3  # count query + two chunk fetches
+        assert response.headers["x-export-total"] == "1500"
+
+    @pytest.mark.asyncio
+    async def test_export_json_limit_and_stats_preserved(self):
+        """JSON export should keep limit semantics and stats values."""
+        ExportRequest, export_memories = self._load_export_route()
+
+        class MockScalarResult:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def all(self):
+                return self._rows
+
+        class MockExecuteResult:
+            def __init__(self, rows):
+                self._rows = rows
+
+            def scalars(self):
+                return MockScalarResult(self._rows)
+
+        class MockDB:
+            def __init__(self):
+                self.offset = 0
+
+            async def execute(self, _stmt):
+                if self.offset >= 3:
+                    return MockExecuteResult([])
+                rows = [TestExportMemories._memory(i) for i in range(self.offset, 3)]
+                self.offset = 3
+                return MockExecuteResult(rows)
+
+        data = await export_memories(
+            ExportRequest(format="json", limit=3),
+            project_id="proj-1",
+            db=MockDB(),
+        )
+
+        assert len(data["memories"]) == 3
+        assert data["stats"]["total_exported"] == 3
+        assert data["stats"]["format"] == "json"
 
 
 class TestACEEndpoints:
