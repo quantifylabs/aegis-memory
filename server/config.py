@@ -78,10 +78,22 @@ class Settings(BaseSettings):
     # ---------- CORS ----------
     cors_origins: str = Field(default="*", alias="CORS_ORIGINS")
 
-    def get_cors_origins(self) -> list:
-        if self.cors_origins == "*":
+    def get_cors_origins(self) -> list[str]:
+        raw_origins = [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+        if raw_origins == ["*"]:
             return ["*"]
-        return [o.strip() for o in self.cors_origins.split(",")]
+
+        if "*" in raw_origins:
+            raise ValueError(
+                "CORS_ORIGINS cannot mix '*' with explicit origins. "
+                "Use '*' alone for non-credential mode."
+            )
+
+        return raw_origins
+
+    def cors_allow_credentials(self) -> bool:
+        return self.get_cors_origins() != ["*"]
 
 
 @lru_cache

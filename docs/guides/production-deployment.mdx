@@ -87,6 +87,25 @@ Production deployment requires significant infrastructure expertise. This guide 
     <Warning>
     **Security**: Never commit `.env` files. Use a secrets manager in production.
     </Warning>
+
+
+    ### CORS Configuration (Production-safe)
+
+    Configure CORS based on whether you send credentials (Authorization headers or cookies):
+
+    ```bash
+    # Credentialed browser clients (recommended)
+    CORS_ORIGINS=https://app.example.com,https://admin.example.com
+    ```
+
+    ```bash
+    # Public API mode without credentials
+    CORS_ORIGINS=*
+    ```
+
+    <Warning>
+    Do not combine `*` with explicit origins. Wildcard origin runs in non-credential mode.
+    </Warning>
   </Tab>
 
   <Tab title="Kubernetes">
