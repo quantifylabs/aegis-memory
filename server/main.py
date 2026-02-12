@@ -13,16 +13,14 @@ ACE Enhancements (v1.1):
 """
 
 import logging
-import time
-import uuid
-from collections.abc import Callable
 from contextlib import asynccontextmanager
 
 from config import get_settings
 from database import check_db_health, init_db
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from observability import ObservabilityMiddleware
 from routes import router as memory_router
 from routes_ace import router as ace_router
 from routes_dashboard import router as dashboard_router
@@ -127,41 +125,10 @@ app.add_middleware(
 )
 
 
-@app.middleware("http")
-async def add_request_id(request: Request, call_next: Callable) -> Response:
-    """Add request ID for tracing."""
-    request_id = request.headers.get("X-Request-ID", uuid.uuid4().hex[:16])
 
-    start = time.monotonic()
-    response = await call_next(request)
-    elapsed = time.monotonic() - start
-
-    response.headers["X-Request-ID"] = request_id
-    response.headers["X-Response-Time"] = f"{elapsed:.3f}s"
-
-    # Log request
-    logger.info(
-        f"{request.method} {request.url.path} "
-        f"status={response.status_code} "
-        f"time={elapsed:.3f}s "
-        f"request_id={request_id}"
-    )
-
-    return response
-
-
-@app.middleware("http")
-async def handle_exceptions(request: Request, call_next: Callable) -> Response:
-    """Global exception handler."""
-    try:
-        return await call_next(request)
-    except Exception as e:
-        logger.exception(f"Unhandled exception: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "Internal server error"},
-        )
-
+app.add_middleware(
+    ObservabilityMiddleware,
+)
 
 # ---------- Routes ----------
 
