@@ -72,7 +72,8 @@
         "guides/smart-memory",
         "guides/ace-patterns",
         "guides/production-deployment",
-        "guides/observability"
+        "guides/observability",
+        "guides/performance-benchmarks"
       ]
     },
     {
