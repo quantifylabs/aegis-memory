@@ -44,10 +44,13 @@ dependencies = [
     "rich>=14.0.0",
     "pyyaml>=6.0.2",
     "textual>=0.50.0",
+    "pydantic>=2.10.0",
+    "mcp>=1.6.0",
 ]
 
 [project.scripts]
 aegis = "aegis_memory.cli.main:main"
+aegis-mcp = "aegis_memory.mcp_server:main"
 
 [project.optional-dependencies]
 server = [
