@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from embedding_service import content_hash
+from event_repository import EventRepository
 from observability import OperationNames, record_operation, track_latency
 from models import (
     FeatureStatus,
@@ -23,6 +24,7 @@ from models import (
     MemoryType,
     SessionProgress,
     VoteHistory,
+    MemoryEventType,
 )
 from sqlalchemy import and_, not_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -104,6 +106,21 @@ class ACERepository:
                 result = await db.execute(select(Memory).where(Memory.id == memory_id))
                 memory = result.scalar_one_or_none()
 
+                if memory is not None:
+                    await EventRepository.create_event(
+                        db,
+                        memory_id=memory_id,
+                        project_id=project_id,
+                        namespace=memory.namespace,
+                        agent_id=voter_agent_id,
+                        event_type=(
+                            MemoryEventType.VOTED_HELPFUL.value
+                            if vote == "helpful"
+                            else MemoryEventType.VOTED_HARMFUL.value
+                        ),
+                        event_payload={"task_id": task_id, "context": context},
+                    )
+
             record_operation(OperationNames.MEMORY_VOTE, "success")
             return memory
         except Exception:
@@ -165,6 +182,16 @@ class ACERepository:
 
         memory.updated_at = datetime.now(timezone.utc)
 
+        await EventRepository.create_event(
+            db,
+            memory_id=memory.id,
+            project_id=project_id,
+            namespace=memory.namespace,
+            agent_id=memory.agent_id,
+            event_type=MemoryEventType.DELTA_UPDATED.value,
+            event_payload={"metadata_patch": metadata_patch or {}},
+        )
+
         with track_latency(OperationNames.MEMORY_DELTA_UPDATE):
             await db.commit()
         record_operation(OperationNames.MEMORY_DELTA_UPDATE, "success")
@@ -209,6 +236,16 @@ class ACERepository:
             memory.metadata_json = metadata
 
         memory.updated_at = datetime.now(timezone.utc)
+
+        await EventRepository.create_event(
+            db,
+            memory_id=memory.id,
+            project_id=project_id,
+            namespace=memory.namespace,
+            agent_id=deprecated_by or memory.agent_id,
+            event_type=MemoryEventType.DEPRECATED.value,
+            event_payload={"superseded_by": superseded_by, "reason": reason},
+        )
 
         with track_latency(OperationNames.MEMORY_DELTA_DEPRECATE):
             await db.commit()
@@ -259,6 +296,15 @@ class ACERepository:
 
         with track_latency(OperationNames.MEMORY_REFLECTION):
             db.add(memory)
+            await EventRepository.create_event(
+                db,
+                memory_id=memory.id,
+                project_id=project_id,
+                namespace=namespace,
+                agent_id=agent_id,
+                event_type=MemoryEventType.REFLECTED.value,
+                event_payload={"source_trajectory_id": source_trajectory_id, "error_pattern": error_pattern},
+            )
             await db.commit()
             await db.refresh(memory)
 
@@ -369,6 +415,15 @@ class ACERepository:
 
         with track_latency(OperationNames.MEMORY_SESSION_CREATE):
             db.add(session)
+            await EventRepository.create_event(
+                db,
+                memory_id=None,
+                project_id=project_id,
+                namespace=namespace,
+                agent_id=agent_id,
+                event_type=MemoryEventType.CREATED.value,
+                event_payload={"source": "session", "session_id": session_id},
+            )
             await db.commit()
             await db.refresh(session)
 
@@ -453,6 +508,16 @@ class ACERepository:
 
         session.updated_at = datetime.now(timezone.utc)
 
+        await EventRepository.create_event(
+            db,
+            memory_id=None,
+            project_id=project_id,
+            namespace=session.namespace,
+            agent_id=session.agent_id,
+            event_type=MemoryEventType.DELTA_UPDATED.value,
+            event_payload={"source": "session", "session_id": session_id, "status": session.status},
+        )
+
         with track_latency(OperationNames.MEMORY_SESSION_UPDATE):
             await db.commit()
             await db.refresh(session)
@@ -493,6 +558,15 @@ class ACERepository:
 
         with track_latency(OperationNames.MEMORY_FEATURE_CREATE):
             db.add(feature)
+            await EventRepository.create_event(
+                db,
+                memory_id=None,
+                project_id=project_id,
+                namespace=namespace,
+                agent_id=None,
+                event_type=MemoryEventType.CREATED.value,
+                event_payload={"source": "feature", "feature_id": feature_id, "status": FeatureStatus.NOT_STARTED.value},
+            )
             await db.commit()
             await db.refresh(feature)
 
@@ -571,6 +645,16 @@ class ACERepository:
             feature.failure_reason = failure_reason
 
         feature.updated_at = now
+
+        await EventRepository.create_event(
+            db,
+            memory_id=None,
+            project_id=project_id,
+            namespace=namespace,
+            agent_id=implemented_by or verified_by,
+            event_type=MemoryEventType.DELTA_UPDATED.value,
+            event_payload={"source": "feature", "feature_id": feature_id, "status": feature.status, "passes": feature.passes},
+        )
 
         with track_latency(OperationNames.MEMORY_FEATURE_UPDATE):
             await db.commit()
