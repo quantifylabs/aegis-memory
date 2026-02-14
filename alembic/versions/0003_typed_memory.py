@@ -17,14 +17,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Widen memory_type column from String(16) to String(32)
-    op.alter_column(
-        "memories",
-        "memory_type",
-        type_=sa.String(32),
-        existing_type=sa.String(16),
-        existing_nullable=False,
-    )
+    # Widen memory_type column from VARCHAR(16) to VARCHAR(32)
+    # Use raw SQL to avoid asyncpg edge cases with alter_column + existing_server_default
+    op.execute("ALTER TABLE memories ALTER COLUMN memory_type TYPE VARCHAR(32)")
 
     # Add typed memory columns
     op.add_column("memories", sa.Column("session_id", sa.String(64), nullable=True))
@@ -54,10 +49,5 @@ def downgrade() -> None:
     op.drop_column("memories", "entity_id")
     op.drop_column("memories", "session_id")
 
-    op.alter_column(
-        "memories",
-        "memory_type",
-        type_=sa.String(16),
-        existing_type=sa.String(32),
-        existing_nullable=False,
-    )
+    # Narrow memory_type back to VARCHAR(16)
+    op.execute("ALTER TABLE memories ALTER COLUMN memory_type TYPE VARCHAR(16)")

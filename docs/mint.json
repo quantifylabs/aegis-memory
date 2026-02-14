@@ -71,6 +71,7 @@
       "pages": [
         "guides/smart-memory",
         "guides/ace-patterns",
+        "guides/typed-memory",
         "guides/production-deployment",
         "guides/observability",
         "guides/performance-benchmarks"
