@@ -91,6 +91,7 @@ client.vote(memories[0].id, "helpful", voter_agent_id="assistant")
 | Long-running agent state | File-based progress tracking | Structured session & feature tracking |
 | Context window limits | Dump everything in prompt | Semantic search + effectiveness scoring |
 | Learning from mistakes | Manual prompt tuning | Memory voting + reflection patterns |
+| Typed cognitive memory (episodic/semantic/procedural/control) | Custom schema per type | Built-in typed memory API with session timelines & entity facts |
 
 **Aegis Memory is not another vector database.** It's an *agent-native memory fabric* with primitives designed for how AI agents actually work.
 
@@ -120,6 +121,7 @@ Different memory tools solve different memory problems. This comparison stays fo
 | **Cross-agent query with policy boundaries** | — | — | — | — | ✓ |
 | **Handoff baton / structured handoff state** | — | — | — | — | ✓ |
 | **ACE loop (vote / reflection / playbook)** | — | — | — | — | ✓ |
+| **Typed memory model** | — | — | — | — | ✓ |
 
 ### When to pick Aegis (quick checklist)
 
@@ -177,6 +179,7 @@ aegis query "What does the user prefer?" --json
 - **Scope-Aware Access** — `agent-private`, `agent-shared`, `global` with automatic ACL
 - **Multi-Agent Handoffs** — Structured state transfer between agents
 - **Auto-Deduplication** — Hash-based O(1) duplicate detection
+- **Typed Memory** — Cognitive memory types: episodic, semantic, procedural, control
 
 ### ACE Patterns
 - **Memory Voting** — Track which memories help vs harm task completion
@@ -319,6 +322,54 @@ client.reflection(
 ```
 
 **[→ ACE Patterns Guide](https://docs.aegismemory.com/guides/ace-patterns)**
+
+## Typed Memory API
+
+Aegis supports 4 cognitive memory types inspired by research SOTA systems for multi-layered agent memory:
+
+```python
+# Episodic — record interaction trace
+client.post("/memories/typed/episodic", json={
+    "content": "User asked about pricing",
+    "agent_id": "sales",
+    "session_id": "conv-42",
+    "sequence_number": 1,
+})
+
+# Semantic — store extracted fact
+client.post("/memories/typed/semantic", json={
+    "content": "User is a Python developer",
+    "entity_id": "user_123",
+})
+
+# Procedural — save reusable strategy
+client.post("/memories/typed/procedural", json={
+    "content": "For API pagination, use cursor-based approach",
+    "agent_id": "executor",
+    "steps": ["Init cursor", "Fetch page", "Check has_more"],
+})
+
+# Control — record meta-rule
+client.post("/memories/typed/control", json={
+    "content": "Never use range() for unknown-length pagination",
+    "agent_id": "reflector",
+    "error_pattern": "pagination_incomplete",
+})
+
+# Query by type
+client.post("/memories/typed/query", json={
+    "query": "pagination strategies",
+    "memory_types": ["procedural", "control"],
+})
+
+# Session timeline
+client.get("/memories/typed/episodic/session/conv-42")
+
+# Entity facts
+client.get("/memories/typed/semantic/entity/user_123")
+```
+
+**[→ Typed Memory Guide](https://docs.aegismemory.com/guides/typed-memory)**
 
 ## Performance
 

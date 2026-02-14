@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-02-14
+
+### Added
+
+- **Typed Memory API** — 4 cognitive memory types inspired by research SOTA systems (MIRIX, G-Memory, BMAM):
+  - `episodic` — Time-ordered interaction traces linked to sessions
+  - `semantic` — Facts, preferences, knowledge linked to entities
+  - `procedural` — Workflows, strategies, reusable patterns
+  - `control` — Meta-rules, error patterns, constraints
+- **7 new API endpoints** under `/memories/typed/`:
+  - `POST /memories/typed/episodic` — Store episodic memory
+  - `POST /memories/typed/semantic` — Store semantic memory
+  - `POST /memories/typed/procedural` — Store procedural memory
+  - `POST /memories/typed/control` — Store control memory
+  - `POST /memories/typed/query` — Type-filtered semantic search
+  - `GET /memories/typed/episodic/session/{session_id}` — Session timeline
+  - `GET /memories/typed/semantic/entity/{entity_id}` — Entity facts
+- **3 new indexed columns** on Memory table: `session_id`, `entity_id`, `sequence_number`
+- **2 partial indexes**: `ix_memories_session`, `ix_memories_entity`
+- **Alembic migration** `0003_typed_memory` (upgrade + downgrade)
+- **Repository methods**: `get_session_timeline()`, `get_entity_facts()`
+- **Test suite**: `tests/test_typed_memory.py`
+
+### Changed
+
+- `MemoryOut` response model extended with `memory_type`, `session_id`, `entity_id`, `sequence_number` fields (both modular and legacy routes)
+- `MemoryQuery` now accepts optional `memory_types` filter list
+- `memory_type` column widened from `String(16)` to `String(32)` for extensibility
+- Version bumped to `1.9.0`
+
 ## [1.8.0] - 2026-02-14
 
 ### Added

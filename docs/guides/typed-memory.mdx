@@ -1,0 +1,200 @@
+---
+title: 'Typed Memory'
+description: 'Cognitive memory types for multi-layered agent memory'
+---
+
+# Typed Memory
+
+Aegis Memory v1.9.0 introduces 4 cognitive memory types inspired by research SOTA systems (MIRIX, G-Memory, BMAM). These types move Aegis from a flat vector+metadata model toward a research-grade multi-layered memory architecture.
+
+## Motivation
+
+Human cognition uses different memory systems for different purposes. Similarly, AI agents benefit from separating:
+
+- **What happened** (episodic) from **what is known** (semantic)
+- **How to do things** (procedural) from **what to avoid** (control)
+
+This separation enables more targeted retrieval, better session continuity, and richer agent self-improvement.
+
+## Memory Types
+
+### Episodic
+
+Time-ordered interaction traces tied to a specific session. Episodic memories capture *what happened* during agent interactions.
+
+**Default scope:** `agent-private` (personal interaction trace)
+
+```python
+POST /memories/typed/episodic
+{
+    "content": "User asked about pricing for enterprise plan",
+    "agent_id": "sales",
+    "session_id": "conv-42",
+    "sequence_number": 1
+}
+```
+
+**Key fields:**
+- `session_id` (required) — Links the memory to a conversation session
+- `sequence_number` (optional) — Explicit ordering within the session
+
+**Use when:** Recording interaction history, building conversation timelines, debugging agent behavior.
+
+### Semantic
+
+Facts, preferences, and knowledge about entities. Semantic memories capture *what is known* and persist across sessions.
+
+**Default scope:** `global` (shared knowledge)
+
+```python
+POST /memories/typed/semantic
+{
+    "content": "User is a Python developer based in Manchester",
+    "entity_id": "user_123"
+}
+```
+
+**Key fields:**
+- `entity_id` (optional) — Links the memory to a specific entity (user, project, concept)
+
+**Use when:** Storing user profiles, extracted facts, domain knowledge, entity attributes.
+
+### Procedural
+
+Workflows, strategies, and reusable patterns. Procedural memories capture *how to do things*.
+
+**Default scope:** `global` (reusable strategies)
+
+```python
+POST /memories/typed/procedural
+{
+    "content": "For API pagination, use cursor-based approach",
+    "agent_id": "executor",
+    "steps": ["Initialize cursor", "Fetch page", "Check has_more flag"],
+    "trigger_conditions": ["API returns paginated results"]
+}
+```
+
+**Key fields:**
+- `steps` (optional) — Ordered list of steps, stored in metadata
+- `trigger_conditions` (optional) — When to apply this procedure, stored in metadata
+
+**Use when:** Recording successful strategies, building agent playbooks, codifying best practices.
+
+### Control
+
+Meta-rules, error patterns, and constraints. Control memories capture *what to avoid* and behavioral boundaries.
+
+**Default scope:** `global` (system-wide rules)
+
+```python
+POST /memories/typed/control
+{
+    "content": "Never use range() for unknown-length pagination",
+    "agent_id": "reflector",
+    "error_pattern": "pagination_incomplete",
+    "severity": "high"
+}
+```
+
+**Key fields:**
+- `error_pattern` (optional) — Categorizes the error type
+- `severity` (optional) — Priority level, stored in metadata
+- `source_trajectory_id` (optional) — Links to the trajectory that triggered this rule
+
+**Use when:** Recording failure modes, enforcing constraints, building guardrails.
+
+## Querying Typed Memories
+
+### Type-Filtered Search
+
+Search across specific memory types:
+
+```python
+POST /memories/typed/query
+{
+    "query": "pagination strategies",
+    "memory_types": ["procedural", "control"],
+    "top_k": 10
+}
+```
+
+### Session Timeline
+
+Get all episodic memories for a session, ordered by sequence:
+
+```python
+GET /memories/typed/episodic/session/conv-42
+```
+
+### Entity Facts
+
+Get all semantic memories for an entity:
+
+```python
+GET /memories/typed/semantic/entity/user_123
+```
+
+### Existing Query Enhancement
+
+The existing `/memories/query` endpoint now accepts a `memory_types` filter:
+
+```python
+POST /memories/query
+{
+    "query": "user preferences",
+    "memory_types": ["semantic", "standard"]
+}
+```
+
+## Relationship to Existing ACE Types
+
+The 4 new types complement the existing 5 types — they don't replace them:
+
+| Existing Type | New Equivalent | Difference |
+|---|---|---|
+| `standard` | `semantic` | `semantic` adds `entity_id` linking |
+| `strategy` | `procedural` | `procedural` adds structured `steps` and `trigger_conditions` |
+| `reflection` | `control` | `control` adds `severity` and broader meta-rule scope |
+| `progress` | `episodic` | `episodic` adds `session_id` and `sequence_number` for finer granularity |
+| `feature` | — | No equivalent; feature tracking remains unique |
+
+Use whichever type best fits your use case. Both sets work side-by-side.
+
+## When to Use Which Type
+
+| Scenario | Recommended Type |
+|---|---|
+| Recording what happened in a conversation | `episodic` |
+| Storing a fact about a user or entity | `semantic` |
+| Saving a reusable workflow or pattern | `procedural` |
+| Recording a rule or constraint | `control` |
+| General-purpose memory storage | `standard` |
+| Storing a lesson from a failure | `reflection` or `control` |
+| Tracking session progress | `progress` |
+| Tracking feature completion | `feature` |
+
+## Database Schema
+
+Three new columns on the `memories` table:
+
+| Column | Type | Purpose |
+|---|---|---|
+| `session_id` | `String(64)` | Links episodic memories to sessions |
+| `entity_id` | `String(128)` | Links semantic memories to entities |
+| `sequence_number` | `Integer` | Ordering within a session |
+
+Two partial indexes for efficient lookups:
+- `ix_memories_session` — `(project_id, session_id)` WHERE session_id IS NOT NULL
+- `ix_memories_entity` — `(project_id, entity_id)` WHERE entity_id IS NOT NULL
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="ACE Patterns" icon="brain" href="/guides/ace-patterns">
+    Self-improving agent patterns (vote, reflect, playbook)
+  </Card>
+  <Card title="API Reference" icon="code" href="/api-reference/rest">
+    Full REST API documentation
+  </Card>
+</CardGroup>

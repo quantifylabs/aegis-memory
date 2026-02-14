@@ -29,6 +29,7 @@ from api.routers import (
     dashboard,
     handoffs,
     memories,
+    typed_memory,
 )
 
 logger = logging.getLogger("aegis")
@@ -130,6 +131,9 @@ def create_app() -> FastAPI:
     app.include_router(ace_progress.router, prefix="/memories/ace", tags=["ACE"])
     app.include_router(ace_features.router, prefix="/memories/ace", tags=["ACE"])
     app.include_router(ace_eval.router, prefix="/memories/ace", tags=["ACE"])
+
+    # Typed Memory (v1.9.0)
+    app.include_router(typed_memory.router, prefix="/memories/typed", tags=["typed-memory"])
 
     # Dashboard
     app.include_router(dashboard.router)

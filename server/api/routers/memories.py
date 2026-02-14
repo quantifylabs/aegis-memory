@@ -64,6 +64,7 @@ class MemoryQuery(BaseModel):
     namespace: str = "default"
     top_k: int = Field(default=10, ge=1, le=100)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    memory_types: list[str] | None = None
 
 
 class CrossAgentQuery(BaseModel):
@@ -82,6 +83,7 @@ class CrossAgentQuery(BaseModel):
 class MemoryOut(BaseModel):
     id: str
     content: str
+    memory_type: str = "standard"
     user_id: str | None
     agent_id: str | None
     namespace: str
@@ -91,6 +93,9 @@ class MemoryOut(BaseModel):
     shared_with_agents: list[str]
     derived_from_agents: list[str]
     coordination_metadata: dict[str, Any]
+    session_id: str | None = None
+    entity_id: str | None = None
+    sequence_number: int | None = None
     score: float | None = None
 
     class Config:
@@ -125,12 +130,17 @@ class ExportRequest(BaseModel):
 
 def _mem_to_out(mem: Memory, score: float | None = None) -> MemoryOut:
     return MemoryOut(
-        id=mem.id, content=mem.content, user_id=mem.user_id,
+        id=mem.id, content=mem.content,
+        memory_type=mem.memory_type or "standard",
+        user_id=mem.user_id,
         agent_id=mem.agent_id, namespace=mem.namespace,
         metadata=mem.metadata_json or {}, created_at=mem.created_at,
         scope=mem.scope, shared_with_agents=mem.shared_with_agents or [],
         derived_from_agents=mem.derived_from_agents or [],
         coordination_metadata=mem.coordination_metadata or {},
+        session_id=mem.session_id,
+        entity_id=mem.entity_id,
+        sequence_number=mem.sequence_number,
         score=score,
     )
 
@@ -210,7 +220,7 @@ async def query_memories(body: MemoryQuery, project_id: str = Depends(check_rate
         with track_latency(OperationNames.MEMORY_QUERY):
             embed_service = get_embedding_service()
             query_embedding = await embed_service.embed_single(body.query, db)
-            results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, agent_id=body.agent_id, requesting_agent_id=body.agent_id, top_k=body.top_k, min_score=body.min_score, requested_scope=body.scope)
+            results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, agent_id=body.agent_id, requesting_agent_id=body.agent_id, top_k=body.top_k, min_score=body.min_score, requested_scope=body.scope, memory_types=body.memory_types)
         elapsed_ms = (time.monotonic() - start) * 1000
         memories = [_mem_to_out(mem, score) for mem, score in results]
         retrieved_ids = [mem.id for mem, _ in results]

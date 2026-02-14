@@ -56,6 +56,10 @@ class MemoryType(str, Enum):
     PROGRESS = "progress"
     FEATURE = "feature"
     STRATEGY = "strategy"
+    EPISODIC = "episodic"
+    SEMANTIC = "semantic"
+    PROCEDURAL = "procedural"
+    CONTROL = "control"
 
 
 class FeatureStatus(str, Enum):
@@ -142,7 +146,7 @@ class Memory(Base):
     namespace = Column(String(64), nullable=False, default="default")
 
     # ACE Enhancement: Memory type categorization
-    memory_type = Column(String(16), nullable=False, default=MemoryType.STANDARD.value)
+    memory_type = Column(String(32), nullable=False, default=MemoryType.STANDARD.value)
 
     content = Column(Text, nullable=False)
     content_hash = Column(String(64), nullable=False, index=True)  # For fast dedup
@@ -173,6 +177,11 @@ class Memory(Base):
     # ACE Enhancement: Source tracking for reflections
     source_trajectory_id = Column(String(64), nullable=True)  # Links reflection to source
     error_pattern = Column(String(128), nullable=True)  # Categorizes error type
+
+    # Typed Memory (v1.9.0): Cognitive memory type support
+    session_id = Column(String(64), nullable=True)  # Links episodic memories to session
+    entity_id = Column(String(128), nullable=True)  # Links semantic memories to entity
+    sequence_number = Column(Integer, nullable=True)  # Ordering within session
 
     # Relationships
     votes = relationship("VoteHistory", back_populates="memory", cascade="all, delete-orphan")
@@ -208,6 +217,12 @@ class Memory(Base):
             postgresql_with={'m': 16, 'ef_construction': 64},
             postgresql_ops={'embedding': 'vector_cosine_ops'}
         ),
+
+        # Typed Memory (v1.9.0): Partial indexes for session and entity queries
+        Index('ix_memories_session', 'project_id', 'session_id',
+              postgresql_where=text('session_id IS NOT NULL')),
+        Index('ix_memories_entity', 'project_id', 'entity_id',
+              postgresql_where=text('entity_id IS NOT NULL')),
     )
 
     def can_access(self, requesting_agent_id: str | None) -> bool:

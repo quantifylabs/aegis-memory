@@ -56,6 +56,9 @@ class MemoryRepository:
         memory_type: str = MemoryType.STANDARD.value,  # ACE Enhancement
         source_trajectory_id: str | None = None,  # ACE Enhancement
         error_pattern: str | None = None,  # ACE Enhancement
+        session_id: str | None = None,  # Typed Memory
+        entity_id: str | None = None,  # Typed Memory
+        sequence_number: int | None = None,  # Typed Memory
     ) -> Memory:
         """Add a single memory."""
         memory_id = uuid4().hex
@@ -85,6 +88,9 @@ class MemoryRepository:
             memory_type=memory_type,
             source_trajectory_id=source_trajectory_id,
             error_pattern=error_pattern,
+            session_id=session_id,
+            entity_id=entity_id,
+            sequence_number=sequence_number,
         )
 
         try:
@@ -144,6 +150,9 @@ class MemoryRepository:
                 derived_from_agents=m.get("derived_from_agents") or [],
                 coordination_metadata=m.get("coordination_metadata") or {},
                 memory_type=m.get("memory_type", MemoryType.STANDARD.value),
+                session_id=m.get("session_id"),
+                entity_id=m.get("entity_id"),
+                sequence_number=m.get("sequence_number"),
             )
             objs.append(obj)
 
@@ -486,3 +495,70 @@ class MemoryRepository:
         except Exception:
             record_operation(OperationNames.MEMORY_GET_HANDOFF, "error")
             raise
+
+    @staticmethod
+    async def get_session_timeline(
+        db: AsyncSession,
+        *,
+        project_id: str,
+        session_id: str,
+        namespace: str = "default",
+        include_deprecated: bool = False,
+        limit: int = 100,
+    ) -> list[Memory]:
+        """
+        Get episodic memories for a session ordered by sequence_number then created_at.
+
+        Uses the ix_memories_session partial index for efficient lookups.
+        """
+        conditions = [
+            Memory.project_id == project_id,
+            Memory.session_id == session_id,
+            Memory.namespace == namespace,
+        ]
+        if not include_deprecated:
+            conditions.append(not_(Memory.is_deprecated))
+
+        stmt = (
+            select(Memory)
+            .where(and_(*conditions))
+            .order_by(
+                Memory.sequence_number.asc().nulls_last(),
+                Memory.created_at.asc(),
+            )
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
+
+    @staticmethod
+    async def get_entity_facts(
+        db: AsyncSession,
+        *,
+        project_id: str,
+        entity_id: str,
+        namespace: str = "default",
+        include_deprecated: bool = False,
+        limit: int = 100,
+    ) -> list[Memory]:
+        """
+        Get semantic memories for an entity ordered by created_at desc.
+
+        Uses the ix_memories_entity partial index for efficient lookups.
+        """
+        conditions = [
+            Memory.project_id == project_id,
+            Memory.entity_id == entity_id,
+            Memory.namespace == namespace,
+        ]
+        if not include_deprecated:
+            conditions.append(not_(Memory.is_deprecated))
+
+        stmt = (
+            select(Memory)
+            .where(and_(*conditions))
+            .order_by(Memory.created_at.desc())
+            .limit(limit)
+        )
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
