@@ -7,7 +7,112 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-02-14
+
 ### Added
+
+- **`RateLimiterProtocol`** (`runtime_checkable`) -- shared interface for all rate limiter implementations with `check()` and `get_remaining()` methods
+- **`get_remaining()`** on `RedisRateLimiter` -- synchronous approximation + async-precise variant (`get_remaining_async()`)
+- **`create_rate_limiter()` factory** -- auto-detects Redis from `REDIS_URL`, falls back to in-memory
+- **`X-RateLimit-*` response headers** on every API response:
+  - `X-RateLimit-Limit-Minute`, `X-RateLimit-Remaining-Minute`
+  - `X-RateLimit-Limit-Hour`, `X-RateLimit-Remaining-Hour`
+- **Reproducible benchmark harness** (`benchmarks/`):
+  - `generate_dataset.py` -- seeded JSONL dataset generator
+  - `query_workload.py` -- async workload runner with latency percentiles
+  - `run_benchmark.sh` -- end-to-end benchmark script
+  - `machine_profile.py` -- capture hardware profile for reproducibility
+- Rate limiter test suite (`tests/test_rate_limiter_unified.py`) -- protocol conformance, factory, headers
+- Version test suite (`tests/test_version.py`) -- checks no hardcoded version strings remain
+- **Baseline benchmark results** (`benchmarks/results.json`) -- 1060 ops, 0% error rate on 8 vCPU / 7.6 GB RAM; concurrent writes at 85 ops/s (p50=100ms), concurrent queries at 18.6 ops/s (p50=413ms)
+- README Performance section updated with actual benchmark data, replacing provisional numbers
+
+### Changed
+
+- **Version synchronized from `pyproject.toml`** via `importlib.metadata.version("aegis-memory")` with `"dev"` fallback
+- Removed all hardcoded `"1.2.0"` version strings from `main.py` and `api/app.py`
+
+## [1.7.0] - 2026-02-14
+
+### Added
+
+- **Modular application structure** -- decomposed into `api/`, `domain/`, `infra/` bounded contexts
+  - `api/app.py` -- new modular FastAPI entry point via `create_app()`
+  - `api/routers/` -- 9 focused routers (memories, handoffs, ace_votes, ace_delta, ace_reflections, ace_progress, ace_features, ace_eval, dashboard), each under 300 lines
+  - `api/dependencies/` -- shared auth, rate_limit, and database dependencies
+- **Domain layer** (`domain/`) with service, repository, and model modules for memory, ACE, events, and eval
+- **Infrastructure layer** (`infra/`) with adapters for DB, embeddings, observability, auth, and config
+- `KeyStore` class (`infra/auth/key_store.py`) for API key management
+
+### Changed
+
+- **Unified transaction boundaries** -- all `await db.commit()` calls removed from `ace_repository.py`; commit/rollback now handled exclusively by the `get_db()` FastAPI dependency
+- Original `main.py`, `routes.py`, `routes_ace.py` retained as backward-compatible entry points
+- `api/app.py` version bumped to `1.7.0`
+
+## [1.6.0] - 2026-02-14
+
+### Added
+
+- **Normalized `memory_shared_agents` join table** for scalable ACL lookups
+  - `MemorySharedAgent` ORM model with composite PK (`memory_id`, `shared_agent_id`)
+  - Indexes: `ix_msa_memory_agent` (unique), `ix_msa_query` (project + namespace + agent)
+  - Alembic migration `0002_memory_shared_agents`
+- **Dual-write** on `add()` and `add_batch()` -- populates both JSON and join table
+- **Backfill script** (`server/backfill_acl.py`) -- idempotent migration from JSON to join table
+- ACL test suite (`tests/test_acl.py`) covering dual-write, join-based read, backfill, cascade
+
+### Changed
+
+- `semantic_search` ACL now uses indexed join-table subquery instead of JSONB `@>` containment
+- `query_playbook` ACL switched from JSONB containment to join-table subquery
+- `shared_with_agents` JSON column retained for backward compatibility but no longer read for ACL decisions
+
+## [1.5.0] - 2026-02-14
+
+### Added
+
+- **Alembic as canonical schema source** -- deterministic schema lifecycle
+  - `alembic.ini`, `alembic/env.py` with async migration support
+  - Baseline migration `0001_baseline.py` capturing full v1.3.0+ schema
+  - `script.py.mako` template for new migrations
+- `Makefile` with `db-upgrade`, `db-downgrade`, `db-migrate`, `db-check` targets
+- CI workflow `.github/workflows/migration-check.yml` for migration round-trip testing
+- Migration test suite (`tests/test_migrations.py`)
+
+### Changed
+
+- `init_db()` is now environment-aware:
+  - `AEGIS_ENV=development` (default): uses `create_all()` as before
+  - `AEGIS_ENV=production`: verifies `alembic_version` table exists; fails fast if not
+- `alembic>=1.13.0` added to `[server]` dependencies in `pyproject.toml`
+
+### Removed
+
+- `INIT_SQL` and `MIGRATION_SQL_V1_1` raw SQL constants from `models.py` (schema now managed by Alembic)
+
+## [1.4.0] - 2026-02-14
+
+### Added
+
+- **Project-scoped API key authentication** behind `ENABLE_PROJECT_AUTH` feature flag
+  - `Project` and `ApiKey` ORM models for multi-tenant isolation
+  - `TokenVerifier` for bearer token validation (legacy + project key modes)
+  - `AuthPolicy` with `can_write_memory()` and `can_query_memory()` checks
+  - SHA-256 key hashing for secure storage
+  - Key expiration and active/inactive status support
+  - Audit logging for every authentication decision
+- `ENABLE_PROJECT_AUTH` config flag (default: `false`) -- zero behavior change when off
+- `AEGIS_ENV` config flag (`development` | `production`) for environment-aware behavior
+- Migration `004_project_auth.sql` with `projects` and `api_keys` tables + default project seed
+- Auth test suite (`tests/test_auth.py`) covering legacy fallback, project keys, policy, audit
+
+### Changed
+
+- `get_project_id` dependency extracted from `routes.py` into `server/auth.py`
+- `routes.py` and `routes_ace.py` import auth from centralized module
+
+### Added (Unreleased)
 
 - CLI onboarding and productivity commands:
   - `aegis init` top-level setup wizard with lightweight framework detection (LangChain/CrewAI) and config bootstrap

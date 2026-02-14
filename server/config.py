@@ -75,6 +75,18 @@ class Settings(BaseSettings):
     # ---------- Redis (optional, for distributed rate limiting) ----------
     redis_url: str | None = Field(default=None, alias="REDIS_URL")
 
+    # ---------- Auth ----------
+    enable_project_auth: bool = Field(
+        default=False,
+        alias="ENABLE_PROJECT_AUTH",
+        description="Enable project-scoped API key auth. When false, uses legacy single AEGIS_API_KEY.",
+    )
+    aegis_env: str = Field(
+        default="development",
+        alias="AEGIS_ENV",
+        description="Environment: 'development' or 'production'. Controls schema init behavior.",
+    )
+
     # ---------- CORS ----------
     cors_origins: str = Field(default="*", alias="CORS_ORIGINS")
 

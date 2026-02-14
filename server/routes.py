@@ -12,6 +12,7 @@ Key improvements:
 from datetime import datetime
 from typing import Any
 
+from auth import get_project_id
 from config import get_settings
 from database import get_db, get_read_db
 from embedding_service import content_hash, get_embedding_service
@@ -151,26 +152,7 @@ class HandoffBaton(BaseModel):
 
 # ---------- Dependencies ----------
 
-async def get_project_id(request: Request) -> str:
-    """Extract and validate project ID from API key."""
-    auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing or malformed Authorization header. Expected: 'Bearer <api_key>'"
-        )
-
-    token = auth[7:].strip()
-
-    # In production, validate against a projects table
-    # For now, use the configured API key
-    if token != settings.aegis_api_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key. Check AEGIS_API_KEY environment variable on the server."
-        )
-
-    return settings.default_project_id
+# get_project_id is imported from auth.py (supports legacy + project-scoped keys)
 
 
 async def check_rate_limit(project_id: str = Depends(get_project_id)):

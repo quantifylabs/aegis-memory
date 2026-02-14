@@ -68,6 +68,47 @@ class FeatureStatus(str, Enum):
     FAILED = "failed"
 
 
+class Project(Base):
+    """
+    Project represents a tenant in the multi-tenant auth model.
+
+    Each project has its own set of API keys and isolated memory namespace.
+    """
+    __tablename__ = "projects"
+
+    id = Column(String(64), primary_key=True)
+    name = Column(String(128), nullable=False)
+    description = Column(Text, nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    api_keys = relationship("ApiKey", back_populates="project", cascade="all, delete-orphan")
+
+
+class ApiKey(Base):
+    """
+    API key for project-scoped authentication.
+
+    Keys are stored as SHA-256 hashes. The raw key is only shown once at creation.
+    """
+    __tablename__ = "api_keys"
+
+    id = Column(String(32), primary_key=True)
+    project_id = Column(String(64), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    key_hash = Column(String(64), nullable=False, unique=True, index=True)
+    name = Column(String(128), nullable=False, default="default")
+    is_active = Column(Boolean, nullable=False, default=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    project = relationship("Project", back_populates="api_keys")
+
+    __table_args__ = (
+        Index('ix_api_keys_project', 'project_id'),
+    )
+
+
 class MemoryEventType(str, Enum):
     CREATED = "created"
     QUERIED = "queried"
@@ -135,6 +176,7 @@ class Memory(Base):
 
     # Relationships
     votes = relationship("VoteHistory", back_populates="memory", cascade="all, delete-orphan")
+    shared_agents = relationship("MemorySharedAgent", back_populates="memory", cascade="all, delete-orphan")
 
     # Composite indexes for the most common query patterns
     __table_args__ = (
@@ -199,6 +241,29 @@ class Memory(Base):
         if total == 0:
             return 0.0
         return (self.bullet_helpful - self.bullet_harmful) / (total + 1)
+
+
+class MemorySharedAgent(Base):
+    """
+    Normalized join table for memory ACL sharing.
+
+    Replaces JSON-based shared_with_agents lookups with an indexed table
+    for O(1) ACL checks at scale.
+    """
+    __tablename__ = "memory_shared_agents"
+
+    memory_id = Column(String(32), ForeignKey("memories.id", ondelete="CASCADE"), primary_key=True)
+    shared_agent_id = Column(String(64), primary_key=True)
+    project_id = Column(String(64), nullable=False)
+    namespace = Column(String(64), nullable=False, default="default")
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    memory = relationship("Memory", back_populates="shared_agents")
+
+    __table_args__ = (
+        Index('ix_msa_memory_agent', 'memory_id', 'shared_agent_id', unique=True),
+        Index('ix_msa_query', 'project_id', 'namespace', 'shared_agent_id'),
+    )
 
 
 class VoteHistory(Base):
@@ -366,132 +431,5 @@ class MemoryEvent(Base):
     )
 
 
-# SQL to run after table creation (for pgvector setup)
-INIT_SQL = """
--- Enable pgvector
-CREATE EXTENSION IF NOT EXISTS vector;
-
--- Set HNSW search parameters for queries (can tune per-query too)
-SET hnsw.ef_search = 100;
-
--- Create the HNSW index if it doesn't exist
--- This is idempotent
-CREATE INDEX IF NOT EXISTS ix_memories_embedding_hnsw
-ON memories USING hnsw (embedding vector_cosine_ops)
-WITH (m = 16, ef_construction = 64);
-
--- ACE Enhancement: Index for memory type queries
-CREATE INDEX IF NOT EXISTS ix_memories_project_type
-ON memories (project_id, namespace, memory_type);
-
--- ACE Enhancement: Partial index for active (non-deprecated) memories
-CREATE INDEX IF NOT EXISTS ix_memories_active
-ON memories (project_id, namespace)
-WHERE is_deprecated = false;
-
--- ACE Enhancement: Vote history indexes
-CREATE INDEX IF NOT EXISTS ix_votes_memory ON vote_history (memory_id);
-CREATE INDEX IF NOT EXISTS ix_votes_agent ON vote_history (project_id, voter_agent_id);
-
--- ACE Enhancement: Session progress indexes
-CREATE INDEX IF NOT EXISTS ix_session_project ON session_progress (project_id, namespace);
-CREATE INDEX IF NOT EXISTS ix_session_agent ON session_progress (project_id, agent_id);
-
--- ACE Enhancement: Feature tracker indexes
-CREATE INDEX IF NOT EXISTS ix_feature_project ON feature_tracker (project_id, namespace);
-CREATE INDEX IF NOT EXISTS ix_feature_session ON feature_tracker (session_id);
-CREATE INDEX IF NOT EXISTS ix_feature_status ON feature_tracker (project_id, status);
-
--- Effectiveness analytics linkage indexes
-CREATE INDEX IF NOT EXISTS ix_memory_events_project_task ON memory_events (project_id, task_id);
-CREATE INDEX IF NOT EXISTS ix_memory_events_project_retrieval ON memory_events (project_id, retrieval_event_id);
-"""
-
-
-# Migration SQL for existing deployments
-MIGRATION_SQL_V1_1 = """
--- Add new columns to memories table (ACE enhancements)
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS memory_type VARCHAR(16) DEFAULT 'standard';
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS is_deprecated BOOLEAN DEFAULT false;
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS deprecated_at TIMESTAMPTZ;
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS deprecated_by VARCHAR(64);
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS superseded_by VARCHAR(32);
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS source_trajectory_id VARCHAR(64);
-ALTER TABLE memories ADD COLUMN IF NOT EXISTS error_pattern VARCHAR(128);
-
--- Create vote_history table
-CREATE TABLE IF NOT EXISTS vote_history (
-    id VARCHAR(32) PRIMARY KEY,
-    memory_id VARCHAR(32) REFERENCES memories(id) ON DELETE CASCADE,
-    project_id VARCHAR(64) NOT NULL,
-    voter_agent_id VARCHAR(64) NOT NULL,
-    vote VARCHAR(8) NOT NULL,
-    context TEXT,
-    task_id VARCHAR(64),
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Create session_progress table
-CREATE TABLE IF NOT EXISTS session_progress (
-    id VARCHAR(32) PRIMARY KEY,
-    project_id VARCHAR(64) NOT NULL,
-    session_id VARCHAR(64) UNIQUE NOT NULL,
-    agent_id VARCHAR(64),
-    user_id VARCHAR(64),
-    namespace VARCHAR(64) DEFAULT 'default',
-    completed_items JSONB DEFAULT '[]',
-    in_progress_item VARCHAR(256),
-    next_items JSONB DEFAULT '[]',
-    blocked_items JSONB DEFAULT '[]',
-    status VARCHAR(16) DEFAULT 'active',
-    summary TEXT,
-    last_action TEXT,
-    total_items INTEGER DEFAULT 0,
-    completed_count INTEGER DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Create feature_tracker table
-CREATE TABLE IF NOT EXISTS feature_tracker (
-    id VARCHAR(32) PRIMARY KEY,
-    project_id VARCHAR(64) NOT NULL,
-    session_id VARCHAR(64),
-    namespace VARCHAR(64) DEFAULT 'default',
-    feature_id VARCHAR(128) NOT NULL,
-    category VARCHAR(64),
-    description TEXT NOT NULL,
-    test_steps JSONB DEFAULT '[]',
-    status VARCHAR(16) DEFAULT 'not_started',
-    passes BOOLEAN DEFAULT false,
-    implemented_by VARCHAR(64),
-    verified_by VARCHAR(64),
-    implementation_notes TEXT,
-    failure_reason TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    completed_at TIMESTAMPTZ
-);
-
--- Create indexes
-CREATE INDEX IF NOT EXISTS ix_memories_project_type ON memories (project_id, namespace, memory_type);
-CREATE INDEX IF NOT EXISTS ix_memories_active ON memories (project_id, namespace) WHERE is_deprecated = false;
-CREATE INDEX IF NOT EXISTS ix_votes_memory ON vote_history (memory_id);
-CREATE INDEX IF NOT EXISTS ix_votes_agent ON vote_history (project_id, voter_agent_id);
-CREATE INDEX IF NOT EXISTS ix_session_project ON session_progress (project_id, namespace);
-CREATE INDEX IF NOT EXISTS ix_session_agent ON session_progress (project_id, agent_id);
-CREATE INDEX IF NOT EXISTS ix_feature_project ON feature_tracker (project_id, namespace);
-CREATE INDEX IF NOT EXISTS ix_feature_session ON feature_tracker (session_id);
-CREATE INDEX IF NOT EXISTS ix_feature_status ON feature_tracker (project_id, status);
-
--- Effectiveness analytics linkage indexes
-CREATE INDEX IF NOT EXISTS ix_memory_events_project_task ON memory_events (project_id, task_id);
-CREATE INDEX IF NOT EXISTS ix_memory_events_project_retrieval ON memory_events (project_id, retrieval_event_id);
-
--- Extend memory events with retrieval/task linkage for effectiveness analytics
-ALTER TABLE memory_events ADD COLUMN IF NOT EXISTS task_id VARCHAR(128);
-ALTER TABLE memory_events ADD COLUMN IF NOT EXISTS retrieval_event_id VARCHAR(32);
-ALTER TABLE memory_events ADD COLUMN IF NOT EXISTS selected_memory_ids JSONB DEFAULT '[]';
-CREATE INDEX IF NOT EXISTS ix_memory_events_project_task ON memory_events (project_id, task_id);
-CREATE INDEX IF NOT EXISTS ix_memory_events_project_retrieval ON memory_events (project_id, retrieval_event_id);
-"""
+# Legacy SQL constants removed in v1.5.0 -- schema is now managed by Alembic.
+# See alembic/versions/ for migration history.

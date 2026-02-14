@@ -12,6 +12,7 @@ ACE Enhancements (v1.1):
 6. Voting, delta updates, progress tracking, feature tracking endpoints
 """
 
+import importlib.metadata
 import logging
 from contextlib import asynccontextmanager
 
@@ -34,6 +35,11 @@ logging.basicConfig(
 logger = logging.getLogger("aegis")
 
 settings = get_settings()
+
+try:
+    __version__ = importlib.metadata.version("aegis-memory")
+except importlib.metadata.PackageNotFoundError:
+    __version__ = "dev"
 
 
 @asynccontextmanager
@@ -84,7 +90,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Aegis Memory API",
-    version="1.2.0",
+    version=__version__,
     description="""
     # Aegis Memory
 
@@ -144,7 +150,7 @@ async def root():
     """API root - returns basic info."""
     return {
         "name": "Aegis Memory API",
-        "version": "1.2.0",
+        "version": __version__,
         "docs": "/docs",
         "health": "/health",
         "metrics": "/metrics",
@@ -158,7 +164,7 @@ async def health():
 
     return {
         "status": "healthy" if db_health["status"] == "healthy" else "degraded",
-        "version": "1.2.0",
+        "version": __version__,
         "features": ["voting", "delta_updates", "progress_tracking", "feature_tracking"],
         "database": db_health,
     }

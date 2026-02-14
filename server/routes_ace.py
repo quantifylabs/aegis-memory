@@ -18,18 +18,20 @@ from datetime import datetime
 from typing import Any, Literal
 
 from ace_repository import ACERepository
-from event_repository import EventRepository
+from auth import get_project_id
 from config import get_settings
 from database import get_db, get_read_db
 from embedding_service import get_embedding_service
 from eval_repository import EvalRepository
+from event_repository import EventRepository
 from fastapi import APIRouter, Depends, HTTPException
 from memory_repository import MemoryRepository
 from models import FeatureStatus, MemoryEventType, MemoryScope, MemoryType
+from observability import OperationNames, record_operation, track_latency
 from pydantic import BaseModel, Field
+from rate_limiter import RateLimiter, RateLimitExceeded
 from routes import check_rate_limit
 from scope_inference import ScopeInference
-from observability import OperationNames, record_operation, track_latency
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/ace", tags=["ACE"])

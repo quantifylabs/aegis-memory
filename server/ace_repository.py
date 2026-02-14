@@ -21,6 +21,7 @@ from models import (
     FeatureTracker,
     Memory,
     MemoryScope,
+    MemorySharedAgent,
     MemoryType,
     SessionProgress,
     VoteHistory,
@@ -101,7 +102,7 @@ class ACERepository:
                     )
                     await db.execute(stmt)
 
-                await db.commit()
+                await db.flush()
 
                 result = await db.execute(select(Memory).where(Memory.id == memory_id))
                 memory = result.scalar_one_or_none()
@@ -193,7 +194,7 @@ class ACERepository:
         )
 
         with track_latency(OperationNames.MEMORY_DELTA_UPDATE):
-            await db.commit()
+            await db.flush()
         record_operation(OperationNames.MEMORY_DELTA_UPDATE, "success")
         return True
 
@@ -248,7 +249,7 @@ class ACERepository:
         )
 
         with track_latency(OperationNames.MEMORY_DELTA_DEPRECATE):
-            await db.commit()
+            await db.flush()
         record_operation(OperationNames.MEMORY_DELTA_DEPRECATE, "success")
         return True
 
@@ -305,7 +306,7 @@ class ACERepository:
                 event_type=MemoryEventType.REFLECTED.value,
                 event_payload={"source_trajectory_id": source_trajectory_id, "error_pattern": error_pattern},
             )
-            await db.commit()
+            await db.flush()
             await db.refresh(memory)
 
         record_operation(OperationNames.MEMORY_REFLECTION, "success")
@@ -335,19 +336,16 @@ class ACERepository:
 
         Ranked by semantic similarity.
         """
-        from sqlalchemy import cast
-        from sqlalchemy.dialects.postgresql import JSONB
-
-        # Build access control filter using JSONB containment
-        # Cast shared_with_agents to JSONB and check if it contains the agent ID
-        shared_contains = cast(Memory.shared_with_agents, JSONB).contains(
-            cast([requesting_agent_id], JSONB)
+        # Build access control filter using normalized join table
+        shared_subquery = (
+            select(MemorySharedAgent.memory_id)
+            .where(MemorySharedAgent.shared_agent_id == requesting_agent_id)
         )
 
         access_filter = or_(
             Memory.scope == MemoryScope.GLOBAL.value,
             Memory.agent_id == requesting_agent_id,
-            shared_contains,
+            Memory.id.in_(shared_subquery),
         )
 
         # Build base query with filters
@@ -424,7 +422,7 @@ class ACERepository:
                 event_type=MemoryEventType.CREATED.value,
                 event_payload={"source": "session", "session_id": session_id},
             )
-            await db.commit()
+            await db.flush()
             await db.refresh(session)
 
         record_operation(OperationNames.MEMORY_SESSION_CREATE, "success")
@@ -519,7 +517,7 @@ class ACERepository:
         )
 
         with track_latency(OperationNames.MEMORY_SESSION_UPDATE):
-            await db.commit()
+            await db.flush()
             await db.refresh(session)
 
         record_operation(OperationNames.MEMORY_SESSION_UPDATE, "success")
@@ -567,7 +565,7 @@ class ACERepository:
                 event_type=MemoryEventType.CREATED.value,
                 event_payload={"source": "feature", "feature_id": feature_id, "status": FeatureStatus.NOT_STARTED.value},
             )
-            await db.commit()
+            await db.flush()
             await db.refresh(feature)
 
         record_operation(OperationNames.MEMORY_FEATURE_CREATE, "success")
@@ -663,7 +661,7 @@ class ACERepository:
         )
 
         with track_latency(OperationNames.MEMORY_FEATURE_UPDATE):
-            await db.commit()
+            await db.flush()
             await db.refresh(feature)
 
         record_operation(OperationNames.MEMORY_FEATURE_UPDATE, "success")

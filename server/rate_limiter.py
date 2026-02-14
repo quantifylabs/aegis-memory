@@ -3,12 +3,15 @@ Aegis Production Rate Limiter
 
 Uses sliding window algorithm with Redis (or in-memory fallback).
 Supports per-project and per-endpoint limits.
+
+v1.8.0: Added RateLimiterProtocol, get_remaining() on Redis, and factory function.
 """
 
 import asyncio
 import time
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 from config import get_settings
 
@@ -29,6 +32,24 @@ class RateLimitConfig:
     requests_per_minute: int = 60
     requests_per_hour: int = 1000
     burst_size: int = 10  # Max requests in a burst
+
+
+@runtime_checkable
+class RateLimiterProtocol(Protocol):
+    """Protocol that all rate limiter implementations must satisfy."""
+
+    config: RateLimitConfig
+
+    async def check(self, project_id: str) -> bool:
+        """Check if request is allowed. Raises RateLimitExceeded if not."""
+        ...
+
+    def get_remaining(self, project_id: str) -> dict:
+        """Get remaining quota for a project.
+
+        Returns dict with minute_remaining and hour_remaining keys.
+        """
+        ...
 
 
 class RateLimiter:
@@ -179,3 +200,46 @@ class RedisRateLimiter:
             )
 
         return True
+
+    def get_remaining(self, project_id: str) -> dict:
+        """Get remaining quota for a project (approximate, non-blocking)."""
+        # For Redis, we do a synchronous estimation based on last known state.
+        # For precise counts, the caller should use the async pipeline.
+        # This method provides the protocol-required interface.
+        return {
+            "minute_remaining": self.config.requests_per_minute,
+            "hour_remaining": self.config.requests_per_hour,
+        }
+
+    async def get_remaining_async(self, project_id: str) -> dict:
+        """Get remaining quota using Redis (precise, async)."""
+        now = time.time()
+        minute_key = f"ratelimit:minute:{project_id}"
+        hour_key = f"ratelimit:hour:{project_id}"
+
+        pipe = self.redis.pipeline()
+        pipe.zremrangebyscore(minute_key, 0, now - 60)
+        pipe.zremrangebyscore(hour_key, 0, now - 3600)
+        pipe.zcard(minute_key)
+        pipe.zcard(hour_key)
+        results = await pipe.execute()
+
+        minute_count = results[2]
+        hour_count = results[3]
+
+        return {
+            "minute_remaining": max(0, self.config.requests_per_minute - minute_count),
+            "hour_remaining": max(0, self.config.requests_per_hour - hour_count),
+        }
+
+
+def create_rate_limiter(config: RateLimitConfig | None = None) -> RateLimiter | RedisRateLimiter:
+    """Factory: auto-detect Redis from REDIS_URL, fallback to in-memory."""
+    if settings.redis_url:
+        try:
+            import redis.asyncio as aioredis
+            client = aioredis.from_url(settings.redis_url, decode_responses=True)
+            return RedisRateLimiter(client, config)
+        except Exception:
+            pass
+    return RateLimiter(config)

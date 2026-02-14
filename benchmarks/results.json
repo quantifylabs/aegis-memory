@@ -1,0 +1,111 @@
+{
+  "timestamp": "2026-02-14T14:58:24.132870+00:00",
+  "base_url": "http://localhost:8000",
+  "dataset": "dataset.jsonl",
+  "server_version": "dev",
+  "phase1_sequential_add": {
+    "count": 50,
+    "p50_ms": 72.3,
+    "p95_ms": 88.5,
+    "p99_ms": 96.5,
+    "mean_ms": 71.1,
+    "min_ms": 13.6,
+    "max_ms": 96.5,
+    "wall_time_s": 3.56,
+    "throughput_ops": 14.1,
+    "errors": 0
+  },
+  "phase2_batch_add": {
+    "count": 5,
+    "p50_ms": 216.4,
+    "p95_ms": 291.5,
+    "p99_ms": 291.5,
+    "mean_ms": 216.9,
+    "min_ms": 155.7,
+    "max_ms": 291.5,
+    "wall_time_s": 1.09,
+    "throughput_ops": 4.6,
+    "errors": 0,
+    "batch_size": 20
+  },
+  "phase3_concurrent_add": {
+    "count": 845,
+    "p50_ms": 99.6,
+    "p95_ms": 192.9,
+    "p99_ms": 510.7,
+    "mean_ms": 116.4,
+    "min_ms": 17.2,
+    "max_ms": 738.7,
+    "wall_time_s": 9.93,
+    "throughput_ops": 85.1,
+    "errors": 0,
+    "concurrency": 10
+  },
+  "phase4_sequential_query": {
+    "count": 30,
+    "p50_ms": 281.7,
+    "p95_ms": 411.2,
+    "p99_ms": 1501.8,
+    "mean_ms": 261.1,
+    "min_ms": 31.1,
+    "max_ms": 1501.8,
+    "wall_time_s": 7.83,
+    "throughput_ops": 3.8,
+    "errors": 0
+  },
+  "phase5_concurrent_query": {
+    "count": 70,
+    "p50_ms": 413.2,
+    "p95_ms": 1832.0,
+    "p99_ms": 1896.8,
+    "mean_ms": 512.9,
+    "min_ms": 45.8,
+    "max_ms": 1896.8,
+    "wall_time_s": 3.75,
+    "throughput_ops": 18.6,
+    "errors": 0,
+    "concurrency": 10
+  },
+  "phase6_cross_agent_query": {
+    "count": 20,
+    "p50_ms": 304.1,
+    "p95_ms": 380.4,
+    "p99_ms": 380.4,
+    "mean_ms": 299.8,
+    "min_ms": 50.3,
+    "max_ms": 380.4,
+    "wall_time_s": 6.0,
+    "throughput_ops": 3.3,
+    "errors": 0
+  },
+  "phase7_vote": {
+    "count": 20,
+    "p50_ms": 64.1,
+    "p95_ms": 176.0,
+    "p99_ms": 176.0,
+    "mean_ms": 70.9,
+    "min_ms": 32.7,
+    "max_ms": 176.0,
+    "wall_time_s": 1.42,
+    "throughput_ops": 14.1,
+    "errors": 0
+  },
+  "phase8_deduplication": {
+    "count": 20,
+    "p50_ms": 74.7,
+    "p95_ms": 112.2,
+    "p99_ms": 112.2,
+    "mean_ms": 73.6,
+    "min_ms": 29.5,
+    "max_ms": 112.2,
+    "wall_time_s": 1.47,
+    "throughput_ops": 13.6,
+    "errors": 0,
+    "dedup_detected": 0
+  },
+  "summary": {
+    "total_operations": 1060,
+    "total_errors": 0,
+    "error_rate_pct": 0.0
+  }
+}

@@ -188,7 +188,7 @@ aegis query "What does the user prefer?" --json
 ### Production Ready
 - **Self-Hostable** — Docker, Kubernetes, any cloud
 - **Observable** — Prometheus metrics, structured logging
-- **Fast** — 30-80ms queries on 1M+ memories
+- **Fast** — Sub-100ms writes, 85 ops/s concurrent throughput
 - **Safe** — Data export, migrations, no vendor lock-in
 
 ### Observability & Evaluation
@@ -322,16 +322,20 @@ client.reflection(
 
 ## Performance
 
-_Methodology (preliminary): figures below come from local benchmark runs over 1M memories on a 16 vCPU / 64 GB RAM host with top-k=10 semantic queries; see benchmark source/reproduction notes in [`docs/guides/performance-benchmarks.mdx`](docs/guides/performance-benchmarks.mdx), including dataset size, hardware profile, and query parameters._ 
+Benchmarked on 8 vCPU / 7.6 GB RAM (Intel 13th Gen), 1000 memories, Docker Compose (PostgreSQL 16 + pgvector), concurrency=10. Queries include OpenAI embedding latency. Reproduce with `cd benchmarks && bash run_benchmark.sh`.
 
-> ⚠️ These latency numbers are provisional until benchmark artifacts are published in the benchmark guide.
+| Operation | p50 | p95 | p99 | Throughput |
+|-----------|-----|-----|-----|------------|
+| Sequential add | 72ms | 89ms | 97ms | 14.1 ops/s |
+| Batch add (5x20) | 216ms | 292ms | 292ms | 4.6 ops/s |
+| Concurrent add (c=10) | 100ms | 193ms | 511ms | 85.1 ops/s |
+| Sequential query | 282ms | 411ms | 1502ms | 3.8 ops/s |
+| Concurrent query (c=10) | 413ms | 1832ms | 1897ms | 18.6 ops/s |
+| Cross-agent query | 304ms | 380ms | 380ms | 3.3 ops/s |
+| Vote | 64ms | 176ms | 176ms | 14.1 ops/s |
+| Deduplication | 75ms | 112ms | 112ms | 13.6 ops/s |
 
-| Operation | Latency | Notes |
-|-----------|---------|-------|
-| Query (1M memories) | 30-80ms | HNSW index |
-| Add single | ~100ms | Includes embedding |
-| Add batch (50) | ~300ms | Batched embedding |
-| Deduplication | <1ms | Hash lookup |
+> **Note:** Query tail latency (p95/p99) is dominated by the external OpenAI embedding call, not Aegis or PostgreSQL. Write and vote operations that skip embedding are consistently under 100ms at p50.
 
 ## Documentation
 

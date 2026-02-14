@@ -138,7 +138,35 @@ async def get_read_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def init_db():
-    """Initialize database schema and extensions."""
+    """
+    Initialize database schema and extensions.
+
+    Behavior depends on AEGIS_ENV:
+    - development: Uses metadata.create_all() for convenience
+    - production: Verifies alembic_version table exists (requires managed migrations)
+    """
+    if settings.aegis_env == "production":
+        # In production, require Alembic-managed schema
+        async with primary_engine.begin() as conn:
+            try:
+                result = await conn.execute(text("SELECT version_num FROM alembic_version LIMIT 1"))
+                row = result.first()
+                if row is None:
+                    raise RuntimeError(
+                        "Production mode: alembic_version table exists but has no revision. "
+                        "Run 'alembic upgrade head' or 'alembic stamp head' first."
+                    )
+            except Exception as e:
+                if "alembic_version" in str(e).lower():
+                    raise RuntimeError(
+                        "Production mode requires Alembic-managed schema. "
+                        "Run 'alembic upgrade head' to initialize, or "
+                        "'alembic stamp head' for existing databases."
+                    ) from e
+                raise
+        return
+
+    # Development mode: auto-create tables
     async with primary_engine.begin() as conn:
         # Enable pgvector
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))

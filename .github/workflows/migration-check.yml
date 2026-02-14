@@ -1,0 +1,65 @@
+name: Migration Round-Trip Check
+
+on:
+  pull_request:
+    paths:
+      - 'alembic/**'
+      - 'server/models.py'
+      - 'migrations/**'
+  push:
+    branches: [main]
+    paths:
+      - 'alembic/**'
+      - 'server/models.py'
+      - 'migrations/**'
+
+jobs:
+  migration-check:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: aegis
+          POSTGRES_PASSWORD: aegis
+          POSTGRES_DB: aegis_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://aegis:aegis@localhost:5432/aegis_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[server,dev]"
+          pip install alembic>=1.13.0
+
+      - name: Run migration round-trip
+        run: |
+          echo "=== Upgrade to head ==="
+          alembic upgrade head
+
+          echo "=== Downgrade to base ==="
+          alembic downgrade base
+
+          echo "=== Upgrade to head again ==="
+          alembic upgrade head
+
+          echo "=== Migration round-trip passed ==="
+
+      - name: Run migration tests
+        run: pytest tests/test_migrations.py -v

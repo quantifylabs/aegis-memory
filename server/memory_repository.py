@@ -17,9 +17,9 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from embedding_service import content_hash
-from models import Memory, MemoryScope, MemoryType
+from models import Memory, MemoryScope, MemorySharedAgent, MemoryType
 from observability import OperationNames, record_operation, record_query_execution, track_latency
-from sqlalchemy import and_, cast, delete, not_, or_, select, text
+from sqlalchemy import and_, cast, delete, exists, not_, or_, select, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -91,6 +91,18 @@ class MemoryRepository:
             with track_latency(OperationNames.MEMORY_ADD):
                 db.add(mem)
                 await db.flush()
+
+                # Dual-write: populate join table for ACL
+                if shared_with_agents:
+                    for agent in shared_with_agents:
+                        db.add(MemorySharedAgent(
+                            memory_id=memory_id,
+                            shared_agent_id=agent,
+                            project_id=project_id,
+                            namespace=namespace,
+                        ))
+                    await db.flush()
+
             record_operation(OperationNames.MEMORY_ADD, "success")
             return mem
         except Exception:
@@ -139,6 +151,20 @@ class MemoryRepository:
             with track_latency(OperationNames.MEMORY_ADD_BATCH):
                 db.add_all(objs)
                 await db.flush()
+
+                # Dual-write: populate join table for ACL
+                for i, obj in enumerate(objs):
+                    shared = memories[i].get("shared_with_agents") or []
+                    for agent in shared:
+                        db.add(MemorySharedAgent(
+                            memory_id=obj.id,
+                            shared_agent_id=agent,
+                            project_id=obj.project_id,
+                            namespace=obj.namespace,
+                        ))
+                if any(m.get("shared_with_agents") for m in memories):
+                    await db.flush()
+
             record_operation(OperationNames.MEMORY_ADD_BATCH, "success")
             return objs
         except Exception:
@@ -222,11 +248,11 @@ class MemoryRepository:
             # Can access if:
             # 1. Scope is GLOBAL, or
             # 2. Scope is AGENT_PRIVATE and agent_id matches, or
-            # 3. Scope is AGENT_SHARED and (agent_id matches OR in shared_with_agents)
-            # Use cast to JSONB for proper containment check
-            # PostgreSQL's @> operator checks if JSONB array contains a value
-            shared_contains = cast(Memory.shared_with_agents, JSONB).contains(
-                cast([requesting_agent_id], JSONB)
+            # 3. Scope is AGENT_SHARED and (agent_id matches OR in memory_shared_agents join table)
+            # Uses indexed join table for O(1) ACL lookups at scale
+            shared_subquery = (
+                select(MemorySharedAgent.memory_id)
+                .where(MemorySharedAgent.shared_agent_id == requesting_agent_id)
             )
 
             scope_filter = or_(
@@ -239,7 +265,7 @@ class MemoryRepository:
                     Memory.scope == MemoryScope.AGENT_SHARED.value,
                     or_(
                         Memory.agent_id == requesting_agent_id,
-                        shared_contains
+                        Memory.id.in_(shared_subquery)
                     )
                 ),
             )
