@@ -1,20 +1,59 @@
 ---
-title: "Performance Benchmarks (Placeholder)"
-description: "Preliminary benchmark methodology and artifact placeholders for README latency claims."
+title: "Performance Benchmarks"
+description: "Reproducible benchmark results and methodology for Aegis Memory."
 ---
 
-# Performance Benchmarks (Placeholder)
+# Performance Benchmarks
 
-This page is a temporary benchmark source-of-truth referenced by the README while full benchmark artifacts are being finalized.
+## Test Environment
 
-## Current methodology snapshot
+- **Hardware:** 8 vCPU (Intel 13th Gen), 7.6 GB RAM
+- **Stack:** Docker Compose — PostgreSQL 16 + pgvector, FastAPI
+- **Dataset:** 1000 memories, 100 queries, 20 cross-agent queries (seeded, deterministic)
+- **Concurrency:** 10 concurrent clients
+- **Embedding:** OpenAI `text-embedding-3-small` (1536 dimensions)
 
-- **Dataset size:** 1,000,000 memories in a single namespace
-- **Hardware profile:** 16 vCPU, 64 GB RAM, local NVMe SSD, Linux host
-- **Query parameters:** semantic query with `top_k=10`, default reranker disabled, warm index cache
+## Results
 
-## Benchmark source
+| Operation | p50 | p95 | p99 | Throughput |
+|-----------|-----|-----|-----|------------|
+| Sequential add | 72ms | 89ms | 97ms | 14.1 ops/s |
+| Batch add (5x20) | 216ms | 292ms | 292ms | 4.6 ops/s |
+| Concurrent add (c=10) | 100ms | 193ms | 511ms | 85.1 ops/s |
+| Sequential query | 282ms | 411ms | 1502ms | 3.8 ops/s |
+| Concurrent query (c=10) | 413ms | 1832ms | 1897ms | 18.6 ops/s |
+| Cross-agent query | 304ms | 380ms | 380ms | 3.3 ops/s |
+| Vote | 64ms | 176ms | 176ms | 14.1 ops/s |
+| Deduplication | 75ms | 112ms | 112ms | 13.6 ops/s |
 
-Until dedicated benchmark scripts are published, use this document as the canonical methodology reference for the README Performance table.
+**Total:** 1060 operations, 0% error rate.
 
-> TODO: replace this placeholder with committed benchmark scripts/config and attach reproducible result artifacts (raw runs + summarized percentiles).
+## Key Findings
+
+- **Writes scale well under concurrency** — 85 ops/s at p50=100ms with 10 concurrent clients.
+- **Query tail latency is OpenAI-bound** — p95/p99 spikes on queries are dominated by the external embedding API call, not Aegis or PostgreSQL.
+- **Votes and dedup are cheap** — pure database operations with no embedding overhead, consistently under 75ms at p50.
+
+## Reproduce
+
+```bash
+cd benchmarks && bash run_benchmark.sh
+```
+
+The harness generates a seeded dataset (`--seed 42`), captures machine profile, and writes results to `results.json`. Configure via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `COUNT` | 1000 | Number of memories to generate |
+| `QUERIES` | 100 | Number of queries to run |
+| `CONCURRENCY` | 10 | Concurrent client count |
+| `BASE_URL` | `http://localhost:8000` | Server URL |
+| `API_KEY` | `dev-secret-key` | API key |
+| `SEED` | 42 | Random seed for reproducibility |
+
+## Benchmark Scripts
+
+- `generate_dataset.py` — Seeded JSONL dataset generator
+- `query_workload.py` — Async workload runner with latency percentiles
+- `machine_profile.py` — Captures hardware profile for reproducibility
+- `run_benchmark.sh` — End-to-end orchestrator
