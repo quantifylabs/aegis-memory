@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-02-20
+
+### Added
+
+- **Formalized ACE Loop** -- full Generation -> Reflection -> Curation cycle as native memory operations
+  - `ace_runs` table for tracking agent execution runs with outcomes
+  - `POST /ace/run` -- start tracking an agent run
+  - `POST /ace/run/{run_id}/complete` -- complete run with auto-feedback:
+    - Auto-votes memories used (helpful on success, harmful on failure)
+    - Auto-creates reflection memories on failure
+    - Links run results to playbook entries
+  - `GET /ace/run/{run_id}` -- retrieve run details
+  - `POST /ace/playbook/agent` -- agent-specific playbook retrieval with optional task_type filter
+  - `POST /ace/curate` -- trigger curation cycle (identify effective, flag ineffective, suggest consolidations)
+- **SDK methods**: `start_run()`, `complete_run()`, `get_run()`, `get_playbook_for_agent()`, `curate()`
+- **Alembic migration** `0004_ace_runs`
+- **Test suite**: `tests/test_ace_loop.py`
+
+### Changed
+
+- Version bumped to `1.9.1`
+
 ## [1.9.0] - 2026-02-14
 
 ### Added

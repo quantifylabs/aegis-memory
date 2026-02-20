@@ -120,7 +120,7 @@ Different memory tools solve different memory problems. This comparison stays fo
 | **Built for multi-agent ACL/scopes** | — | — | — | — | ✓ |
 | **Cross-agent query with policy boundaries** | — | — | — | — | ✓ |
 | **Handoff baton / structured handoff state** | — | — | — | — | ✓ |
-| **ACE loop (vote / reflection / playbook)** | — | — | — | — | ✓ |
+| **ACE loop (vote / reflect / curate / run tracking)** | — | — | — | — | ✓ |
 | **Typed memory model** | — | — | — | — | ✓ |
 
 ### When to pick Aegis (quick checklist)
@@ -287,9 +287,66 @@ crew = Crew(agents=[...], memory=AegisCrewMemory())
 
 **[→ Integration Guides](https://docs.aegismemory.com/integrations/crewai)**
 
-## ACE Patterns
+## ACE Loop: Production-Grade Agentic Context Engineering
 
-Aegis implements patterns from recent research on self-improving agents:
+Aegis is the first memory engine with a **complete ACE loop** -- the Generation -> Reflection -> Curation cycle from Stanford/SambaNova's research, engineered for production use.
+
+**The problem ACE solves:** Your agent made the same mistake 5 times? ACE loop remembers the fix forever. Agents forget what worked last session? Run tracking closes that feedback loop. Stale memories polluting retrieval? Curation auto-cleans your playbook.
+
+```
+Generation          Execution          Reflection          Curation
+    |                   |                   |                  |
+ Query playbook  ->  Run task with   ->  Auto-vote on    ->  Promote effective
+ for strategies      tracked memories    used memories       Flag ineffective
+                                         Auto-reflect        Consolidate duplicates
+                                         on failures
+```
+
+### Full ACE Loop in Code
+
+```python
+from aegis_memory import AegisClient
+
+client = AegisClient(api_key="your-key")
+
+# 1. GENERATION: Query agent-specific playbook
+playbook = client.get_playbook_for_agent(
+    "executor",
+    query="API pagination task",
+    task_type="api-integration",
+)
+memory_ids = [e.id for e in playbook.entries]
+
+# 2. EXECUTION: Track which memories the agent uses
+run = client.start_run(
+    "task-42", "executor",
+    task_type="api-integration",
+    memory_ids_used=memory_ids,
+)
+
+# ... agent does its work ...
+
+# 3. REFLECTION: Complete with outcome (auto-feedback!)
+client.complete_run("task-42", success=True, evaluation={"score": 0.95})
+# -> Auto-votes 'helpful' on every memory used
+# -> On failure: auto-votes 'harmful' AND creates a reflection memory
+
+# 4. CURATION: Periodically clean up
+curation = client.curate(namespace="production")
+# -> Promotes high-effectiveness entries
+# -> Flags low-effectiveness for deprecation
+# -> Identifies duplicate entries to consolidate
+```
+
+### What "Engineered" Means vs "Inspired"
+
+| Feature | ACE-Inspired | Aegis ACE-Engineered |
+|---------|-------------|---------------------|
+| Voting | Manual vote endpoints | Auto-voting tied to run outcomes |
+| Reflection | Manual reflection creation | Auto-reflection on failure with error context |
+| Curation | Not implemented | Full curation cycle with promote/flag/consolidate |
+| Run tracking | Not tracked | First-class `ace_runs` table linking memories to outcomes |
+| Agent-specific playbook | Generic query | Filtered by agent_id + task_type |
 
 ### Memory Voting
 ```python
@@ -297,31 +354,31 @@ Aegis implements patterns from recent research on self-improving agents:
 client.vote(memory.id, "helpful", voter_agent_id="executor")
 
 # Query only effective strategies
-strategies = client.playbook("API pagination", agent_id="executor", min_effectiveness=0.3)
+strategies = client.query_playbook("API pagination", agent_id="executor", min_effectiveness=0.3)
 ```
 
 ### Session Progress
 ```python
 # Track work across context windows
-client.progress.update(
-    session_id="build-dashboard",
-    completed=["auth", "routing"],
-    in_progress="api-client",
-    blocked=[{"item": "payments", "reason": "Waiting for API keys"}]
+session = client.create_session("build-dashboard", agent_id="coding-agent")
+client.update_session("build-dashboard",
+    completed_items=["auth", "routing"],
+    in_progress_item="api-client",
+    blocked_items=[{"item": "payments", "reason": "Waiting for API keys"}]
 )
 ```
 
 ### Reflections
 ```python
 # Store lessons from failures
-client.reflection(
+client.add_reflection(
     content="Always use while True for pagination, not range(n)",
     agent_id="reflector",
     error_pattern="pagination_incomplete"
 )
 ```
 
-**[→ ACE Patterns Guide](https://docs.aegismemory.com/guides/ace-patterns)**
+**[-> ACE Patterns Guide](https://docs.aegismemory.com/guides/ace-patterns)**
 
 ## Typed Memory API
 

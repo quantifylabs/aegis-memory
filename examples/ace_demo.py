@@ -280,6 +280,67 @@ def main():
     print(f"  Next items: {session.next_items}")
     
     # =========================================================================
+    # PATTERN 8: ACE Run Tracking (v1.9.1)
+    # (Full Generation -> Reflection -> Curation loop)
+    # =========================================================================
+    print("\n" + "=" * 60)
+    print("PATTERN 8: ACE Run Tracking")
+    print("=" * 60)
+
+    # Query agent-specific playbook
+    agent_playbook = client.get_playbook_for_agent(
+        "coding-agent",
+        query="implementing WebSocket chat",
+        task_type="chat",
+        namespace="project-alpha",
+    )
+    memory_ids = [e.id for e in agent_playbook.entries]
+    print(f"Agent playbook: {len(agent_playbook.entries)} entries for chat task")
+
+    # Start tracking a run
+    run = client.start_run(
+        run_id="fix-chat-ws",
+        agent_id="coding-agent",
+        task_type="chat",
+        namespace="project-alpha",
+        memory_ids_used=memory_ids,
+    )
+    print(f"Started run: {run.run_id} (status={run.status})")
+
+    # ... agent does its work (fixing chat with WebSocket) ...
+
+    # Complete the run with success
+    completed = client.complete_run(
+        "fix-chat-ws",
+        success=True,
+        evaluation={"score": 0.95, "latency_ms": 50},
+        logs={"steps": ["replaced HTTP polling", "added WebSocket handler"]},
+    )
+    print(f"Completed run: {completed.run_id} (success={completed.success})")
+    print(f"  Auto-voted 'helpful' on {len(completed.memory_ids_used)} memories")
+
+    # =========================================================================
+    # PATTERN 9: Curation Cycle (v1.9.1)
+    # (Promote effective, flag ineffective, suggest consolidations)
+    # =========================================================================
+    print("\n" + "=" * 60)
+    print("PATTERN 9: Curation Cycle")
+    print("=" * 60)
+
+    curation = client.curate(
+        namespace="project-alpha",
+        agent_id="coding-agent",
+        top_k=5,
+    )
+    print(f"Curation results:")
+    print(f"  Promoted: {len(curation.promoted)} high-effectiveness entries")
+    print(f"  Flagged: {len(curation.flagged)} low-effectiveness entries")
+    print(f"  Consolidation candidates: {len(curation.consolidation_candidates)}")
+
+    for entry in curation.promoted[:3]:
+        print(f"  [+{entry.effectiveness_score:.2f}] {entry.content[:60]}...")
+
+    # =========================================================================
     # What the NEXT session would do:
     # =========================================================================
     print("\n" + "=" * 60)
@@ -288,13 +349,13 @@ def main():
     print("""
     1. Load session progress: client.get_session("build-chatbot-v1")
     2. Check features: client.list_features(session_id="build-chatbot-v1")
-    3. Query playbook for failed feature: client.query_playbook("real-time chat")
+    3. Query agent playbook: client.get_playbook_for_agent("coding-agent", ...)
     4. See reflection about WebSocket (now highest ranked!)
-    5. Fix chat-receive with WebSocket
-    6. Mark feature complete
-    7. Continue to remaining features
+    5. Start run: client.start_run("next-task", ...)
+    6. Complete run: client.complete_run("next-task", success=True)
+    7. Curate: client.curate() to clean up the playbook
     """)
-    
+
     client.close()
     print("\nDemo complete!")
 

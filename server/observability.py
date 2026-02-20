@@ -84,6 +84,11 @@ class OperationNames:
     MEMORY_FEATURE_GET = "memory_feature_get"
     MEMORY_FEATURE_UPDATE = "memory_feature_update"
     MEMORY_FEATURE_LIST = "memory_feature_list"
+    MEMORY_RUN_CREATE = "memory_run_create"
+    MEMORY_RUN_GET = "memory_run_get"
+    MEMORY_RUN_COMPLETE = "memory_run_complete"
+    MEMORY_PLAYBOOK_AGENT = "memory_playbook_agent"
+    MEMORY_CURATE = "memory_curate"
 
 
 class SpanNames:

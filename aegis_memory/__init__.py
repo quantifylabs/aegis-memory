@@ -53,7 +53,7 @@ Quick Start (Smart Agent - Full Auto):
 For more examples, see: https://github.com/quantifylabs/aegis-memory/tree/main/examples
 """
 
-__version__ = "1.3.0"
+__version__ = "1.3.1"
 
 # Core client (manual control)
 from aegis_memory.client import (
@@ -63,6 +63,10 @@ from aegis_memory.client import (
     PlaybookEntry,
     SessionProgress,
     Feature,
+    RunResult,
+    CurationResult,
+    CurationEntry,
+    ConsolidationCandidate,
 )
 
 # Smart memory (automatic extraction)
@@ -97,11 +101,15 @@ from aegis_memory.filters import (
 __all__ = [
     # Core
     "AegisClient",
-    "AsyncAegisClient", 
+    "AsyncAegisClient",
     "Memory",
     "PlaybookEntry",
     "SessionProgress",
     "Feature",
+    "RunResult",
+    "CurationResult",
+    "CurationEntry",
+    "ConsolidationCandidate",
     # Smart Memory
     "SmartMemory",
     "SmartAgent",

@@ -121,6 +121,9 @@ class MemoryEventType(str, Enum):
     DEPRECATED = "deprecated"
     DELTA_UPDATED = "delta_updated"
     REFLECTED = "reflected"
+    RUN_STARTED = "run_started"
+    RUN_COMPLETED = "run_completed"
+    CURATED = "curated"
 
 
 class Memory(Base):
@@ -443,6 +446,41 @@ class MemoryEvent(Base):
         Index('ix_memory_events_memory_created', 'memory_id', 'created_at'),
         Index('ix_memory_events_project_task', 'project_id', 'task_id'),
         Index('ix_memory_events_project_retrieval', 'project_id', 'retrieval_event_id'),
+    )
+
+
+class AceRun(Base):
+    """
+    Track agent execution runs for ACE loop feedback.
+
+    Links task execution to memories used, enabling:
+    - Auto-voting: memories used in successful runs get 'helpful' votes
+    - Auto-reflection: failures generate reflection memories
+    - Run-playbook linking: playbook entries track which runs validated them
+    """
+    __tablename__ = "ace_runs"
+
+    id = Column(String(32), primary_key=True)
+    project_id = Column(String(64), nullable=False)
+    run_id = Column(String(64), nullable=False)
+    agent_id = Column(String(64), nullable=True)
+    task_type = Column(String(64), nullable=True)
+    namespace = Column(String(64), nullable=False, default="default")
+    status = Column(String(16), nullable=False, default="running")
+    success = Column(Boolean, nullable=True)
+    evaluation = Column(JSON, nullable=False, default=dict)
+    logs = Column(JSON, nullable=False, default=dict)
+    memory_ids_used = Column(JSON, nullable=False, default=list)
+    reflection_ids = Column(JSON, nullable=False, default=list)
+    started_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('ix_ace_runs_project_run', 'project_id', 'run_id', unique=True),
+        Index('ix_ace_runs_project_agent', 'project_id', 'agent_id'),
+        Index('ix_ace_runs_project_task_type', 'project_id', 'task_type'),
     )
 
 

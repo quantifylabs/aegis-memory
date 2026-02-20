@@ -196,6 +196,83 @@ async def verify_and_complete(feature_id: str):
     return True
 ```
 
+## Pattern 6: ACE Run Tracking
+
+Track agent runs end-to-end and automatically feed outcomes back into the memory system.
+
+### Why It Works
+
+Without run tracking, there's no feedback loop. Memories get voted on manually (if at all), and agents keep making the same mistakes. Run tracking closes the loop automatically: memories used in successful runs get reinforced, and failures generate reflections.
+
+```python
+from aegis_memory import AegisClient
+
+client = AegisClient(api_key="...")
+
+# 1. Query playbook before starting
+playbook = client.get_playbook_for_agent(
+    "executor",
+    query="API pagination task",
+    task_type="api-integration",
+)
+memory_ids = [e.id for e in playbook.entries]
+
+# 2. Start tracking the run
+run = client.start_run(
+    run_id="task-42",
+    agent_id="executor",
+    task_type="api-integration",
+    memory_ids_used=memory_ids,
+)
+
+# 3. Execute the task...
+# (agent does its work here)
+
+# 4. Complete the run with outcome
+result = client.complete_run(
+    "task-42",
+    success=True,
+    evaluation={"score": 0.95, "pages_fetched": 150},
+)
+# Auto-votes 'helpful' on all memory_ids_used!
+
+# On failure:
+result = client.complete_run(
+    "task-42",
+    success=False,
+    evaluation={"error": "Timeout after 30s", "error_pattern": "timeout"},
+)
+# Auto-votes 'harmful' AND creates a reflection memory!
+```
+
+## Pattern 7: Curation Cycle
+
+Periodically clean up your memory playbook by promoting effective entries, flagging harmful ones, and identifying duplicates.
+
+```python
+# Trigger curation
+curation = client.curate(
+    namespace="production",
+    agent_id="executor",
+    top_k=10,
+    min_effectiveness_threshold=-0.3,
+)
+
+# Review promoted entries (high effectiveness, validated by runs)
+for entry in curation.promoted:
+    print(f"[+{entry.effectiveness_score:.2f}] {entry.content}")
+
+# Review flagged entries (low effectiveness, candidates for deprecation)
+for entry in curation.flagged:
+    print(f"[-{entry.effectiveness_score:.2f}] {entry.content}")
+    # Optionally deprecate:
+    # client.deprecate(entry.id, reason="Low effectiveness after curation")
+
+# Review consolidation candidates (similar entries to merge)
+for c in curation.consolidation_candidates:
+    print(f"Similar: {c.content_a[:50]} <-> {c.content_b[:50]}")
+```
+
 ## Performance Impact
 
 Based on the ACE paper's benchmarks:
@@ -218,6 +295,16 @@ Based on the ACE paper's benchmarks:
 | `reflection` | Lessons from failures | global |
 | `progress` | Session state | agent-private |
 | `feature` | Feature tracking | global |
+
+### ACE Loop Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/ace/run` | POST | Start tracking an agent run |
+| `/ace/run/{run_id}` | GET | Get run details |
+| `/ace/run/{run_id}/complete` | POST | Complete run with auto-feedback |
+| `/ace/playbook/agent` | POST | Agent-specific playbook query |
+| `/ace/curate` | POST | Trigger curation cycle |
 
 ### Effectiveness Score
 

@@ -86,6 +86,62 @@ def _parse_feature_data(data: Dict[str, Any]) -> "Feature":
     )
 
 
+def _parse_dt(val: Optional[str]) -> Optional[datetime]:
+    if val is None:
+        return None
+    return datetime.fromisoformat(val.replace("Z", "+00:00"))
+
+
+def _parse_run_data(data: Dict[str, Any]) -> "RunResult":
+    return RunResult(
+        run_id=data["run_id"],
+        status=data["status"],
+        success=data.get("success"),
+        agent_id=data.get("agent_id"),
+        task_type=data.get("task_type"),
+        namespace=data.get("namespace", "default"),
+        evaluation=data.get("evaluation", {}),
+        logs=data.get("logs", {}),
+        memory_ids_used=data.get("memory_ids_used", []),
+        reflection_ids=data.get("reflection_ids", []),
+        started_at=datetime.fromisoformat(data["started_at"].replace("Z", "+00:00")),
+        completed_at=_parse_dt(data.get("completed_at")),
+        created_at=datetime.fromisoformat(data["created_at"].replace("Z", "+00:00")),
+        updated_at=datetime.fromisoformat(data["updated_at"].replace("Z", "+00:00")),
+    )
+
+
+def _parse_curation_data(data: Dict[str, Any]) -> "CurationResult":
+    return CurationResult(
+        promoted=[
+            CurationEntry(
+                id=e["id"], content=e["content"], memory_type=e["memory_type"],
+                effectiveness_score=e["effectiveness_score"],
+                bullet_helpful=e["bullet_helpful"], bullet_harmful=e["bullet_harmful"],
+                total_votes=e["total_votes"],
+            )
+            for e in data.get("promoted", [])
+        ],
+        flagged=[
+            CurationEntry(
+                id=e["id"], content=e["content"], memory_type=e["memory_type"],
+                effectiveness_score=e["effectiveness_score"],
+                bullet_helpful=e["bullet_helpful"], bullet_harmful=e["bullet_harmful"],
+                total_votes=e["total_votes"],
+            )
+            for e in data.get("flagged", [])
+        ],
+        consolidation_candidates=[
+            ConsolidationCandidate(
+                memory_id_a=c["memory_id_a"], memory_id_b=c["memory_id_b"],
+                content_a=c["content_a"], content_b=c["content_b"],
+                reason=c["reason"],
+            )
+            for c in data.get("consolidation_candidates", [])
+        ],
+    )
+
+
 @dataclass
 class Memory:
     """A memory from Aegis."""
@@ -216,6 +272,55 @@ class HandoffBaton:
     recent_decisions: List[str]
     key_facts: List[str]
     memory_ids: List[str]
+
+
+@dataclass
+class RunResult:
+    """Result of an ACE run operation."""
+    run_id: str
+    status: str
+    success: Optional[bool]
+    agent_id: Optional[str]
+    task_type: Optional[str]
+    namespace: str
+    evaluation: Dict[str, Any]
+    logs: Dict[str, Any]
+    memory_ids_used: List[str]
+    reflection_ids: List[str]
+    started_at: datetime
+    completed_at: Optional[datetime]
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass
+class CurationEntry:
+    """A memory entry in curation results."""
+    id: str
+    content: str
+    memory_type: str
+    effectiveness_score: float
+    bullet_helpful: int
+    bullet_harmful: int
+    total_votes: int
+
+
+@dataclass
+class ConsolidationCandidate:
+    """A pair of similar memories that could be consolidated."""
+    memory_id_a: str
+    memory_id_b: str
+    content_a: str
+    content_b: str
+    reason: str
+
+
+@dataclass
+class CurationResult:
+    """Result of a curation cycle."""
+    promoted: List[CurationEntry]
+    flagged: List[CurationEntry]
+    consolidation_candidates: List[ConsolidationCandidate]
 
 
 class AegisClient:
@@ -1005,6 +1110,145 @@ class AegisClient:
             in_progress=data["in_progress"],
         )
     
+    # ---------- ACE: Run Tracking ----------
+
+    def start_run(
+        self,
+        run_id: str,
+        agent_id: Optional[str] = None,
+        *,
+        task_type: Optional[str] = None,
+        namespace: str = "default",
+        memory_ids_used: Optional[List[str]] = None,
+    ) -> RunResult:
+        """
+        Start tracking an agent run.
+
+        ACE Loop: Records which memories are being used for the current
+        task execution. Complete later with complete_run().
+        """
+        body: Dict[str, Any] = {
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "task_type": task_type,
+            "namespace": namespace,
+            "memory_ids_used": memory_ids_used,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post("/memories/ace/run", json=body)
+        resp.raise_for_status()
+        return _parse_run_data(resp.json())
+
+    def complete_run(
+        self,
+        run_id: str,
+        *,
+        success: bool,
+        evaluation: Optional[Dict[str, Any]] = None,
+        logs: Optional[Dict[str, Any]] = None,
+        auto_vote: bool = True,
+        auto_reflect: bool = True,
+    ) -> RunResult:
+        """
+        Complete a run with auto-feedback.
+
+        ACE Loop: On completion, automatically:
+        - Votes on memories used (helpful on success, harmful on failure)
+        - Creates reflection memories on failure
+        """
+        body: Dict[str, Any] = {
+            "success": success,
+            "evaluation": evaluation,
+            "logs": logs,
+            "auto_vote": auto_vote,
+            "auto_reflect": auto_reflect,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post(f"/memories/ace/run/{run_id}/complete", json=body)
+        resp.raise_for_status()
+        return _parse_run_data(resp.json())
+
+    def get_run(self, run_id: str) -> RunResult:
+        """Get run details by run_id."""
+        resp = self.client.get(f"/memories/ace/run/{run_id}")
+        resp.raise_for_status()
+        return _parse_run_data(resp.json())
+
+    def get_playbook_for_agent(
+        self,
+        agent_id: str,
+        *,
+        query: str = "general task strategies",
+        task_type: Optional[str] = None,
+        namespace: str = "default",
+        top_k: int = 20,
+        min_effectiveness: float = -1.0,
+    ) -> PlaybookResult:
+        """
+        Get playbook entries filtered by agent_id and optional task_type.
+
+        ACE Loop: Before starting a task, query agent-specific strategies
+        that have been validated by past runs.
+        """
+        body: Dict[str, Any] = {
+            "query": query,
+            "agent_id": agent_id,
+            "task_type": task_type,
+            "namespace": namespace,
+            "top_k": top_k,
+            "min_effectiveness": min_effectiveness,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post("/memories/ace/playbook/agent", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        return PlaybookResult(
+            entries=[
+                PlaybookEntry(
+                    id=e["id"],
+                    content=e["content"],
+                    memory_type=e["memory_type"],
+                    effectiveness_score=e["effectiveness_score"],
+                    bullet_helpful=e["bullet_helpful"],
+                    bullet_harmful=e["bullet_harmful"],
+                    error_pattern=e.get("error_pattern"),
+                    created_at=datetime.fromisoformat(e["created_at"].replace("Z", "+00:00")),
+                )
+                for e in data["entries"]
+            ],
+            query_time_ms=data["query_time_ms"],
+        )
+
+    def curate(
+        self,
+        *,
+        namespace: str = "default",
+        agent_id: Optional[str] = None,
+        top_k: int = 10,
+        min_effectiveness_threshold: float = -0.3,
+    ) -> CurationResult:
+        """
+        Trigger a curation cycle.
+
+        ACE Loop: Identifies effective entries to promote, ineffective
+        entries to flag, and similar entries to consolidate.
+        """
+        body: Dict[str, Any] = {
+            "namespace": namespace,
+            "agent_id": agent_id,
+            "top_k": top_k,
+            "min_effectiveness_threshold": min_effectiveness_threshold,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post("/memories/ace/curate", json=body)
+        resp.raise_for_status()
+        return _parse_curation_data(resp.json())
+
     # ---------- Export ----------
 
     def export_json(
@@ -1595,3 +1839,115 @@ class AsyncAegisClient:
             passes=False,
             failure_reason=reason,
         )
+
+    # ---------- ACE: Run Tracking ----------
+
+    async def start_run(
+        self,
+        run_id: str,
+        agent_id: Optional[str] = None,
+        *,
+        task_type: Optional[str] = None,
+        namespace: str = "default",
+        memory_ids_used: Optional[List[str]] = None,
+    ) -> RunResult:
+        body: Dict[str, Any] = {
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "task_type": task_type,
+            "namespace": namespace,
+            "memory_ids_used": memory_ids_used,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post("/memories/ace/run", json=body)
+        resp.raise_for_status()
+        return _parse_run_data(resp.json())
+
+    async def complete_run(
+        self,
+        run_id: str,
+        *,
+        success: bool,
+        evaluation: Optional[Dict[str, Any]] = None,
+        logs: Optional[Dict[str, Any]] = None,
+        auto_vote: bool = True,
+        auto_reflect: bool = True,
+    ) -> RunResult:
+        body: Dict[str, Any] = {
+            "success": success,
+            "evaluation": evaluation,
+            "logs": logs,
+            "auto_vote": auto_vote,
+            "auto_reflect": auto_reflect,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post(f"/memories/ace/run/{run_id}/complete", json=body)
+        resp.raise_for_status()
+        return _parse_run_data(resp.json())
+
+    async def get_run(self, run_id: str) -> RunResult:
+        resp = await self.client.get(f"/memories/ace/run/{run_id}")
+        resp.raise_for_status()
+        return _parse_run_data(resp.json())
+
+    async def get_playbook_for_agent(
+        self,
+        agent_id: str,
+        *,
+        query: str = "general task strategies",
+        task_type: Optional[str] = None,
+        namespace: str = "default",
+        top_k: int = 20,
+        min_effectiveness: float = -1.0,
+    ) -> PlaybookResult:
+        body: Dict[str, Any] = {
+            "query": query,
+            "agent_id": agent_id,
+            "task_type": task_type,
+            "namespace": namespace,
+            "top_k": top_k,
+            "min_effectiveness": min_effectiveness,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post("/memories/ace/playbook/agent", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return PlaybookResult(
+            entries=[
+                PlaybookEntry(
+                    id=e["id"],
+                    content=e["content"],
+                    memory_type=e["memory_type"],
+                    effectiveness_score=e["effectiveness_score"],
+                    bullet_helpful=e["bullet_helpful"],
+                    bullet_harmful=e["bullet_harmful"],
+                    error_pattern=e.get("error_pattern"),
+                    created_at=datetime.fromisoformat(e["created_at"].replace("Z", "+00:00")),
+                )
+                for e in data["entries"]
+            ],
+            query_time_ms=data["query_time_ms"],
+        )
+
+    async def curate(
+        self,
+        *,
+        namespace: str = "default",
+        agent_id: Optional[str] = None,
+        top_k: int = 10,
+        min_effectiveness_threshold: float = -0.3,
+    ) -> CurationResult:
+        body: Dict[str, Any] = {
+            "namespace": namespace,
+            "agent_id": agent_id,
+            "top_k": top_k,
+            "min_effectiveness_threshold": min_effectiveness_threshold,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post("/memories/ace/curate", json=body)
+        resp.raise_for_status()
+        return _parse_curation_data(resp.json())

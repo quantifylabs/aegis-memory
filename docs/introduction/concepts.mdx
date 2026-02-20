@@ -173,6 +173,33 @@ client.features.create("user-auth",
 client.features.mark_complete("user-auth", verified_by="tester")
 ```
 
+## Runs
+
+**Runs** track agent task execution end-to-end, linking memories used to outcomes:
+
+```python
+# Start a run before executing a task
+run = client.start_run("task-42", "executor", memory_ids_used=["m1", "m2"])
+
+# Complete with outcome -- auto-votes and auto-reflects
+client.complete_run("task-42", success=True, evaluation={"score": 0.95})
+```
+
+On success, memories used get "helpful" votes. On failure, they get "harmful" votes and a reflection memory is created automatically.
+
+## Curation
+
+**Curation** periodically cleans up the memory playbook:
+
+```python
+result = client.curate(namespace="production")
+print(f"Promoted: {len(result.promoted)}")  # High-effectiveness entries
+print(f"Flagged: {len(result.flagged)}")    # Low-effectiveness entries
+print(f"Consolidation: {len(result.consolidation_candidates)}")  # Duplicates
+```
+
+Together, Runs + Curation form the complete ACE loop: Generation -> Execution -> Reflection -> Curation.
+
 ## Quick Reference
 
 | Concept | Purpose | Example |
@@ -186,6 +213,8 @@ client.features.mark_complete("user-auth", verified_by="tester")
 | Effectiveness | Vote-based quality score | 0.8 (helpful) |
 | Session | Progress tracking | completed, in_progress, next |
 | Feature | Verification gates | test steps, pass/fail |
+| Run | Task execution tracking | start -> complete with outcome |
+| Curation | Memory quality control | promote, flag, consolidate |
 
 ## Next Steps
 

@@ -17,6 +17,7 @@ from embedding_service import content_hash
 from event_repository import EventRepository
 from observability import OperationNames, record_operation, track_latency
 from models import (
+    AceRun,
     FeatureStatus,
     FeatureTracker,
     Memory,
@@ -696,3 +697,361 @@ class ACERepository:
 
         record_operation(OperationNames.MEMORY_FEATURE_LIST, "success")
         return list(result.scalars().all())
+
+    # ---------- ACE Run Tracking Operations ----------
+
+    @staticmethod
+    async def create_run(
+        db: AsyncSession,
+        project_id: str,
+        run_id: str,
+        agent_id: str | None = None,
+        task_type: str | None = None,
+        namespace: str = "default",
+        memory_ids_used: list[str] | None = None,
+    ) -> AceRun:
+        """Create a new ACE run with status='running'."""
+        now = datetime.now(timezone.utc)
+
+        run = AceRun(
+            id=generate_id(),
+            project_id=project_id,
+            run_id=run_id,
+            agent_id=agent_id,
+            task_type=task_type,
+            namespace=namespace,
+            status="running",
+            memory_ids_used=memory_ids_used or [],
+            reflection_ids=[],
+            evaluation={},
+            logs={},
+            started_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+
+        with track_latency(OperationNames.MEMORY_RUN_CREATE):
+            db.add(run)
+            await EventRepository.create_event(
+                db,
+                memory_id=None,
+                project_id=project_id,
+                namespace=namespace,
+                agent_id=agent_id,
+                event_type=MemoryEventType.RUN_STARTED.value,
+                event_payload={"run_id": run_id, "task_type": task_type},
+            )
+            await db.flush()
+            await db.refresh(run)
+
+        record_operation(OperationNames.MEMORY_RUN_CREATE, "success")
+        return run
+
+    @staticmethod
+    async def get_run(
+        db: AsyncSession,
+        run_id: str,
+        project_id: str,
+    ) -> AceRun | None:
+        """Get run by run_id."""
+        with track_latency(OperationNames.MEMORY_RUN_GET):
+            result = await db.execute(
+                select(AceRun).where(
+                    and_(
+                        AceRun.run_id == run_id,
+                        AceRun.project_id == project_id,
+                    )
+                )
+            )
+        record_operation(OperationNames.MEMORY_RUN_GET, "success")
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def complete_run(
+        db: AsyncSession,
+        run_id: str,
+        project_id: str,
+        success: bool,
+        evaluation: dict[str, Any] | None = None,
+        logs: dict[str, Any] | None = None,
+        auto_vote: bool = True,
+        auto_reflect: bool = True,
+        embed_fn: Any | None = None,
+    ) -> AceRun | None:
+        """
+        Complete an ACE run with feedback.
+
+        - Auto-vote: iterate memory_ids_used, vote 'helpful' if success, 'harmful' if failed
+        - Auto-reflect: if failed and evaluation includes error info, create a reflection memory
+        - Emit RUN_COMPLETED event
+        """
+        result = await db.execute(
+            select(AceRun).where(
+                and_(
+                    AceRun.run_id == run_id,
+                    AceRun.project_id == project_id,
+                )
+            )
+        )
+        run = result.scalar_one_or_none()
+
+        if not run:
+            return None
+
+        now = datetime.now(timezone.utc)
+        run.status = "completed" if success else "failed"
+        run.success = success
+        run.evaluation = evaluation or {}
+        run.logs = logs or {}
+        run.completed_at = now
+        run.updated_at = now
+
+        # Auto-vote on memories used
+        if auto_vote and run.memory_ids_used:
+            vote_type = "helpful" if success else "harmful"
+            voter = run.agent_id or "ace-loop"
+            for memory_id in run.memory_ids_used:
+                await ACERepository.vote_memory(
+                    db,
+                    memory_id=memory_id,
+                    project_id=project_id,
+                    voter_agent_id=voter,
+                    vote=vote_type,
+                    context=f"Auto-vote from run {run_id} (success={success})",
+                    task_id=run_id,
+                )
+
+        # Auto-reflect on failure
+        reflection_ids = []
+        if auto_reflect and not success and embed_fn is not None:
+            error_info = (evaluation or {}).get("error", "")
+            error_pattern = (evaluation or {}).get("error_pattern", "run_failure")
+            if error_info:
+                reflection_content = (
+                    f"Run '{run_id}' failed. Error: {error_info}. "
+                    f"Task type: {run.task_type or 'unknown'}. "
+                    f"Memories used: {len(run.memory_ids_used)}."
+                )
+                embedding = await embed_fn(reflection_content)
+                reflection = await ACERepository.create_reflection(
+                    db,
+                    project_id=project_id,
+                    content=reflection_content,
+                    embedding=embedding,
+                    agent_id=run.agent_id or "ace-loop",
+                    namespace=run.namespace,
+                    source_trajectory_id=run_id,
+                    error_pattern=error_pattern,
+                    metadata={"auto_generated": True, "run_id": run_id},
+                )
+                reflection_ids.append(reflection.id)
+
+        run.reflection_ids = reflection_ids
+
+        await EventRepository.create_event(
+            db,
+            memory_id=None,
+            project_id=project_id,
+            namespace=run.namespace,
+            agent_id=run.agent_id,
+            event_type=MemoryEventType.RUN_COMPLETED.value,
+            event_payload={
+                "run_id": run_id,
+                "success": success,
+                "auto_vote": auto_vote,
+                "auto_reflect": auto_reflect,
+                "reflection_ids": reflection_ids,
+                "memories_voted": len(run.memory_ids_used) if auto_vote else 0,
+            },
+        )
+
+        with track_latency(OperationNames.MEMORY_RUN_COMPLETE):
+            await db.flush()
+            await db.refresh(run)
+
+        record_operation(OperationNames.MEMORY_RUN_COMPLETE, "success")
+        return run
+
+    @staticmethod
+    async def get_playbook_for_agent(
+        db: AsyncSession,
+        query_embedding: list[float],
+        project_id: str,
+        agent_id: str,
+        namespace: str = "default",
+        task_type: str | None = None,
+        top_k: int = 20,
+        min_effectiveness: float = -1.0,
+    ) -> list[tuple[Memory, float]]:
+        """
+        Query playbook filtered by agent_id + optional task_type.
+
+        Boosts entries validated by successful runs by sorting with
+        linked run count + effectiveness.
+        """
+        # Build access control filter
+        shared_subquery = (
+            select(MemorySharedAgent.memory_id)
+            .where(MemorySharedAgent.shared_agent_id == agent_id)
+        )
+
+        access_filter = or_(
+            Memory.scope == MemoryScope.GLOBAL.value,
+            Memory.agent_id == agent_id,
+            Memory.id.in_(shared_subquery),
+        )
+
+        include_types = [MemoryType.STRATEGY.value, MemoryType.REFLECTION.value]
+
+        # Build base query
+        conditions = [
+            Memory.project_id == project_id,
+            Memory.namespace == namespace,
+            Memory.memory_type.in_(include_types),
+            not_(Memory.is_deprecated),
+            access_filter,
+        ]
+
+        # Filter by agent_id: include global entries + agent-specific entries
+        conditions.append(
+            or_(
+                Memory.agent_id == agent_id,
+                Memory.scope == MemoryScope.GLOBAL.value,
+                Memory.agent_id.is_(None),
+            )
+        )
+
+        query = (
+            select(
+                Memory,
+                (1 - Memory.embedding.cosine_distance(query_embedding)).label("score")
+            )
+            .where(and_(*conditions))
+            .order_by(Memory.embedding.cosine_distance(query_embedding))
+            .limit(top_k * 2)
+        )
+
+        with track_latency(OperationNames.MEMORY_PLAYBOOK_AGENT):
+            result = await db.execute(query)
+            rows = result.all()
+        record_operation(OperationNames.MEMORY_PLAYBOOK_AGENT, "success")
+
+        # Post-filter by effectiveness and optional task_type metadata
+        filtered = []
+        for memory, score in rows:
+            effectiveness = memory.get_effectiveness_score()
+            if effectiveness < min_effectiveness:
+                continue
+            # If task_type specified, prefer entries with matching task_type in metadata
+            if task_type:
+                meta = memory.metadata_json or {}
+                entry_task_type = meta.get("task_type")
+                if entry_task_type and entry_task_type != task_type:
+                    continue
+            filtered.append((memory, score))
+
+        return filtered[:top_k]
+
+    @staticmethod
+    async def curate(
+        db: AsyncSession,
+        project_id: str,
+        namespace: str = "default",
+        agent_id: str | None = None,
+        top_k: int = 10,
+        min_effectiveness_threshold: float = -0.3,
+    ) -> dict[str, Any]:
+        """
+        Curation cycle: identify effective, flag ineffective, suggest consolidations.
+
+        Returns a dict with:
+        - promoted: list of high-effectiveness memory summaries
+        - flagged: list of low-effectiveness memory summaries
+        - consolidation_candidates: list of pairs of similar memories
+        """
+        conditions = [
+            Memory.project_id == project_id,
+            Memory.namespace == namespace,
+            Memory.memory_type.in_([MemoryType.STRATEGY.value, MemoryType.REFLECTION.value]),
+            not_(Memory.is_deprecated),
+        ]
+
+        if agent_id:
+            conditions.append(
+                or_(
+                    Memory.agent_id == agent_id,
+                    Memory.scope == MemoryScope.GLOBAL.value,
+                )
+            )
+
+        with track_latency(OperationNames.MEMORY_CURATE):
+            result = await db.execute(
+                select(Memory)
+                .where(and_(*conditions))
+                .order_by(Memory.created_at)
+            )
+            all_memories = list(result.scalars().all())
+
+        # Score all memories
+        scored = []
+        for mem in all_memories:
+            effectiveness = mem.get_effectiveness_score()
+            total_votes = mem.bullet_helpful + mem.bullet_harmful
+            scored.append({
+                "id": mem.id,
+                "content": mem.content[:200],
+                "memory_type": mem.memory_type,
+                "effectiveness_score": effectiveness,
+                "bullet_helpful": mem.bullet_helpful,
+                "bullet_harmful": mem.bullet_harmful,
+                "total_votes": total_votes,
+            })
+
+        # Sort by effectiveness
+        scored.sort(key=lambda x: x["effectiveness_score"], reverse=True)
+
+        # Promoted: top-k effective (with positive scores and votes)
+        promoted = [s for s in scored if s["effectiveness_score"] > 0 and s["total_votes"] > 0][:top_k]
+
+        # Flagged: bottom entries below threshold
+        flagged = [s for s in scored if s["effectiveness_score"] < min_effectiveness_threshold and s["total_votes"] > 0][:top_k]
+
+        # Consolidation candidates: find memories with similar content (simple length + prefix check)
+        consolidation_candidates = []
+        for i in range(len(all_memories)):
+            for j in range(i + 1, len(all_memories)):
+                a, b = all_memories[i], all_memories[j]
+                # Simple heuristic: same type, same first 50 chars (normalized)
+                if a.memory_type == b.memory_type:
+                    a_prefix = a.content[:50].lower().strip()
+                    b_prefix = b.content[:50].lower().strip()
+                    if a_prefix == b_prefix and a.id != b.id:
+                        consolidation_candidates.append({
+                            "memory_id_a": a.id,
+                            "memory_id_b": b.id,
+                            "content_a": a.content[:100],
+                            "content_b": b.content[:100],
+                            "reason": "similar_content_prefix",
+                        })
+
+        await EventRepository.create_event(
+            db,
+            memory_id=None,
+            project_id=project_id,
+            namespace=namespace,
+            agent_id=agent_id,
+            event_type=MemoryEventType.CURATED.value,
+            event_payload={
+                "promoted_count": len(promoted),
+                "flagged_count": len(flagged),
+                "consolidation_count": len(consolidation_candidates),
+                "total_evaluated": len(scored),
+            },
+        )
+
+        record_operation(OperationNames.MEMORY_CURATE, "success")
+        return {
+            "promoted": promoted,
+            "flagged": flagged,
+            "consolidation_candidates": consolidation_candidates,
+        }

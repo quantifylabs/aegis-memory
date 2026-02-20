@@ -5,6 +5,8 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+pytest.importorskip("mcp", reason="mcp package not installed")
+
 from aegis_memory.client import AddResult, Feature, FeatureList, Memory, SessionProgress, VoteResult
 from aegis_memory.mcp_server import (
     AddMemoryInput,
