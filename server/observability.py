@@ -89,6 +89,12 @@ class OperationNames:
     MEMORY_RUN_COMPLETE = "memory_run_complete"
     MEMORY_PLAYBOOK_AGENT = "memory_playbook_agent"
     MEMORY_CURATE = "memory_curate"
+    INTERACTION_CREATE = "interaction_create"
+    INTERACTION_GET = "interaction_get"
+    INTERACTION_SESSION_TIMELINE = "interaction_session_timeline"
+    INTERACTION_AGENT_HISTORY = "interaction_agent_history"
+    INTERACTION_SEARCH = "interaction_search"
+    INTERACTION_CHAIN = "interaction_chain"
 
 
 class SpanNames:

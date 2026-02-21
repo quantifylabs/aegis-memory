@@ -28,6 +28,7 @@ from api.routers import (
     ace_votes,
     dashboard,
     handoffs,
+    interaction_events,
     memories,
     typed_memory,
 )
@@ -134,6 +135,9 @@ def create_app() -> FastAPI:
 
     # Typed Memory (v1.9.0)
     app.include_router(typed_memory.router, prefix="/memories/typed", tags=["typed-memory"])
+
+    # Interaction Events (v1.9.11)
+    app.include_router(interaction_events.router, prefix="/interaction-events", tags=["interaction-events"])
 
     # Dashboard
     app.include_router(dashboard.router)

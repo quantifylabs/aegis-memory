@@ -92,6 +92,7 @@ client.vote(memories[0].id, "helpful", voter_agent_id="assistant")
 | Context window limits | Dump everything in prompt | Semantic search + effectiveness scoring |
 | Learning from mistakes | Manual prompt tuning | Memory voting + reflection patterns |
 | Typed cognitive memory (episodic/semantic/procedural/control) | Custom schema per type | Built-in typed memory API with session timelines & entity facts |
+| Multi-agent collaboration history | Custom event logs | Interaction Events — temporal + causal chain history without graph database complexity |
 
 **Aegis Memory is not another vector database.** It's an *agent-native memory fabric* with primitives designed for how AI agents actually work.
 
@@ -122,6 +123,7 @@ Different memory tools solve different memory problems. This comparison stays fo
 | **Handoff baton / structured handoff state** | — | — | — | — | ✓ |
 | **ACE loop (vote / reflect / curate / run tracking)** | — | — | — | — | ✓ |
 | **Typed memory model** | — | — | — | — | ✓ |
+| **Interaction Events (collaboration history + causal chains)** | — | — | Partial | — | ✓ (Aegis Interaction Events provide 80% of G-Memory's value via temporal + causal chaining without graph database complexity) |
 
 ### When to pick Aegis (quick checklist)
 

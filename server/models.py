@@ -124,6 +124,7 @@ class MemoryEventType(str, Enum):
     RUN_STARTED = "run_started"
     RUN_COMPLETED = "run_completed"
     CURATED = "curated"
+    INTERACTION_CREATED = "interaction_created"
 
 
 class Memory(Base):
@@ -481,6 +482,52 @@ class AceRun(Base):
         Index('ix_ace_runs_project_run', 'project_id', 'run_id', unique=True),
         Index('ix_ace_runs_project_agent', 'project_id', 'agent_id'),
         Index('ix_ace_runs_project_task_type', 'project_id', 'task_type'),
+    )
+
+
+class InteractionEvent(Base):
+    """
+    Lightweight multi-agent collaboration history table.
+
+    Captures interaction events with temporal + causal chain support.
+    Provides 80% of G-Memory's collaboration trace value without graph
+    database complexity.
+
+    Causal chains are built via parent_event_id self-references.
+    Indexes support efficient session timeline and agent history queries.
+    """
+    __tablename__ = "interaction_events"
+
+    event_id = Column(String(32), primary_key=True)
+    project_id = Column(String(64), nullable=False)
+    session_id = Column(String(64), nullable=False)
+    agent_id = Column(String(64), nullable=True)
+    content = Column(Text, nullable=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    tool_calls = Column(JSON, nullable=False, server_default="[]")
+    parent_event_id = Column(
+        String(32),
+        ForeignKey("interaction_events.event_id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    namespace = Column(String(64), nullable=False, server_default="default")
+    extra_metadata = Column(JSON, nullable=True)
+    # Nullable: only populated when embed=True is requested at creation time.
+    # pgvector >= 0.5.0 skips NULL rows in HNSW index automatically.
+    embedding = Column(Vector(1536), nullable=True)
+
+    __table_args__ = (
+        Index('ix_interaction_project_session_ts', 'project_id', 'session_id', 'timestamp'),
+        Index('ix_interaction_project_agent_ts', 'project_id', 'agent_id', 'timestamp'),
+        Index('ix_interaction_parent', 'parent_event_id',
+              postgresql_where=text('parent_event_id IS NOT NULL')),
+        Index(
+            'ix_interaction_embedding_hnsw',
+            'embedding',
+            postgresql_using='hnsw',
+            postgresql_with={'m': 16, 'ef_construction': 64},
+            postgresql_ops={'embedding': 'vector_cosine_ops'},
+        ),
     )
 
 

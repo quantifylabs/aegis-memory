@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.11] - 2026-02-21
+
+### Added
+
+- **Interaction Events** — lightweight multi-agent collaboration history (Priority 3)
+  - `interaction_events` table with temporal + causal chain support
+  - `POST /interaction-events/` — create event (201); optional `embed=True` for semantic search
+  - `GET /interaction-events/session/{session_id}` — session timeline ordered ASC
+  - `GET /interaction-events/agent/{agent_id}` — agent history ordered DESC
+  - `POST /interaction-events/search` — embed query → cosine similarity search
+  - `GET /interaction-events/{event_id}` — event + full causal chain (root → leaf)
+  - Two composite B-tree indexes: `(project_id, session_id, timestamp)` and `(project_id, agent_id, timestamp)`
+  - Partial index on `parent_event_id` for causal chain traversal
+  - HNSW index on `embedding` for vector search (pgvector >= 0.5.0, skips NULLs automatically)
+  - `INTERACTION_CREATED = "interaction_created"` added to `MemoryEventType` enum (now 11 members)
+  - **SDK methods** (sync + async): `record_interaction()`, `get_session_interactions()`, `get_agent_interactions()`, `search_interactions()`, `get_interaction_chain()`
+  - **Alembic migration** `0005_interaction_events` (down_revision="0004")
+  - **Test suite**: `tests/test_interaction_events.py` (~400 lines, 10 test classes)
+  - **Docs**: `docs/guides/interaction-events.mdx`
+
 ## [1.9.1] - 2026-02-20
 
 ### Added

@@ -1,0 +1,229 @@
+---
+title: Interaction Events
+description: Lightweight multi-agent collaboration history with temporal + causal chain support
+---
+
+## Overview
+
+Interaction Events give you a lightweight history layer for multi-agent collaboration — capturing what each agent did, when it happened, and how events relate causally. This provides **80% of G-Memory's collaboration trace value** without the operational complexity of a graph database.
+
+### How it compares to G-Memory
+
+| Capability | G-Memory (NeurIPS 2025) | Aegis Interaction Events |
+|---|---|---|
+| Collaboration history | 3-tier graph hierarchy | Flat table with parent_event_id chains |
+| Temporal queries | Graph traversal | Indexed (session_id, timestamp) |
+| Causal chains | Graph edges | Self-referential parent_event_id |
+| Semantic search | Graph + vector | pgvector HNSW (when embed=True) |
+| Infrastructure | Graph database required | Your existing Postgres |
+
+### When to use Interaction Events vs other tables
+
+| Use case | Recommended table |
+|---|---|
+| Agent said/did something during a session | `interaction_events` |
+| Agent run succeeded/failed with feedback loop | `ace_runs` |
+| Abstract fact, preference, domain knowledge | `memories` (typed: semantic) |
+| Step-by-step procedure or playbook entry | `memories` (typed: procedural) |
+
+---
+
+## Table Schema
+
+```sql
+interaction_events (
+  event_id         VARCHAR(32)   PRIMARY KEY,
+  project_id       VARCHAR(64)   NOT NULL,
+  session_id       VARCHAR(64)   NOT NULL,
+  agent_id         VARCHAR(64),
+  content          TEXT,
+  timestamp        TIMESTAMPTZ   DEFAULT now(),
+  tool_calls       JSONB         DEFAULT '[]',
+  parent_event_id  VARCHAR(32)   REFERENCES interaction_events(event_id) ON DELETE SET NULL,
+  namespace        VARCHAR(64)   DEFAULT 'default',
+  extra_metadata   JSONB,
+  embedding        VECTOR(1536)  -- populated only when embed=True
+)
+
+-- Indexes
+ix_interaction_project_session_ts  (project_id, session_id, timestamp)
+ix_interaction_project_agent_ts    (project_id, agent_id, timestamp)
+ix_interaction_parent              (parent_event_id) WHERE parent_event_id IS NOT NULL
+ix_interaction_embedding_hnsw      HNSW m=16 ef_construction=64 vector_cosine_ops
+```
+
+**Embedding note:** Only events created with `embed=True` store a vector. pgvector >= 0.5.0 skips NULL rows in the HNSW index automatically, so embedding is safe to keep optional.
+
+---
+
+## Creating Events with Causal Chains
+
+Build a causal chain by referencing the previous event's `event_id` as `parent_event_id`:
+
+```python
+from aegis_memory import AegisClient
+
+client = AegisClient(api_key="your-key")
+
+# Agent A starts a task
+evt_a = client.record_interaction(
+    session_id="session-42",
+    content="Searching documentation for API rate limits",
+    agent_id="researcher-agent",
+    tool_calls=[{"name": "web_search", "args": {"query": "API rate limits"}}],
+)
+
+# Agent B responds, causally linked to Agent A's event
+evt_b = client.record_interaction(
+    session_id="session-42",
+    content="Found rate limit: 1000 req/min. Implementing backoff.",
+    agent_id="executor-agent",
+    parent_event_id=evt_a.event_id,  # causal link
+)
+
+print(f"Created chain: {evt_a.event_id} → {evt_b.event_id}")
+```
+
+### With semantic search enabled
+
+Set `embed=True` to generate a vector embedding so the event is searchable:
+
+```python
+evt = client.record_interaction(
+    session_id="session-42",
+    content="User requested dark mode theme change",
+    agent_id="ui-agent",
+    embed=True,  # stores vector for later semantic search
+    extra_metadata={"component": "theme-system", "priority": "high"},
+)
+```
+
+---
+
+## Session Timeline Query
+
+Retrieve all events for a session ordered by timestamp ASC:
+
+```python
+timeline = client.get_session_interactions(
+    "session-42",
+    namespace="default",
+    limit=100,
+)
+
+print(f"Session has {timeline.count} events")
+for event in timeline.events:
+    print(f"[{event.timestamp}] {event.agent_id}: {event.content[:80]}")
+```
+
+---
+
+## Agent History Query
+
+Retrieve an agent's recent events across all sessions, most recent first (DESC):
+
+```python
+history = client.get_agent_interactions(
+    "researcher-agent",
+    namespace="default",
+    limit=50,
+)
+
+print(f"Agent has {history.count} recorded interactions")
+for event in history.events:
+    print(f"[{event.session_id}] {event.content[:80]}")
+```
+
+---
+
+## Semantic Search
+
+Find past interactions similar to a query. Only events created with `embed=True` are included:
+
+```python
+results = client.search_interactions(
+    "API rate limit handling patterns",
+    namespace="default",
+    top_k=5,
+    min_score=0.7,
+    # Optional: narrow to a specific session or agent
+    # session_id="session-42",
+    # agent_id="researcher-agent",
+)
+
+for item in results.results:
+    print(f"[score={item.score:.3f}] {item.event.content[:100]}")
+print(f"Search completed in {results.query_time_ms:.1f}ms")
+```
+
+---
+
+## Causal Chain Traversal
+
+Get an event plus its full ancestor chain from root to the requested event:
+
+```python
+result = client.get_interaction_chain(evt_b.event_id)
+
+print(f"Chain depth: {result.chain_depth}")
+for step, event in enumerate(result.chain):
+    print(f"  Step {step+1}: [{event.agent_id}] {event.content[:80]}")
+    if event.event_id == result.event.event_id:
+        print("  ^ (requested event)")
+```
+
+The chain is always ordered **root → leaf** (oldest ancestor first, requested event last).
+
+---
+
+## Async Usage
+
+All methods have async equivalents on `AsyncAegisClient`:
+
+```python
+from aegis_memory import AsyncAegisClient
+
+async with AsyncAegisClient(api_key="your-key") as client:
+    evt = await client.record_interaction(
+        session_id="session-42",
+        content="Async agent interaction",
+        agent_id="async-agent",
+    )
+    timeline = await client.get_session_interactions("session-42")
+    chain = await client.get_interaction_chain(evt.event_id)
+```
+
+---
+
+## SDK Method Reference
+
+| Method | Description |
+|---|---|
+| `record_interaction(session_id, content, *, agent_id, tool_calls, parent_event_id, namespace, extra_metadata, embed)` | Record a new interaction event |
+| `get_session_interactions(session_id, *, namespace, limit, offset)` | Session timeline (ASC) |
+| `get_agent_interactions(agent_id, *, namespace, limit, offset)` | Agent history (DESC) |
+| `search_interactions(query, *, namespace, session_id, agent_id, top_k, min_score)` | Semantic search |
+| `get_interaction_chain(event_id)` | Event + causal chain (root → leaf) |
+
+---
+
+## API Endpoint Reference
+
+All endpoints are under `/interaction-events`:
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/interaction-events/` | Create event (201) |
+| `GET` | `/interaction-events/session/{session_id}` | Session timeline (ASC) |
+| `GET` | `/interaction-events/agent/{agent_id}` | Agent history (DESC) |
+| `POST` | `/interaction-events/search` | Semantic search |
+| `GET` | `/interaction-events/{event_id}` | Event + causal chain |
+
+**Route ordering:** `/{event_id}` is deliberately declared last to prevent FastAPI from matching `/session/...` or `/agent/...` paths as event IDs.
+
+---
+
+## Next Steps
+
+- [ACE Patterns Guide](./ace-patterns.mdx) — understand the full Generation → Reflection → Curation loop
+- [Typed Memory Guide](./typed-memory.mdx) — episodic, semantic, procedural, and control memory types

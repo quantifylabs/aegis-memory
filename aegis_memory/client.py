@@ -323,6 +323,87 @@ class CurationResult:
     consolidation_candidates: List[ConsolidationCandidate]
 
 
+@dataclass
+class InteractionEvent:
+    """A recorded interaction event."""
+    event_id: str
+    project_id: str
+    session_id: str
+    agent_id: Optional[str]
+    content: Optional[str]
+    timestamp: datetime
+    tool_calls: List[Any]
+    parent_event_id: Optional[str]
+    namespace: str
+    extra_metadata: Optional[Dict[str, Any]]
+    has_embedding: bool
+
+
+@dataclass
+class InteractionEventResult:
+    """Result of creating an interaction event."""
+    event_id: str
+    session_id: str
+    namespace: str
+    has_embedding: bool
+
+
+@dataclass
+class SessionTimelineResult:
+    """Timeline of events for a session."""
+    session_id: str
+    namespace: str
+    events: List[InteractionEvent]
+    count: int
+
+
+@dataclass
+class AgentInteractionsResult:
+    """Interaction history for an agent."""
+    agent_id: str
+    namespace: str
+    events: List[InteractionEvent]
+    count: int
+
+
+@dataclass
+class InteractionSearchResultItem:
+    """A single search result with score."""
+    event: InteractionEvent
+    score: float
+
+
+@dataclass
+class InteractionSearchResult:
+    """Result of a semantic search over interaction events."""
+    results: List[InteractionSearchResultItem]
+    query_time_ms: float
+
+
+@dataclass
+class EventWithChainResult:
+    """An event plus its full causal chain (root → leaf)."""
+    event: InteractionEvent
+    chain: List[InteractionEvent]
+    chain_depth: int
+
+
+def _parse_interaction_event(data: Dict[str, Any]) -> "InteractionEvent":
+    return InteractionEvent(
+        event_id=data["event_id"],
+        project_id=data["project_id"],
+        session_id=data["session_id"],
+        agent_id=data.get("agent_id"),
+        content=data.get("content"),
+        timestamp=datetime.fromisoformat(data["timestamp"].replace("Z", "+00:00")),
+        tool_calls=data.get("tool_calls", []),
+        parent_event_id=data.get("parent_event_id"),
+        namespace=data.get("namespace", "default"),
+        extra_metadata=data.get("extra_metadata"),
+        has_embedding=data.get("has_embedding", False),
+    )
+
+
 class AegisClient:
     """
     Aegis Memory API client with ACE enhancements.
@@ -1249,6 +1330,139 @@ class AegisClient:
         resp.raise_for_status()
         return _parse_curation_data(resp.json())
 
+    # ---------- Interaction Events ----------
+
+    def record_interaction(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        agent_id: Optional[str] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        parent_event_id: Optional[str] = None,
+        namespace: str = "default",
+        extra_metadata: Optional[Dict[str, Any]] = None,
+        embed: bool = False,
+    ) -> InteractionEventResult:
+        """
+        Record an interaction event for a session.
+
+        Set embed=True to generate a vector embedding for later semantic search.
+        Link events causally by setting parent_event_id to a prior event's ID.
+        """
+        body: Dict[str, Any] = {
+            "session_id": session_id,
+            "content": content,
+            "agent_id": agent_id,
+            "tool_calls": tool_calls,
+            "parent_event_id": parent_event_id,
+            "namespace": namespace,
+            "extra_metadata": extra_metadata,
+            "embed": embed,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+        body["embed"] = embed  # always include embed flag
+
+        resp = self.client.post("/interaction-events/", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return InteractionEventResult(
+            event_id=data["event_id"],
+            session_id=data["session_id"],
+            namespace=data["namespace"],
+            has_embedding=data["has_embedding"],
+        )
+
+    def get_session_interactions(
+        self,
+        session_id: str,
+        *,
+        namespace: str = "default",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> SessionTimelineResult:
+        """Get interaction events for a session ordered by timestamp ASC."""
+        params = {"namespace": namespace, "limit": limit, "offset": offset}
+        resp = self.client.get(f"/interaction-events/session/{session_id}", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        return SessionTimelineResult(
+            session_id=data["session_id"],
+            namespace=data["namespace"],
+            events=[_parse_interaction_event(e) for e in data["events"]],
+            count=data["count"],
+        )
+
+    def get_agent_interactions(
+        self,
+        agent_id: str,
+        *,
+        namespace: str = "default",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> AgentInteractionsResult:
+        """Get interaction events for an agent ordered by timestamp DESC (most recent first)."""
+        params = {"namespace": namespace, "limit": limit, "offset": offset}
+        resp = self.client.get(f"/interaction-events/agent/{agent_id}", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        return AgentInteractionsResult(
+            agent_id=data["agent_id"],
+            namespace=data["namespace"],
+            events=[_parse_interaction_event(e) for e in data["events"]],
+            count=data["count"],
+        )
+
+    def search_interactions(
+        self,
+        query: str,
+        *,
+        namespace: str = "default",
+        session_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        top_k: int = 10,
+        min_score: float = 0.0,
+    ) -> InteractionSearchResult:
+        """
+        Semantic search over interaction events.
+
+        Only events created with embed=True are searchable.
+        """
+        body: Dict[str, Any] = {
+            "query": query,
+            "namespace": namespace,
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "top_k": top_k,
+            "min_score": min_score,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post("/interaction-events/search", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return InteractionSearchResult(
+            results=[
+                InteractionSearchResultItem(
+                    event=_parse_interaction_event(r["event"]),
+                    score=r["score"],
+                )
+                for r in data["results"]
+            ],
+            query_time_ms=data["query_time_ms"],
+        )
+
+    def get_interaction_chain(self, event_id: str) -> EventWithChainResult:
+        """Get an interaction event plus its full causal chain (root → leaf)."""
+        resp = self.client.get(f"/interaction-events/{event_id}")
+        resp.raise_for_status()
+        data = resp.json()
+        return EventWithChainResult(
+            event=_parse_interaction_event(data["event"]),
+            chain=[_parse_interaction_event(e) for e in data["chain"]],
+            chain_depth=data["chain_depth"],
+        )
+
     # ---------- Export ----------
 
     def export_json(
@@ -1951,3 +2165,136 @@ class AsyncAegisClient:
         resp = await self.client.post("/memories/ace/curate", json=body)
         resp.raise_for_status()
         return _parse_curation_data(resp.json())
+
+    # ---------- Interaction Events ----------
+
+    async def record_interaction(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        agent_id: Optional[str] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        parent_event_id: Optional[str] = None,
+        namespace: str = "default",
+        extra_metadata: Optional[Dict[str, Any]] = None,
+        embed: bool = False,
+    ) -> InteractionEventResult:
+        """
+        Record an interaction event for a session.
+
+        Set embed=True to generate a vector embedding for later semantic search.
+        Link events causally by setting parent_event_id to a prior event's ID.
+        """
+        body: Dict[str, Any] = {
+            "session_id": session_id,
+            "content": content,
+            "agent_id": agent_id,
+            "tool_calls": tool_calls,
+            "parent_event_id": parent_event_id,
+            "namespace": namespace,
+            "extra_metadata": extra_metadata,
+            "embed": embed,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+        body["embed"] = embed  # always include embed flag
+
+        resp = await self.client.post("/interaction-events/", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return InteractionEventResult(
+            event_id=data["event_id"],
+            session_id=data["session_id"],
+            namespace=data["namespace"],
+            has_embedding=data["has_embedding"],
+        )
+
+    async def get_session_interactions(
+        self,
+        session_id: str,
+        *,
+        namespace: str = "default",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> SessionTimelineResult:
+        """Get interaction events for a session ordered by timestamp ASC."""
+        params = {"namespace": namespace, "limit": limit, "offset": offset}
+        resp = await self.client.get(f"/interaction-events/session/{session_id}", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        return SessionTimelineResult(
+            session_id=data["session_id"],
+            namespace=data["namespace"],
+            events=[_parse_interaction_event(e) for e in data["events"]],
+            count=data["count"],
+        )
+
+    async def get_agent_interactions(
+        self,
+        agent_id: str,
+        *,
+        namespace: str = "default",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> AgentInteractionsResult:
+        """Get interaction events for an agent ordered by timestamp DESC (most recent first)."""
+        params = {"namespace": namespace, "limit": limit, "offset": offset}
+        resp = await self.client.get(f"/interaction-events/agent/{agent_id}", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        return AgentInteractionsResult(
+            agent_id=data["agent_id"],
+            namespace=data["namespace"],
+            events=[_parse_interaction_event(e) for e in data["events"]],
+            count=data["count"],
+        )
+
+    async def search_interactions(
+        self,
+        query: str,
+        *,
+        namespace: str = "default",
+        session_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        top_k: int = 10,
+        min_score: float = 0.0,
+    ) -> InteractionSearchResult:
+        """
+        Semantic search over interaction events.
+
+        Only events created with embed=True are searchable.
+        """
+        body: Dict[str, Any] = {
+            "query": query,
+            "namespace": namespace,
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "top_k": top_k,
+            "min_score": min_score,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post("/interaction-events/search", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return InteractionSearchResult(
+            results=[
+                InteractionSearchResultItem(
+                    event=_parse_interaction_event(r["event"]),
+                    score=r["score"],
+                )
+                for r in data["results"]
+            ],
+            query_time_ms=data["query_time_ms"],
+        )
+
+    async def get_interaction_chain(self, event_id: str) -> EventWithChainResult:
+        """Get an interaction event plus its full causal chain (root → leaf)."""
+        resp = await self.client.get(f"/interaction-events/{event_id}")
+        resp.raise_for_status()
+        data = resp.json()
+        return EventWithChainResult(
+            event=_parse_interaction_event(data["event"]),
+            chain=[_parse_interaction_event(e) for e in data["chain"]],
+            chain_depth=data["chain_depth"],
+        )
