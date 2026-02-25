@@ -1,0 +1,224 @@
+---
+title: "Temporal Decay for Memory Relevance"
+description: "Keep retrieval fresh — memories fade over time so stale entries don't pollute query results."
+---
+
+## Overview
+
+As agents accumulate memories, older entries that are never retrieved again can crowd out
+fresher, more relevant ones. Temporal decay solves this by reducing each memory's
+ranking weight as it ages, based on how recently it was accessed.
+
+Key properties:
+- **Zero configuration by default** — `apply_decay=False` means existing queries are unaffected.
+- **Per-type half-lives** — different memory types decay at different rates (e.g. episodic fades in 7 days; procedural lasts 180 days).
+- **Access tracking** — every `/query` call automatically updates `last_accessed_at` and increments `access_count` for returned memories.
+- **Archive sweep** — an optional endpoint soft-deprecates memories that have fallen below a relevance threshold.
+
+---
+
+## Decay Formula
+
+```
+decay_factor   = exp(-λ × age_days)
+age_days       = (now − last_accessed_at)  or  (now − created_at) if never accessed
+λ              = ln(2) / half_life_days
+
+relevance_score = effectiveness_score × decay_factor
+```
+
+`semantic_score` (cosine similarity from pgvector) is always returned unchanged.
+When `apply_decay=True`, results are **re-ranked** by:
+
+```
+final_ranking_score = semantic_score × decay_factor
+```
+
+---
+
+## Half-Life Table
+
+| Memory Type  | Half-Life |
+|-------------|-----------|
+| episodic    | 7 days    |
+| progress    | 14 days   |
+| feature     | 14 days   |
+| standard    | 30 days   |
+| reflection  | 60 days   |
+| strategy    | 90 days   |
+| semantic    | 90 days   |
+| procedural  | 180 days  |
+| control     | 180 days  |
+| *(unknown)* | 30 days   |
+
+Retrieve the live table at any time:
+
+```bash
+curl -H "Authorization: Bearer $KEY" /memories/decay/config
+```
+
+Response:
+
+```json
+{
+  "half_lives": { "episodic": 7, "standard": 30, ... },
+  "default_half_life": 30,
+  "formula": "decay_factor = exp(-ln(2)/half_life_days * age_days); ...",
+  "threshold_default": 0.1
+}
+```
+
+---
+
+## Using Decay in Queries
+
+### REST API
+
+Add `"apply_decay": true` to any query body:
+
+```bash
+curl -X POST /memories/query \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "pagination strategies",
+    "agent_id": "executor",
+    "apply_decay": true
+  }'
+```
+
+Works the same for `/memories/query_cross_agent` and `/memories/typed/query`.
+
+### Python SDK
+
+```python
+from aegis_memory import AegisClient
+
+client = AegisClient(api_key="your-key")
+
+# Decay-aware query — older memories rank lower
+memories = client.query(
+    "pagination strategies",
+    agent_id="executor",
+    apply_decay=True,
+)
+
+for m in memories:
+    print(f"[{m.score:.3f}] {m.content}")
+```
+
+### Response Fields
+
+Each memory in the response now includes `relevance_score`:
+
+```json
+{
+  "id": "abc123",
+  "content": "Use cursor-based pagination for large datasets",
+  "score": 0.92,
+  "relevance_score": 0.34
+}
+```
+
+- `score` — raw cosine similarity (unchanged)
+- `relevance_score` — `effectiveness_score × decay_factor` (roadmap formula)
+
+---
+
+## Access Tracking
+
+Every query automatically records access for the returned memories — no extra
+configuration needed. The fields updated on each query are:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `last_accessed_at` | `timestamptz` | Timestamp of the most recent query that returned this memory |
+| `access_count` | `integer` | Total number of times this memory has been returned by queries |
+
+This is a best-effort bulk `UPDATE` that runs after the response is assembled; it
+does **not** block the query response.
+
+---
+
+## Archiving Stale Memories
+
+Use the archive endpoint to soft-deprecate memories that have fallen below a
+`relevance_score` threshold. Archived memories are marked `is_deprecated=True`
+and excluded from future queries.
+
+### Dry run first
+
+```bash
+curl -X POST /memories/decay/archive \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"namespace": "default", "threshold": 0.1, "dry_run": true}'
+```
+
+Response:
+
+```json
+{ "archived": 42, "namespace": "default", "threshold": 0.1, "dry_run": true }
+```
+
+### Archive for real
+
+```bash
+curl -X POST /memories/decay/archive \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"namespace": "default", "threshold": 0.1}'
+```
+
+**Parameters:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `namespace` | string | `"default"` | Namespace to sweep |
+| `threshold` | float (0–1) | `0.1` | Archive memories below this relevance score |
+| `dry_run` | bool | `false` | Preview count without modifying data |
+
+### Threshold guidance
+
+- `0.05` — very aggressive; only archives near-zero-relevance memories
+- `0.1` — **recommended default** — clears memories with essentially no remaining signal
+- `0.25` — moderate; trims memories that haven't been accessed in a long time
+
+---
+
+## Migration
+
+Run the Alembic migration to add the new columns:
+
+```bash
+alembic upgrade 0006
+```
+
+Adds `last_accessed_at` (nullable) and `access_count` (default 0) to the
+`memories` table. Both columns are safe for zero-downtime deployment — no
+existing rows are changed, and queries work without the new columns populated.
+
+---
+
+## How Decay Interacts with Effectiveness Score
+
+`effectiveness_score` is vote-based: `(helpful − harmful) / (total + 1)`.
+
+A memory with 0 votes has `effectiveness_score = 0.0`, so `relevance_score` will
+always be `0.0` regardless of age. This is intentional: unvoted memories
+contribute no signal to relevance scoring, and decay amplifies that zero.
+
+If you want decay to affect unvoted memories differently, cast votes before
+querying:
+
+```python
+client.vote(memory_id, vote="helpful", voter_agent_id="curator")
+```
+
+---
+
+## See Also
+
+- [Typed Memory Guide](/guides/typed-memory) — memory types and half-life relationship
+- [ACE Patterns Guide](/guides/ace-patterns) — voting, reflection, and playbook
+- [API Reference: /memories/decay](/api-reference/decay) — full endpoint docs

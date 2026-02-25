@@ -62,6 +62,21 @@ class MemoryType(str, Enum):
     CONTROL = "control"
 
 
+class TrustLevel(str, Enum):
+    """
+    Agent trust hierarchy per OWASP AI Agent Security Cheat Sheet.
+
+    UNTRUSTED: External/unknown agents. Read-only access to global scope only.
+    INTERNAL:  Default for authenticated agents. Full CRUD within own scope.
+    PRIVILEGED: Can access other agents' private memories, admin operations.
+    SYSTEM:    Reserved for Aegis internal operations (auto-vote, auto-reflect).
+    """
+    UNTRUSTED = "untrusted"
+    INTERNAL = "internal"
+    PRIVILEGED = "privileged"
+    SYSTEM = "system"
+
+
 class FeatureStatus(str, Enum):
     """Feature tracking status for long-running agent tasks."""
     NOT_STARTED = "not_started"
@@ -106,6 +121,10 @@ class ApiKey(Base):
     expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
+    # Security (v2.0.0): Trust level and agent binding
+    trust_level = Column(String(16), nullable=False, default="internal")
+    bound_agent_id = Column(String(64), nullable=True)  # When set, key can only be used by this agent
+
     project = relationship("Project", back_populates="api_keys")
 
     __table_args__ = (
@@ -125,6 +144,11 @@ class MemoryEventType(str, Enum):
     RUN_COMPLETED = "run_completed"
     CURATED = "curated"
     INTERACTION_CREATED = "interaction_created"
+    SECURITY_FLAGGED = "security_flagged"
+    SECURITY_REJECTED = "security_rejected"
+    AUTH_FAILED = "auth_failed"
+    DELETED = "deleted"
+    INTEGRITY_FAILED = "integrity_failed"
 
 
 class Memory(Base):
@@ -187,6 +211,15 @@ class Memory(Base):
     entity_id = Column(String(128), nullable=True)  # Links semantic memories to entity
     sequence_number = Column(Integer, nullable=True)  # Ordering within session
 
+    # Temporal Decay (v1.9.2): Access tracking for relevance decay scoring
+    last_accessed_at = Column(DateTime(timezone=True), nullable=True)
+    access_count = Column(Integer, nullable=False, default=0)
+
+    # Content Security (v2.0.0): Integrity and policy enforcement
+    integrity_hash = Column(String(64), nullable=True)          # HMAC-SHA256 tamper detection
+    content_flags = Column(JSON, nullable=False, default=list)   # ["pii_detected", "injection_flagged", ...]
+    trust_level = Column(String(16), nullable=False, default="internal")  # TrustLevel enum value
+
     # Relationships
     votes = relationship("VoteHistory", back_populates="memory", cascade="all, delete-orphan")
     shared_agents = relationship("MemorySharedAgent", back_populates="memory", cascade="all, delete-orphan")
@@ -227,6 +260,10 @@ class Memory(Base):
               postgresql_where=text('session_id IS NOT NULL')),
         Index('ix_memories_entity', 'project_id', 'entity_id',
               postgresql_where=text('entity_id IS NOT NULL')),
+
+        # Temporal Decay (v1.9.2): Partial index for efficient decay sweep queries
+        Index('ix_memories_last_accessed', 'project_id', 'last_accessed_at',
+              postgresql_where=text('last_accessed_at IS NOT NULL')),
     )
 
     def can_access(self, requesting_agent_id: str | None) -> bool:

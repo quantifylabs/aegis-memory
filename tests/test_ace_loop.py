@@ -81,7 +81,7 @@ class TestAceRunModel:
 
     def test_event_type_total_count(self):
         from models import MemoryEventType
-        assert len(MemoryEventType) == 11
+        assert len(MemoryEventType) == 16
 
 
 # ============================================================================

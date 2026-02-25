@@ -1,0 +1,157 @@
+---
+title: 'Security'
+description: 'Content security, integrity verification, and trust hierarchy for multi-agent memory'
+---
+
+# Security
+
+## Why Memory Security Matters
+
+In multi-agent systems, agents trust each other by default. When your researcher agent passes output to your writer agent, the writer treats that as a legitimate instruction. If you compromise one agent, you get every downstream agent automatically.
+
+The 2025 incident landscape proved this at scale:
+- **EchoLeak** (CVE-2025-32711, CVSS 9.3): A single crafted email triggered automatic data exfiltration from Microsoft 365 Copilot
+- **CrewAI + GPT-4o**: 65% exfiltration success rate in tested scenarios
+- **Drift chatbot cascade**: One compromised agent integration cascaded into 700+ organizations
+
+Memory is the attack surface. Aegis implements [OWASP AI Agent Security Cheat Sheet Section 3](https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html#3-memory-context-security) natively.
+
+## Content Security Pipeline
+
+Every memory write passes through a three-stage content security pipeline before persistence.
+
+### Stage 1: Input Validation
+
+- **Content length**: Max 50,000 characters (configurable via `CONTENT_MAX_LENGTH`)
+- **Metadata depth**: Max 5 levels of nesting (configurable via `METADATA_MAX_DEPTH`)
+- **Metadata keys**: Max 50 total keys (configurable via `METADATA_MAX_KEYS`)
+- **Encoding**: Null bytes and control characters rejected (except `\n`, `\t`, `\r`)
+
+### Stage 2: Sensitive Data Detection
+
+Detects PII and secrets using compiled regex patterns:
+- SSN patterns (`\b\d{3}-\d{2}-\d{4}\b`)
+- Credit card numbers (Luhn-validated 13-19 digit sequences)
+- API keys: AWS (`AKIA...`), OpenAI (`sk-...`), GitHub (`ghp_...`, `gho_...`)
+- Email addresses
+- Password assignments (`password=`, `secret:`, etc.)
+
+### Stage 3: Prompt Injection Detection
+
+Detects common injection patterns:
+- System prompt overrides: "ignore previous instructions", "you are now", "new instructions"
+- Role manipulation: "pretend you are", "act as", "you must now"
+- Data exfiltration triggers: "send data to", "exfiltrate", "forward to" with URLs
+
+### Content Policy Configuration
+
+Each detection category has a configurable action:
+
+| Environment Variable | Default | Options |
+|---------------------|---------|---------|
+| `CONTENT_POLICY_PII` | `flag` | `reject`, `redact`, `flag`, `allow` |
+| `CONTENT_POLICY_SECRETS` | `reject` | `reject`, `redact`, `flag`, `allow` |
+| `CONTENT_POLICY_INJECTION` | `flag` | `reject`, `redact`, `flag`, `allow` |
+
+- **reject**: HTTP 422 returned, memory NOT stored, `SECURITY_REJECTED` event emitted
+- **redact**: Matched patterns replaced with `[REDACTED:<type>]`, memory stored with flags
+- **flag**: Memory stored with `content_flags` populated, available for admin review
+- **allow**: No action, content stored normally
+
+## Memory Integrity (HMAC-SHA256)
+
+Every new memory is signed with HMAC-SHA256 at storage time.
+
+### How It Works
+
+Canonical message format: `{project_id}:{agent_id}:{content}`
+
+The HMAC is computed using `AEGIS_INTEGRITY_KEY` (falls back to `AEGIS_API_KEY`).
+
+### Verification
+
+```bash
+# Verify a specific memory
+POST /security/verify/{memory_id}
+```
+
+Returns whether the stored hash matches the recomputed hash. Legacy rows without hashes return `has_hash: false`.
+
+## Agent Trust Hierarchy
+
+Four trust levels following OWASP recommendations:
+
+| Level | Write Scope | Read Scope | Delete | Admin |
+|-------|------------|------------|--------|-------|
+| `untrusted` | None | Global only | No | No |
+| `internal` | agent-private, agent-shared | Global + own | Own only | No |
+| `privileged` | All scopes | All | All | Yes |
+| `system` | All scopes | All | All | Yes |
+
+### Agent Identity Binding
+
+API keys can be bound to a specific `agent_id` via the `bound_agent_id` field. When set, any request using that key must match the bound agent ID. This prevents agent ID spoofing.
+
+## Per-Agent Rate Limiting
+
+Separate from project-level rate limiting, per-agent limits prevent a single rogue agent from exhausting the project's quota.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `PER_AGENT_RATE_LIMIT_PER_MINUTE` | 30 | Max requests per agent per minute |
+| `PER_AGENT_RATE_LIMIT_PER_HOUR` | 500 | Max requests per agent per hour |
+| `AGENT_MEMORY_LIMIT` | 10,000 | Max memories per agent per project |
+
+## Security Admin Endpoints
+
+All require `privileged` or `system` trust level.
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/security/audit` | GET | Query security events with filters |
+| `/security/flagged` | GET | List flagged memories pending review |
+| `/security/verify/{id}` | POST | Verify HMAC integrity of a memory |
+| `/security/config` | GET | Current security configuration |
+| `/security/scan` | POST | Dry-run content scan without storing |
+
+## SDK Security Methods
+
+```python
+from aegis_memory import AegisClient
+
+client = AegisClient(api_key="your-key")
+
+# Pre-scan content before storing
+result = client.scan_content("Some content to check")
+print(result.allowed, result.flags)
+
+# Verify memory integrity
+check = client.verify_integrity("memory-id")
+print(check.integrity_valid)
+
+# List flagged memories
+flagged = client.get_flagged_memories(namespace="default")
+
+# Query audit trail
+events = client.get_security_audit(event_type="security_rejected")
+
+# Get security config
+config = client.get_security_config()
+```
+
+## Security Configuration Reference
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AEGIS_INTEGRITY_KEY` | Falls back to `AEGIS_API_KEY` | HMAC signing key |
+| `CONTENT_MAX_LENGTH` | 50,000 | Max content length in characters |
+| `METADATA_MAX_DEPTH` | 5 | Max metadata nesting depth |
+| `METADATA_MAX_KEYS` | 50 | Max total metadata keys |
+| `CONTENT_POLICY_PII` | `flag` | Action for PII detections |
+| `CONTENT_POLICY_SECRETS` | `reject` | Action for secret detections |
+| `CONTENT_POLICY_INJECTION` | `flag` | Action for injection detections |
+| `ENABLE_INTEGRITY_CHECK` | `true` | Enable HMAC signing |
+| `PER_AGENT_RATE_LIMIT_PER_MINUTE` | 30 | Per-agent rate limit (minute) |
+| `PER_AGENT_RATE_LIMIT_PER_HOUR` | 500 | Per-agent rate limit (hour) |
+| `AGENT_MEMORY_LIMIT` | 10,000 | Max memories per agent |
+| `ENABLE_TRUST_LEVELS` | `false` | Enable trust level enforcement |

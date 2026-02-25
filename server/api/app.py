@@ -27,9 +27,11 @@ from api.routers import (
     ace_reflections,
     ace_votes,
     dashboard,
+    decay,
     handoffs,
     interaction_events,
     memories,
+    security,
     typed_memory,
 )
 
@@ -79,7 +81,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Aegis Memory API",
         version=__version__,
-        description="Production-grade multi-agent memory layer with ACE enhancements.",
+        description="The secure memory layer for multi-agent AI. Production-grade with OWASP-compliant security.",
         lifespan=lifespan,
         docs_url="/docs",
         redoc_url="/redoc",
@@ -138,6 +140,12 @@ def create_app() -> FastAPI:
 
     # Interaction Events (v1.9.11)
     app.include_router(interaction_events.router, prefix="/interaction-events", tags=["interaction-events"])
+
+    # Temporal Decay (v1.9.2)
+    app.include_router(decay.router, prefix="/memories/decay", tags=["decay"])
+
+    # Security (v2.0.0)
+    app.include_router(security.router, prefix="/security", tags=["security"])
 
     # Dashboard
     app.include_router(dashboard.router)

@@ -118,6 +118,7 @@ class MemoryOut(BaseModel):
     entity_id: str | None = None
     sequence_number: int | None = None
     score: float | None = None
+    relevance_score: float | None = None  # Temporal Decay (v1.9.2)
 
     class Config:
         from_attributes = True

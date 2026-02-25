@@ -87,6 +87,24 @@ class Settings(BaseSettings):
         description="Environment: 'development' or 'production'. Controls schema init behavior.",
     )
 
+    # ---------- Content Security (v2.0.0) ----------
+    integrity_signing_key: str | None = Field(
+        default=None,
+        alias="AEGIS_INTEGRITY_KEY",
+        description="HMAC signing key for memory integrity. Falls back to AEGIS_API_KEY if not set.",
+    )
+    content_max_length: int = Field(default=50_000, alias="CONTENT_MAX_LENGTH")
+    metadata_max_depth: int = Field(default=5, alias="METADATA_MAX_DEPTH")
+    metadata_max_keys: int = Field(default=50, alias="METADATA_MAX_KEYS")
+    content_policy_pii: str = Field(default="flag", alias="CONTENT_POLICY_PII")
+    content_policy_secrets: str = Field(default="reject", alias="CONTENT_POLICY_SECRETS")
+    content_policy_injection: str = Field(default="flag", alias="CONTENT_POLICY_INJECTION")
+    enable_integrity_check: bool = Field(default=True, alias="ENABLE_INTEGRITY_CHECK")
+    per_agent_rate_limit_per_minute: int = Field(default=30, alias="PER_AGENT_RATE_LIMIT_PER_MINUTE")
+    per_agent_rate_limit_per_hour: int = Field(default=500, alias="PER_AGENT_RATE_LIMIT_PER_HOUR")
+    agent_memory_limit: int = Field(default=10_000, alias="AGENT_MEMORY_LIMIT")
+    enable_trust_levels: bool = Field(default=False, alias="ENABLE_TRUST_LEVELS")
+
     # ---------- CORS ----------
     cors_origins: str = Field(default="*", alias="CORS_ORIGINS")
 
@@ -123,6 +141,10 @@ class Settings(BaseSettings):
 
     def cors_allow_credentials(self) -> bool:
         return self.get_cors_origins() != ["*"]
+
+    def get_integrity_key(self) -> str:
+        """Return integrity signing key, falling back to API key."""
+        return self.integrity_signing_key or self.aegis_api_key
 
 
 @lru_cache

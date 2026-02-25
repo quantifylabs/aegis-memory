@@ -22,8 +22,14 @@ from pydantic import BaseModel, Field, field_validator
 from scope_inference import ScopeInference
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from temporal_decay import compute_relevance_score
+from config import get_settings
+from content_security import ContentSecurityScanner
+from integrity import compute_integrity_hash
 
 router = APIRouter()
+_settings = get_settings()
+_scanner = ContentSecurityScanner(_settings)
 
 
 # ---------- Request/Response Models ----------
@@ -65,6 +71,7 @@ class MemoryQuery(BaseModel):
     top_k: int = Field(default=10, ge=1, le=100)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
     memory_types: list[str] | None = None
+    apply_decay: bool = False
 
 
 class CrossAgentQuery(BaseModel):
@@ -78,6 +85,7 @@ class CrossAgentQuery(BaseModel):
     namespace: str = "default"
     top_k: int = Field(default=10, ge=1, le=100)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    apply_decay: bool = False
 
 
 class MemoryOut(BaseModel):
@@ -97,6 +105,9 @@ class MemoryOut(BaseModel):
     entity_id: str | None = None
     sequence_number: int | None = None
     score: float | None = None
+    relevance_score: float | None = None
+    content_flags: list[str] = []
+    trust_level: str = "internal"
 
     class Config:
         from_attributes = True
@@ -142,6 +153,9 @@ def _mem_to_out(mem: Memory, score: float | None = None) -> MemoryOut:
         entity_id=mem.entity_id,
         sequence_number=mem.sequence_number,
         score=score,
+        relevance_score=compute_relevance_score(mem),
+        content_flags=mem.content_flags or [],
+        trust_level=mem.trust_level or "internal",
     )
 
 
@@ -166,13 +180,37 @@ async def add_memory(body: MemoryCreate, project_id: str = Depends(check_rate_li
             if existing:
                 record_operation(OperationNames.MEMORY_ADD, "success")
                 return AddResult(id=existing.id, deduped_from=existing.id)
-            embedding = await embed_service.embed_single(body.content, db)
-            resolved_scope = ScopeInference.infer_scope(content=body.content, explicit_scope=body.scope, agent_id=body.agent_id, metadata=body.metadata or {})
-            mem = await MemoryRepository.add(db, project_id=project_id, content=body.content, embedding=embedding, user_id=body.user_id, agent_id=body.agent_id, namespace=body.namespace, metadata=body.metadata, ttl_seconds=body.ttl_seconds, scope=resolved_scope.value, shared_with_agents=body.shared_with_agents, derived_from_agents=body.derived_from_agents, coordination_metadata=body.coordination_metadata)
+
+            # Content security scan
+            verdict = _scanner.scan(body.content, body.metadata)
+            if not verdict.allowed:
+                await _emit(db, project_id=project_id, namespace=body.namespace, event_type=MemoryEventType.SECURITY_REJECTED.value, payload={"flags": verdict.flags, "detections": [d.detection_type.value for d in verdict.detections]})
+                raise HTTPException(status_code=422, detail=f"Content rejected by security policy: {verdict.flags}")
+            if verdict.flags:
+                await _emit(db, project_id=project_id, namespace=body.namespace, event_type=MemoryEventType.SECURITY_FLAGGED.value, payload={"flags": verdict.flags})
+            content_to_store = verdict.content
+
+            # Memory quota check
+            if body.agent_id and _settings.agent_memory_limit:
+                count = await MemoryRepository.count_agent_memories(db, project_id, body.agent_id)
+                if count >= _settings.agent_memory_limit:
+                    raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=f"Agent '{body.agent_id}' has reached memory limit ({_settings.agent_memory_limit}). Deprecate old memories to free quota.")
+
+            embedding = await embed_service.embed_single(content_to_store, db)
+            resolved_scope = ScopeInference.infer_scope(content=content_to_store, explicit_scope=body.scope, agent_id=body.agent_id, metadata=body.metadata or {})
+
+            # Compute integrity hash
+            integrity_hash = None
+            if _settings.enable_integrity_check:
+                integrity_hash = compute_integrity_hash(content_to_store, body.agent_id, project_id, _settings.get_integrity_key())
+
+            mem = await MemoryRepository.add(db, project_id=project_id, content=content_to_store, embedding=embedding, user_id=body.user_id, agent_id=body.agent_id, namespace=body.namespace, metadata=body.metadata, ttl_seconds=body.ttl_seconds, scope=resolved_scope.value, shared_with_agents=body.shared_with_agents, derived_from_agents=body.derived_from_agents, coordination_metadata=body.coordination_metadata, integrity_hash=integrity_hash, content_flags=verdict.flags, trust_level="internal")
             record_memory_stored_scope(resolved_scope.value)
             await _emit(db, project_id=project_id, memory_id=mem.id, namespace=mem.namespace, agent_id=mem.agent_id, event_type=MemoryEventType.CREATED.value, payload={"source": "add"})
             record_operation(OperationNames.MEMORY_ADD, "success")
             return AddResult(id=mem.id, inferred_scope=resolved_scope.value if body.scope is None else None)
+    except HTTPException:
+        raise
     except Exception:
         record_operation(OperationNames.MEMORY_ADD, "error")
         raise
@@ -220,11 +258,13 @@ async def query_memories(body: MemoryQuery, project_id: str = Depends(check_rate
         with track_latency(OperationNames.MEMORY_QUERY):
             embed_service = get_embedding_service()
             query_embedding = await embed_service.embed_single(body.query, db)
-            results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, agent_id=body.agent_id, requesting_agent_id=body.agent_id, top_k=body.top_k, min_score=body.min_score, requested_scope=body.scope, memory_types=body.memory_types)
+            results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, agent_id=body.agent_id, requesting_agent_id=body.agent_id, top_k=body.top_k, min_score=body.min_score, requested_scope=body.scope, memory_types=body.memory_types, apply_decay=body.apply_decay)
         elapsed_ms = (time.monotonic() - start) * 1000
         memories = [_mem_to_out(mem, score) for mem, score in results]
         retrieved_ids = [mem.id for mem, _ in results]
         event = await _emit(db, project_id=project_id, namespace=body.namespace, agent_id=body.agent_id, event_type=MemoryEventType.QUERIED.value, payload={"query": body.query, "result_count": len(memories), "top_k": body.top_k}, task_id=body.task_id, selected_memory_ids=body.selected_memory_ids or retrieved_ids)
+        # Access tracking: best-effort bulk update (does not block response)
+        await MemoryRepository.touch_accessed(db, retrieved_ids)
         record_operation(OperationNames.MEMORY_QUERY, "success")
         return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2), retrieval_event_id=event.event_id)
     except Exception:
@@ -238,10 +278,13 @@ async def query_cross_agent(body: CrossAgentQuery, project_id: str = Depends(che
     start = time.monotonic()
     embed_service = get_embedding_service()
     query_embedding = await embed_service.embed_single(body.query, db)
-    results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, requesting_agent_id=body.requesting_agent_id, target_agent_ids=body.target_agent_ids, top_k=body.top_k, min_score=body.min_score, requested_scope=body.scope)
+    results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, requesting_agent_id=body.requesting_agent_id, target_agent_ids=body.target_agent_ids, top_k=body.top_k, min_score=body.min_score, requested_scope=body.scope, apply_decay=body.apply_decay)
     elapsed_ms = (time.monotonic() - start) * 1000
     memories = [_mem_to_out(mem, score) for mem, score in results]
-    event = await _emit(db, project_id=project_id, namespace=body.namespace, agent_id=body.requesting_agent_id, event_type=MemoryEventType.QUERIED.value, payload={"source": "query_cross_agent", "query": body.query, "result_count": len(memories), "top_k": body.top_k, "target_agent_ids": body.target_agent_ids or []}, task_id=body.task_id, selected_memory_ids=body.selected_memory_ids or [mem.id for mem, _ in results])
+    retrieved_ids = [mem.id for mem, _ in results]
+    event = await _emit(db, project_id=project_id, namespace=body.namespace, agent_id=body.requesting_agent_id, event_type=MemoryEventType.QUERIED.value, payload={"source": "query_cross_agent", "query": body.query, "result_count": len(memories), "top_k": body.top_k, "target_agent_ids": body.target_agent_ids or []}, task_id=body.task_id, selected_memory_ids=body.selected_memory_ids or retrieved_ids)
+    # Access tracking: best-effort bulk update (does not block response)
+    await MemoryRepository.touch_accessed(db, retrieved_ids)
     return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2), retrieval_event_id=event.event_id)
 
 
@@ -260,6 +303,7 @@ async def delete_memory(memory_id: str, project_id: str = Depends(check_rate_lim
     deleted = await MemoryRepository.delete(db, memory_id, project_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
+    await _emit(db, project_id=project_id, memory_id=memory_id, namespace="default", event_type=MemoryEventType.DELETED.value, payload={"deleted_by": "api_caller"})
 
 
 @router.post("/export")

@@ -71,6 +71,9 @@ class RateLimiter:
         # project_id -> list of (timestamp, count)
         self._minute_windows: dict[str, list] = defaultdict(list)
         self._hour_windows: dict[str, list] = defaultdict(list)
+        # Per-agent sliding windows (key: "project_id:agent_id")
+        self._agent_minute_windows: dict[str, list] = defaultdict(list)
+        self._agent_hour_windows: dict[str, list] = defaultdict(list)
         self._lock = asyncio.Lock()
 
     async def check(self, project_id: str) -> bool:
@@ -120,6 +123,38 @@ class RateLimiter:
             self._minute_windows[project_id].append(now)
             self._hour_windows[project_id].append(now)
 
+            return True
+
+    async def check_agent(self, project_id: str, agent_id: str | None) -> bool:
+        """
+        Per-agent rate limit check. Separate from project-level check().
+
+        Only enforced when agent_id is provided (i.e., bound_agent_id from API key).
+        Uses PER_AGENT_RATE_LIMIT_PER_MINUTE and PER_AGENT_RATE_LIMIT_PER_HOUR settings.
+        """
+        if agent_id is None:
+            return True  # no agent_id means no per-agent limit
+
+        key = f"{project_id}:{agent_id}"
+        per_minute = settings.per_agent_rate_limit_per_minute
+        per_hour = settings.per_agent_rate_limit_per_hour
+
+        async with self._lock:
+            now = time.time()
+            minute_ago = now - 60
+            hour_ago = now - 3600
+
+            self._agent_minute_windows[key] = [t for t in self._agent_minute_windows[key] if t > minute_ago]
+            self._agent_hour_windows[key] = [t for t in self._agent_hour_windows[key] if t > hour_ago]
+
+            if len(self._agent_minute_windows[key]) >= per_minute:
+                raise RateLimitExceeded(f"Agent rate limit exceeded: {per_minute}/minute", retry_after=60)
+
+            if len(self._agent_hour_windows[key]) >= per_hour:
+                raise RateLimitExceeded(f"Agent rate limit exceeded: {per_hour}/hour", retry_after=3600)
+
+            self._agent_minute_windows[key].append(now)
+            self._agent_hour_windows[key].append(now)
             return True
 
     def get_remaining(self, project_id: str) -> dict:
@@ -198,6 +233,39 @@ class RedisRateLimiter:
                 f"Rate limit exceeded: {self.config.requests_per_hour}/hour",
                 retry_after=3600
             )
+
+        return True
+
+    async def check_agent(self, project_id: str, agent_id: str | None) -> bool:
+        """Per-agent rate limit check using Redis sorted sets."""
+        if agent_id is None:
+            return True
+
+        per_minute = settings.per_agent_rate_limit_per_minute
+        per_hour = settings.per_agent_rate_limit_per_hour
+        now = time.time()
+        minute_key = f"ratelimit:agent:minute:{project_id}:{agent_id}"
+        hour_key = f"ratelimit:agent:hour:{project_id}:{agent_id}"
+
+        pipe = self.redis.pipeline()
+        pipe.zremrangebyscore(minute_key, 0, now - 60)
+        pipe.zremrangebyscore(hour_key, 0, now - 3600)
+        pipe.zcard(minute_key)
+        pipe.zcard(hour_key)
+        member = f"{now}:{id(asyncio.current_task())}"
+        pipe.zadd(minute_key, {member: now})
+        pipe.zadd(hour_key, {member: now})
+        pipe.expire(minute_key, 120)
+        pipe.expire(hour_key, 7200)
+        results = await pipe.execute()
+
+        minute_count = results[2] + 1
+        hour_count = results[3] + 1
+
+        if minute_count > per_minute:
+            raise RateLimitExceeded(f"Agent rate limit exceeded: {per_minute}/minute", retry_after=60)
+        if hour_count > per_hour:
+            raise RateLimitExceeded(f"Agent rate limit exceeded: {per_hour}/hour", retry_after=3600)
 
         return True
 

@@ -62,10 +62,15 @@ class TokenVerifier:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid API key. Check AEGIS_API_KEY environment variable on the server.",
             )
-        logger.debug("auth.legacy.success", extra={"project_id": settings.default_project_id})
+        logger.warning(
+            "auth.legacy.deprecation_notice: Legacy single-key auth is deprecated. "
+            "Enable ENABLE_PROJECT_AUTH=true for production security.",
+        )
         return {
             "project_id": settings.default_project_id,
             "auth_method": "legacy",
+            "trust_level": "internal",
+            "bound_agent_id": None,
         }
 
     @staticmethod
@@ -119,6 +124,8 @@ class TokenVerifier:
             "key_id": api_key.id,
             "principal": api_key.name,
             "auth_method": "project_key",
+            "trust_level": getattr(api_key, "trust_level", "internal") or "internal",
+            "bound_agent_id": getattr(api_key, "bound_agent_id", None),
         }
 
 

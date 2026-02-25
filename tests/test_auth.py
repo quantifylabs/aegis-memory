@@ -78,6 +78,8 @@ class TestTokenVerifierLegacy:
             result = TokenVerifier._verify_legacy_key("test-secret-key")
             assert result["project_id"] == "default-project"
             assert result["auth_method"] == "legacy"
+            assert result["trust_level"] == "internal"
+            assert result["bound_agent_id"] is None
 
     @pytest.mark.asyncio
     async def test_legacy_auth_rejects_wrong_key(self, mock_settings_legacy):
@@ -223,13 +225,13 @@ class TestAuditLogging:
 
     @pytest.mark.asyncio
     async def test_audit_log_emitted_on_successful_auth(self, mock_settings_legacy):
-        """Successful auth should emit an audit log."""
+        """Successful auth should emit an audit log (deprecation warning)."""
         with patch("auth.settings", mock_settings_legacy):
             with patch("auth.logger") as mock_logger:
                 from auth import TokenVerifier
 
                 TokenVerifier._verify_legacy_key("test-secret-key")
-                mock_logger.debug.assert_called()
+                mock_logger.warning.assert_called()
 
     @pytest.mark.asyncio
     async def test_audit_log_emitted_on_failed_auth(self, mock_settings_legacy):

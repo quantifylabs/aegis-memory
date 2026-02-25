@@ -102,3 +102,25 @@ class EventRepository:
             .offset(offset)
         )
         return list(result.scalars().all())
+
+    @staticmethod
+    async def log_security_event(
+        db: AsyncSession,
+        *,
+        project_id: str,
+        namespace: str = "default",
+        agent_id: str | None = None,
+        event_type: str,
+        memory_id: str | None = None,
+        details: dict | None = None,
+    ) -> MemoryEvent:
+        """Log a security-relevant event for audit trail."""
+        return await EventRepository.create_event(
+            db,
+            memory_id=memory_id,
+            project_id=project_id,
+            namespace=namespace,
+            agent_id=agent_id,
+            event_type=event_type,
+            event_payload={"security": True, **(details or {})},
+        )

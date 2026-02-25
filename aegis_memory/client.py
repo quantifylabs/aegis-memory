@@ -50,6 +50,8 @@ def _parse_memory_data(data: Dict[str, Any]) -> "Memory":
         memory_type=data.get("memory_type", "standard"),
         bullet_helpful=data.get("bullet_helpful", 0),
         bullet_harmful=data.get("bullet_harmful", 0),
+        content_flags=data.get("content_flags", []),
+        trust_level=data.get("trust_level", "internal"),
     )
 
 
@@ -160,6 +162,39 @@ class Memory:
     memory_type: str = "standard"
     bullet_helpful: int = 0
     bullet_harmful: int = 0
+    content_flags: List[str] = field(default_factory=list)
+    trust_level: str = "internal"
+    integrity_valid: Optional[bool] = None
+
+
+@dataclass
+class ContentScanResult:
+    """Result of a content security scan (dry-run)."""
+    allowed: bool
+    action: str
+    flags: List[str]
+    detections: List[Dict[str, Any]]
+
+
+@dataclass
+class SecurityAuditEvent:
+    """A security audit event from the audit trail."""
+    event_id: str
+    event_type: str
+    project_id: str
+    agent_id: Optional[str]
+    memory_id: Optional[str]
+    details: Dict[str, Any]
+    created_at: str
+
+
+@dataclass
+class IntegrityCheckResult:
+    """Result of memory integrity verification."""
+    memory_id: str
+    integrity_valid: bool
+    has_hash: bool
+    detail: str
 
 
 @dataclass
@@ -530,10 +565,11 @@ class AegisClient:
         namespace: str = "default",
         top_k: int = 10,
         min_score: float = 0.0,
+        apply_decay: bool = False,
     ) -> List[Memory]:
         """
         Semantic search over memories.
-        
+
         Args:
             query: Search query
             user_id: Optional user ID filter
@@ -541,7 +577,8 @@ class AegisClient:
             namespace: Namespace (default: "default")
             top_k: Maximum results (default: 10)
             min_score: Minimum similarity score (default: 0.0)
-        
+            apply_decay: Re-rank results by semantic_score × decay_factor (default: False)
+
         Returns:
             List of matching memories with scores
         """
@@ -552,14 +589,15 @@ class AegisClient:
             "namespace": namespace,
             "top_k": top_k,
             "min_score": min_score,
+            "apply_decay": apply_decay,
         }
-        
+
         resp = self.client.post("/memories/query", json=body)
         resp.raise_for_status()
         data = resp.json()
-        
+
         return [self._parse_memory(m) for m in data["memories"]]
-    
+
     def query_cross_agent(
         self,
         query: str,
@@ -570,10 +608,11 @@ class AegisClient:
         namespace: str = "default",
         top_k: int = 10,
         min_score: float = 0.0,
+        apply_decay: bool = False,
     ) -> List[Memory]:
         """
         Cross-agent semantic search with scope-aware access control.
-        
+
         Args:
             query: Search query
             requesting_agent_id: Agent making the request
@@ -582,7 +621,8 @@ class AegisClient:
             namespace: Namespace (default: "default")
             top_k: Maximum results (default: 10)
             min_score: Minimum similarity score (default: 0.0)
-        
+            apply_decay: Re-rank results by semantic_score × decay_factor (default: False)
+
         Returns:
             List of accessible memories with scores
         """
@@ -594,12 +634,13 @@ class AegisClient:
             "namespace": namespace,
             "top_k": top_k,
             "min_score": min_score,
+            "apply_decay": apply_decay,
         }
-        
+
         resp = self.client.post("/memories/query_cross_agent", json=body)
         resp.raise_for_status()
         data = resp.json()
-        
+
         return [self._parse_memory(m) for m in data["memories"]]
     
     def get(self, memory_id: str) -> Memory:
@@ -1463,6 +1504,65 @@ class AegisClient:
             chain_depth=data["chain_depth"],
         )
 
+    # ---------- Security Operations (v2.0.0) ----------
+
+    def scan_content(self, content: str, metadata: Optional[Dict] = None) -> ContentScanResult:
+        """Pre-scan content without storing. Check for PII, secrets, injection."""
+        resp = self.client.post("/security/scan", json={
+            "content": content, "metadata": metadata,
+        })
+        resp.raise_for_status()
+        data = resp.json()
+        return ContentScanResult(
+            allowed=data["allowed"], action=data["action"],
+            flags=data["flags"], detections=data["detections"],
+        )
+
+    def verify_integrity(self, memory_id: str) -> IntegrityCheckResult:
+        """Verify HMAC integrity of a stored memory."""
+        resp = self.client.post(f"/security/verify/{memory_id}")
+        resp.raise_for_status()
+        data = resp.json()
+        return IntegrityCheckResult(
+            memory_id=data["memory_id"], integrity_valid=data["integrity_valid"],
+            has_hash=data["has_hash"], detail=data["detail"],
+        )
+
+    def get_flagged_memories(self, *, namespace: str = "default", limit: int = 50) -> List[Memory]:
+        """List memories with security flags (PII, injection) pending review."""
+        resp = self.client.get("/security/flagged",
+                               params={"namespace": namespace, "limit": limit})
+        resp.raise_for_status()
+        return [self._parse_memory(m) for m in resp.json().get("memories", [])]
+
+    def get_security_audit(
+        self, *, event_type: Optional[str] = None,
+        start_time: Optional[str] = None, end_time: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[SecurityAuditEvent]:
+        """Query security audit trail."""
+        params: Dict[str, Any] = {"limit": limit}
+        if event_type:
+            params["event_type"] = event_type
+        if start_time:
+            params["start_time"] = start_time
+        if end_time:
+            params["end_time"] = end_time
+        resp = self.client.get("/security/audit", params=params)
+        resp.raise_for_status()
+        return [SecurityAuditEvent(
+            event_id=e["event_id"], event_type=e["event_type"],
+            project_id=e["project_id"], agent_id=e.get("agent_id"),
+            memory_id=e.get("memory_id"), details=e.get("event_payload", {}),
+            created_at=e["created_at"],
+        ) for e in resp.json().get("events", [])]
+
+    def get_security_config(self) -> Dict[str, Any]:
+        """Get current security configuration."""
+        resp = self.client.get("/security/config")
+        resp.raise_for_status()
+        return resp.json()
+
     # ---------- Export ----------
 
     def export_json(
@@ -1597,6 +1697,7 @@ class AsyncAegisClient:
         namespace: str = "default",
         top_k: int = 10,
         min_score: float = 0.0,
+        apply_decay: bool = False,
     ) -> List[Memory]:
         body = {
             "query": query,
@@ -1605,6 +1706,7 @@ class AsyncAegisClient:
             "namespace": namespace,
             "top_k": top_k,
             "min_score": min_score,
+            "apply_decay": apply_decay,
         }
         resp = await self.client.post("/memories/query", json=body)
         resp.raise_for_status()
@@ -1621,6 +1723,7 @@ class AsyncAegisClient:
         namespace: str = "default",
         top_k: int = 10,
         min_score: float = 0.0,
+        apply_decay: bool = False,
     ) -> List[Memory]:
         body = {
             "query": query,
@@ -1630,6 +1733,7 @@ class AsyncAegisClient:
             "namespace": namespace,
             "top_k": top_k,
             "min_score": min_score,
+            "apply_decay": apply_decay,
         }
         resp = await self.client.post("/memories/query_cross_agent", json=body)
         resp.raise_for_status()
@@ -2298,3 +2402,62 @@ class AsyncAegisClient:
             chain=[_parse_interaction_event(e) for e in data["chain"]],
             chain_depth=data["chain_depth"],
         )
+
+    # ---------- Security Operations (v2.0.0) ----------
+
+    async def scan_content(self, content: str, metadata: Optional[Dict] = None) -> ContentScanResult:
+        """Pre-scan content without storing. Check for PII, secrets, injection."""
+        resp = await self.client.post("/security/scan", json={
+            "content": content, "metadata": metadata,
+        })
+        resp.raise_for_status()
+        data = resp.json()
+        return ContentScanResult(
+            allowed=data["allowed"], action=data["action"],
+            flags=data["flags"], detections=data["detections"],
+        )
+
+    async def verify_integrity(self, memory_id: str) -> IntegrityCheckResult:
+        """Verify HMAC integrity of a stored memory."""
+        resp = await self.client.post(f"/security/verify/{memory_id}")
+        resp.raise_for_status()
+        data = resp.json()
+        return IntegrityCheckResult(
+            memory_id=data["memory_id"], integrity_valid=data["integrity_valid"],
+            has_hash=data["has_hash"], detail=data["detail"],
+        )
+
+    async def get_flagged_memories(self, *, namespace: str = "default", limit: int = 50) -> List[Memory]:
+        """List memories with security flags (PII, injection) pending review."""
+        resp = await self.client.get("/security/flagged",
+                                     params={"namespace": namespace, "limit": limit})
+        resp.raise_for_status()
+        return [_parse_memory_data(m) for m in resp.json().get("memories", [])]
+
+    async def get_security_audit(
+        self, *, event_type: Optional[str] = None,
+        start_time: Optional[str] = None, end_time: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[SecurityAuditEvent]:
+        """Query security audit trail."""
+        params: Dict[str, Any] = {"limit": limit}
+        if event_type:
+            params["event_type"] = event_type
+        if start_time:
+            params["start_time"] = start_time
+        if end_time:
+            params["end_time"] = end_time
+        resp = await self.client.get("/security/audit", params=params)
+        resp.raise_for_status()
+        return [SecurityAuditEvent(
+            event_id=e["event_id"], event_type=e["event_type"],
+            project_id=e["project_id"], agent_id=e.get("agent_id"),
+            memory_id=e.get("memory_id"), details=e.get("event_payload", {}),
+            created_at=e["created_at"],
+        ) for e in resp.json().get("events", [])]
+
+    async def get_security_config(self) -> Dict[str, Any]:
+        """Get current security configuration."""
+        resp = await self.client.get("/security/config")
+        resp.raise_for_status()
+        return resp.json()

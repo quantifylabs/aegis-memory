@@ -18,11 +18,18 @@ from models import Memory, MemoryEventType, MemoryScope, MemoryType
 from pydantic import BaseModel, Field
 from scope_inference import ScopeInference
 from sqlalchemy.ext.asyncio import AsyncSession
+from temporal_decay import compute_relevance_score
 
 from api.dependencies.auth import check_rate_limit
 from api.dependencies.database import get_db, get_read_db
+from config import get_settings
+from content_security import ContentSecurityScanner
+from integrity import compute_integrity_hash
+from fastapi import HTTPException
 
 router = APIRouter()
+_settings = get_settings()
+_scanner = ContentSecurityScanner(_settings)
 
 
 # ---------- Pydantic Models ----------
@@ -81,6 +88,7 @@ class TypedQuery(BaseModel):
     namespace: str = "default"
     top_k: int = Field(default=10, ge=1, le=100)
     min_score: float = Field(default=0.0, ge=0.0, le=1.0)
+    apply_decay: bool = False
 
 
 class TypedMemoryOut(BaseModel):
@@ -100,6 +108,7 @@ class TypedMemoryOut(BaseModel):
     entity_id: str | None = None
     sequence_number: int | None = None
     score: float | None = None
+    relevance_score: float | None = None
 
     class Config:
         from_attributes = True
@@ -149,6 +158,7 @@ def _mem_to_typed_out(mem: Memory, score: float | None = None) -> TypedMemoryOut
         entity_id=mem.entity_id,
         sequence_number=mem.sequence_number,
         score=score,
+        relevance_score=compute_relevance_score(mem),
     )
 
 
@@ -185,14 +195,40 @@ async def _create_typed_memory(
             scope=existing.scope, deduped_from=existing.id,
         )
 
-    embedding = await embed_service.embed_single(content, db)
+    # Content security scan
+    verdict = _scanner.scan(content, metadata)
+    if not verdict.allowed:
+        await EventRepository.create_event(
+            db, memory_id=None, project_id=project_id,
+            namespace=namespace, agent_id=agent_id,
+            event_type=MemoryEventType.SECURITY_REJECTED.value,
+            event_payload={"flags": verdict.flags, "detections": [d.detection_type.value for d in verdict.detections]},
+        )
+        raise HTTPException(status_code=422, detail=f"Content rejected by security policy: {verdict.flags}")
+    if verdict.flags:
+        await EventRepository.create_event(
+            db, memory_id=None, project_id=project_id,
+            namespace=namespace, agent_id=agent_id,
+            event_type=MemoryEventType.SECURITY_FLAGGED.value,
+            event_payload={"flags": verdict.flags},
+        )
+    content_to_store = verdict.content
+
+    embedding = await embed_service.embed_single(content_to_store, db)
     resolved_scope = ScopeInference.infer_scope(
-        content=content, explicit_scope=default_scope.value,
+        content=content_to_store, explicit_scope=default_scope.value,
         agent_id=agent_id, metadata=metadata or {},
     )
 
+    # Compute integrity hash
+    integrity_hash = None
+    if _settings.enable_integrity_check:
+        integrity_hash = compute_integrity_hash(
+            content_to_store, agent_id, project_id, _settings.get_integrity_key()
+        )
+
     mem = await MemoryRepository.add(
-        db, project_id=project_id, content=content,
+        db, project_id=project_id, content=content_to_store,
         embedding=embedding, user_id=user_id, agent_id=agent_id,
         namespace=namespace, metadata=metadata, ttl_seconds=ttl_seconds,
         scope=resolved_scope.value, memory_type=memory_type.value,
@@ -200,6 +236,9 @@ async def _create_typed_memory(
         sequence_number=sequence_number,
         source_trajectory_id=source_trajectory_id,
         error_pattern=error_pattern,
+        integrity_hash=integrity_hash,
+        content_flags=verdict.flags,
+        trust_level="internal",
     )
 
     await EventRepository.create_event(
@@ -333,10 +372,14 @@ async def typed_query(
         top_k=body.top_k,
         min_score=body.min_score,
         memory_types=body.memory_types,
+        apply_decay=body.apply_decay,
     )
 
     elapsed_ms = (time.monotonic() - start) * 1000
     memories = [_mem_to_typed_out(mem, score) for mem, score in results]
+    # Access tracking: best-effort bulk update (does not block response)
+    retrieved_ids = [mem.id for mem, _ in results]
+    await MemoryRepository.touch_accessed(db, retrieved_ids)
     return TypedQueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2))
 
 

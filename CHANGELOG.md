@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-02-25
+
+### Added
+
+- **Content Security Layer** — three-stage pipeline for all memory writes:
+  - Input validation: content length (50k default), metadata depth (5), encoding checks
+  - Sensitive data scanner: SSN, credit card, API key, email, password detection
+  - Prompt injection detector: system override, role manipulation, exfiltration triggers
+  - Configurable policy per detection: reject, redact, flag, or allow
+- **Memory Integrity (HMAC-SHA256)** — tamper detection on store, verification on demand
+  - `POST /security/verify/{memory_id}` endpoint
+  - `integrity_hash` column on memories table
+- **Agent Trust Hierarchy** — OWASP 4-tier model (untrusted/internal/privileged/system)
+  - Trust-based operation restrictions (write scope, read scope, delete, admin)
+  - Agent identity binding via API key `bound_agent_id`
+- **Per-Agent Rate Limiting** — separate sliding window per `project_id:agent_id`
+  - Configurable: `PER_AGENT_RATE_LIMIT_PER_MINUTE` (30), `PER_AGENT_RATE_LIMIT_PER_HOUR` (500)
+- **Agent Memory Quota** — configurable max memories per agent (default: 10,000)
+- **Security Admin Endpoints** under `/security/`:
+  - `GET /audit` — security event audit trail
+  - `GET /flagged` — memories with content security flags
+  - `POST /verify/{memory_id}` — integrity verification
+  - `GET /config` — current security settings
+  - `POST /scan` — dry-run content scan
+- **Audit Hardening** — events for auth failures, content rejections, deletions, integrity failures, agent binding violations
+- **SDK methods**: `scan_content()`, `verify_integrity()`, `get_flagged_memories()`, `get_security_audit()`, `get_security_config()`
+- **Alembic migration** `0007_content_security`
+- **Test suite**: `tests/test_content_security.py` (~80 tests)
+- **Docs**: `docs/guides/security.mdx`, updated concepts, positioning, deployment guide
+
+### Changed
+
+- Tagline: "The Memory Layer" -> "The Secure Memory Layer for Multi-Agent AI"
+- `MemoryOut` response includes `content_flags` and `trust_level`
+- `Memory` SDK dataclass includes `content_flags`, `trust_level`, `integrity_valid`
+- Content max length tightened from 100,000 to 50,000 (configurable via `CONTENT_MAX_LENGTH`)
+- Legacy single-key auth now logs deprecation warning
+- Version bumped to 2.0.0
+
+### Security
+
+- Closes CRITICAL: Memory content security (zero validation -> 3-stage pipeline)
+- Closes CRITICAL: Prompt injection vector (detection + flag/reject)
+- Closes CRITICAL: Data integrity (HMAC signing + verification)
+- Closes HIGH: Agent ID spoofing (API key binding)
+- Closes HIGH: Authorization granularity (trust levels + per-operation checks)
+- Closes MODERATE: Input validation (content security pipeline)
+- Closes MODERATE: Rate limiting per-agent (separate sliding window)
+- Closes MODERATE: Audit trail gaps (security events, deletion logs)
+- Closes LOW: CORS documentation + production warning
+- Closes LOW: Legacy auth deprecation notice
+
+## [1.9.2] - 2026-02-22
+
+### Added
+
+- **Temporal Decay for Memory Relevance** — memories that aren't reused lose relevance over time (Priority 4)
+  - `last_accessed_at` (nullable timestamptz) and `access_count` (integer, default 0) columns on `memories` table
+  - Partial index `ix_memories_last_accessed` on `(project_id, last_accessed_at)` for efficient decay queries
+  - `server/temporal_decay.py` — decay engine with configurable half-lives per memory type:
+    - episodic: 7 days · progress/feature: 14 days · standard: 30 days · reflection: 60 days
+    - strategy/semantic: 90 days · procedural/control: 180 days
+  - Decay formula: `decay_factor = exp(-λ × age_days)` where `age_days` uses `last_accessed_at` falling back to `created_at`
+  - `relevance_score` response field on `MemoryOut`/`TypedMemoryOut`: `effectiveness_score × decay_factor` (roadmap formula)
+  - `apply_decay: bool = False` on `/memories/query`, `/memories/query_cross_agent`, `/memories/typed/query`
+    — when `True`, re-ranks results by `semantic_score × decay_factor` before returning
+  - Access tracking: every `/query` call bulk-updates `last_accessed_at` and increments `access_count` for returned memories
+  - **2 new endpoints** under `/memories/decay/`:
+    - `GET /config` — returns half-life table and formula description
+    - `POST /archive` — soft-deprecates memories below a configurable relevance threshold (default 0.1), supports `dry_run`
+  - **SDK**: `apply_decay=False` param on `query()` and `query_cross_agent()`
+  - **Alembic migration** `0006_temporal_decay` (down_revision="0005")
+  - **Test suite**: `tests/test_temporal_decay.py` (~35 tests across 8 classes)
+  - **Docs**: `docs/guides/temporal-decay.mdx`
+
+### Changed
+
+- `MemoryOut` and `TypedMemoryOut` response models extended with `relevance_score: float | None`
+- `MemoryQuery`, `CrossAgentQuery`, `TypedQuery` accept optional `apply_decay: bool = False`
+- Version bumped to `1.9.2`
+
 ## [1.9.11] - 2026-02-21
 
 ### Added
@@ -390,6 +471,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## Upgrade Notes
+
+### 1.9.11 → 1.9.2
+
+1. Run the Alembic migration:
+   ```bash
+   alembic upgrade 0006
+   ```
+   Adds `last_accessed_at` and `access_count` columns to the `memories` table. Zero downtime — both columns are nullable/default-zero.
+
+2. No SDK changes required — `apply_decay` defaults to `False`, so existing query calls are unaffected.
+
+3. To enable decay-aware ranking in queries:
+   ```python
+   memories = client.query("pagination strategies", agent_id="executor", apply_decay=True)
+   ```
+
+4. To archive stale memories below 10% relevance:
+   ```bash
+   curl -X POST /memories/decay/archive \
+     -H "Authorization: Bearer $KEY" \
+     -d '{"namespace": "default", "threshold": 0.1}'
+   ```
 
 ### 1.2 → 1.3
 

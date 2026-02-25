@@ -19,9 +19,10 @@ from uuid import uuid4
 from embedding_service import content_hash
 from models import Memory, MemoryScope, MemorySharedAgent, MemoryType
 from observability import OperationNames, record_operation, record_query_execution, track_latency
-from sqlalchemy import and_, cast, delete, exists, not_, or_, select, text
+from sqlalchemy import and_, cast, delete, exists, func, not_, or_, select, text, update
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
+from temporal_decay import compute_relevance_score, rerank_with_decay
 
 
 class MemoryRepository:
@@ -59,6 +60,9 @@ class MemoryRepository:
         session_id: str | None = None,  # Typed Memory
         entity_id: str | None = None,  # Typed Memory
         sequence_number: int | None = None,  # Typed Memory
+        integrity_hash: str | None = None,       # Content Security
+        content_flags: list[str] | None = None,  # Content Security
+        trust_level: str = "internal",           # Content Security
     ) -> Memory:
         """Add a single memory."""
         memory_id = uuid4().hex
@@ -91,6 +95,9 @@ class MemoryRepository:
             session_id=session_id,
             entity_id=entity_id,
             sequence_number=sequence_number,
+            integrity_hash=integrity_hash,
+            content_flags=content_flags or [],
+            trust_level=trust_level,
         )
 
         try:
@@ -153,6 +160,9 @@ class MemoryRepository:
                 session_id=m.get("session_id"),
                 entity_id=m.get("entity_id"),
                 sequence_number=m.get("sequence_number"),
+                integrity_hash=m.get("integrity_hash"),
+                content_flags=m.get("content_flags") or [],
+                trust_level=m.get("trust_level", "internal"),
             )
             objs.append(obj)
 
@@ -181,6 +191,21 @@ class MemoryRepository:
             raise
 
     @staticmethod
+    async def count_agent_memories(
+        db: AsyncSession, project_id: str, agent_id: str
+    ) -> int:
+        """Count non-deprecated memories for an agent within a project."""
+        from sqlalchemy import func as sa_func, not_
+        result = await db.execute(
+            select(sa_func.count()).select_from(Memory).where(
+                Memory.project_id == project_id,
+                Memory.agent_id == agent_id,
+                not_(Memory.is_deprecated),
+            )
+        )
+        return result.scalar_one()
+
+    @staticmethod
     async def semantic_search(
         db: AsyncSession,
         *,
@@ -197,6 +222,7 @@ class MemoryRepository:
         memory_types: list[str] | None = None,  # ACE Enhancement: filter by type
         requested_scope: str | None = None,
         min_effectiveness: float | None = None,
+        apply_decay: bool = False,  # Temporal Decay (v1.9.2)
     ) -> tuple[list[tuple[Memory, float]], dict]:
         """
         Semantic search using pgvector's HNSW index.
@@ -315,6 +341,12 @@ class MemoryRepository:
             score = 1.0 - distance
             if score >= min_score:
                 output.append((mem, score))
+
+        # Temporal Decay (v1.9.2): re-rank by semantic_score × decay_factor
+        if apply_decay and output:
+            reranked = rerank_with_decay(output)
+            # Collapse back to (mem, semantic_score) preserving semantic score unchanged
+            output = [(mem, sem) for mem, sem, _decay in reranked]
 
         record_query_execution(
             source="semantic_search",
@@ -562,3 +594,77 @@ class MemoryRepository:
         )
         result = await db.execute(stmt)
         return list(result.scalars().all())
+
+    # -------------------------------------------------------------------------
+    # Temporal Decay (v1.9.2)
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    async def touch_accessed(db: AsyncSession, memory_ids: list[str]) -> None:
+        """
+        Bulk-update last_accessed_at and increment access_count for a set of memories.
+
+        Best-effort: called after query returns so it doesn't block the response.
+        Follows the cleanup_expired() pattern (bulk SQL, static method).
+        """
+        if not memory_ids:
+            return
+        await db.execute(
+            update(Memory)
+            .where(Memory.id.in_(memory_ids))
+            .values(
+                last_accessed_at=func.now(),
+                access_count=Memory.access_count + 1,
+            )
+        )
+
+    @staticmethod
+    async def archive_stale(
+        db: AsyncSession,
+        *,
+        project_id: str,
+        namespace: str = "default",
+        threshold: float = 0.1,
+        batch_size: int = 500,
+        dry_run: bool = False,
+    ) -> int:
+        """
+        Soft-deprecate active memories whose relevance_score falls below threshold.
+
+        Uses existing is_deprecated / deprecated_at columns — no new schema needed.
+        Relevance is computed in Python on fetched batches (chunked approach).
+
+        Returns count of memories archived (or that would be archived for dry_run).
+        """
+        now = datetime.now(timezone.utc)
+        conditions = [
+            Memory.project_id == project_id,
+            Memory.namespace == namespace,
+            not_(Memory.is_deprecated),
+        ]
+
+        stmt = (
+            select(Memory)
+            .where(and_(*conditions))
+            .limit(batch_size)
+        )
+
+        result = await db.execute(stmt)
+        memories = list(result.scalars().all())
+
+        stale_ids = []
+        for mem in memories:
+            if compute_relevance_score(mem, now) < threshold:
+                stale_ids.append(mem.id)
+
+        if stale_ids and not dry_run:
+            await db.execute(
+                update(Memory)
+                .where(Memory.id.in_(stale_ids))
+                .values(
+                    is_deprecated=True,
+                    deprecated_at=func.now(),
+                )
+            )
+
+        return len(stale_ids)

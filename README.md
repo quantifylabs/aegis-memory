@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>The Memory Layer for Multi-Agent Systems</strong>
+  <strong>The Secure Memory Layer for Multi-Agent AI</strong>
 </p>
 
 <p align="center">
@@ -23,7 +23,25 @@
 
 ---
 
-Aegis Memory is a production-ready, self-hostable memory engine designed for multi-agent systems. It provides semantic search, scope-aware access control, and ACE (Agentic Context Engineering) patterns that help agents learn and improve over time.
+Aegis Memory is a production-ready, self-hostable memory engine designed for multi-agent systems. It provides semantic search, scope-aware access control, OWASP-compliant security hardening, and ACE (Agentic Context Engineering) patterns that help agents learn and improve over time.
+
+## Why Security?
+
+In 2025, the AI agent security landscape changed. EchoLeak (CVE-2025-32711, CVSS 9.3) showed a single email could trigger automatic data exfiltration from Microsoft 365 Copilot. CrewAI + GPT-4o was exploited with a 65% exfiltration success rate. A single compromised Drift chatbot cascaded into 700+ organizations via Salesforce, Google Workspace, Slack, S3, and Azure.
+
+The core problem: **Agent A's output is Agent B's instruction. Memory is the attack surface.**
+
+Aegis is the first multi-agent memory system to implement [OWASP AI Agent Security](https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html) recommendations natively:
+
+| Feature | Others (mem0, Zep, Letta) | Aegis Memory |
+|---------|---------------------------|--------------|
+| Content injection detection | None | 3-stage pipeline (validation, PII, injection) |
+| Memory integrity | None | HMAC-SHA256 signing + verification |
+| Agent identity binding | Trust request body | Cryptographic binding via API key |
+| Trust hierarchy | None | 4-tier OWASP model (untrusted/internal/privileged/system) |
+| Per-agent rate limiting | None | Sliding window per agent, configurable |
+| Security audit trail | None | Immutable event log for all security operations |
+| Sensitive data protection | None | Auto-detect + reject/redact/flag PII and secrets |
 
 ## Get productive in 2 minutes
 
@@ -93,6 +111,7 @@ client.vote(memories[0].id, "helpful", voter_agent_id="assistant")
 | Learning from mistakes | Manual prompt tuning | Memory voting + reflection patterns |
 | Typed cognitive memory (episodic/semantic/procedural/control) | Custom schema per type | Built-in typed memory API with session timelines & entity facts |
 | Multi-agent collaboration history | Custom event logs | Interaction Events — temporal + causal chain history without graph database complexity |
+| Stale memory pollution | Manual pruning / TTLs | Temporal decay scoring — memories fade by type-specific half-life, re-ranked automatically |
 
 **Aegis Memory is not another vector database.** It's an *agent-native memory fabric* with primitives designed for how AI agents actually work.
 
@@ -124,6 +143,7 @@ Different memory tools solve different memory problems. This comparison stays fo
 | **ACE loop (vote / reflect / curate / run tracking)** | — | — | — | — | ✓ |
 | **Typed memory model** | — | — | — | — | ✓ |
 | **Interaction Events (collaboration history + causal chains)** | — | — | Partial | — | ✓ (Aegis Interaction Events provide 80% of G-Memory's value via temporal + causal chaining without graph database complexity) |
+| **Temporal decay / memory freshness** | — | — | Partial | — | ✓ |
 
 ### When to pick Aegis (quick checklist)
 
@@ -133,6 +153,7 @@ Pick **Aegis Memory** when most of these are true:
 - You need **handoffs** where one agent passes a reliable baton/state bundle to another.
 - You want **ACE patterns** (vote/reflection/playbook) to continuously improve memory quality.
 - You prefer a **self-host posture** with operational control over storage and deployment.
+- You need **temporal decay** so stale memories don't pollute retrieval over time.
 
 > Compliance, pricing, and managed-service nuances are intentionally omitted from the main table; keep those in footnotes/docs so the core comparison remains verifiable.[^comparison]
 
