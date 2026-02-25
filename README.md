@@ -3,7 +3,12 @@
 </p>
 
 <p align="center">
-  <strong>The Secure Memory Layer for Multi-Agent AI</strong>
+  <strong>Your memory layer is your attack surface. Act accordingly.</strong>
+</p>
+
+<p align="center">
+  Open-source memory engine for multi-agent AI.<br/>
+  Content security. Memory integrity. Trust hierarchy. Self-improving agents.
 </p>
 
 <p align="center">
@@ -17,219 +22,52 @@
   <a href="https://docs.aegismemory.com/introduction/overview">Docs</a> •
   <a href="https://www.aegismemory.com/blog/">Blog</a> •
   <a href="https://docs.aegismemory.com/quickstart/installation">Quickstart</a> •
-  <a href="https://docs.aegismemory.com/integrations/crewai">Integrations</a> •
-  <a href="https://docs.aegismemory.com/guides/observability">Observability</a>
+  <a href="https://docs.aegismemory.com/guides/security">Security Guide</a>
 </p>
 
 ---
 
-Aegis Memory is a production-ready, self-hostable memory engine designed for multi-agent systems. It provides semantic search, scope-aware access control, OWASP-compliant security hardening, and ACE (Agentic Context Engineering) patterns that help agents learn and improve over time.
+## The Problem Nobody Else Is Solving
 
-## Why Security?
+Agents are getting compromised. Not theoretically — right now.
 
-In 2025, the AI agent security landscape changed. EchoLeak (CVE-2025-32711, CVSS 9.3) showed a single email could trigger automatic data exfiltration from Microsoft 365 Copilot. CrewAI + GPT-4o was exploited with a 65% exfiltration success rate. A single compromised Drift chatbot cascaded into 700+ organizations via Salesforce, Google Workspace, Slack, S3, and Azure.
+- [**EchoLeak**](https://arxiv.org/html/2509.10540v1) (CVE-2025-32711, CVSS 9.3) — a single email triggered zero-click data exfiltration from Microsoft 365 Copilot[^echoleak]
+- [**CrewAI + GPT-4o**](https://openreview.net/pdf?id=DAozI4etUp) — researchers achieved 65% exfiltration success rate against multi-agent systems (COLM 2025)[^crewai]
+- [**Drift chatbot cascade**](https://socprime.com/blog/cve-2025-32711-zero-click-ai-vulnerability/) — one compromised chatbot integration cascaded into 700+ organizations via Salesforce, Google Workspace, Slack, S3, and Azure[^drift]
+- [**OWASP Top 10 for Agentic Applications**](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/) published December 2025 — memory and context manipulation is a top risk category[^owasp-top10]
 
-The core problem: **Agent A's output is Agent B's instruction. Memory is the attack surface.**
+**Agent A's output is Agent B's instruction. Memory is the vector.**
 
-Aegis is the first multi-agent memory system to implement [OWASP AI Agent Security](https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html) recommendations natively:
+Every other memory layer trusts content by default. That is the vulnerability.
 
-| Feature | Others (mem0, Zep, Letta) | Aegis Memory |
-|---------|---------------------------|--------------|
-| Content injection detection | None | 3-stage pipeline (validation, PII, injection) |
-| Memory integrity | None | HMAC-SHA256 signing + verification |
-| Agent identity binding | Trust request body | Cryptographic binding via API key |
-| Trust hierarchy | None | 4-tier OWASP model (untrusted/internal/privileged/system) |
-| Per-agent rate limiting | None | Sliding window per agent, configurable |
-| Security audit trail | None | Immutable event log for all security operations |
-| Sensitive data protection | None | Auto-detect + reject/redact/flag PII and secrets |
+## What Your Memory Layer Is Missing
 
-## Get productive in 2 minutes
+We checked the docs, repos, and changelogs of every major competitor.[^comparison] These protections do not exist anywhere else:
 
-For first-time setup, starter scaffolding, and debugging memory quality, start with the CLI flow:
+| Security Feature | mem0 | Zep | Letta | Aegis |
+|---|---|---|---|---|
+| Content injection detection | — | — | — | 3-stage pipeline |
+| Memory integrity | — | — | — | HMAC-SHA256 |
+| Agent identity binding | — | — | — | Cryptographic API key |
+| Trust hierarchy | — | — | — | 4-tier OWASP model |
+| Per-agent rate limiting | — | — | — | Sliding window |
+| Security audit trail | — | — | — | Immutable event log |
+| Sensitive data protection | — | — | — | Auto-detect + reject/redact/flag |
 
-1. `aegis init`
-2. `aegis new <template>`
-3. `aegis explore`
+## Built for a World Where Agents Get Compromised
 
-See the [CLI API reference](docs/api-reference/cli.mdx) for command details.
+Aegis implements [OWASP AI Agent Security](https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html) recommendations natively. Six capabilities, none optional:
 
-## Quick Start: Smart Memory (Zero Config)
+1. **[3-stage content security pipeline](https://docs.aegismemory.com/guides/security)** — input validation, sensitive data scanning, prompt injection detection. Every memory write. Not optional.
+2. **[HMAC-SHA256 integrity signing](https://docs.aegismemory.com/guides/security)** — tamper detection on store, verification on demand. You know if a memory was modified.
+3. **[OWASP 4-tier trust hierarchy](https://docs.aegismemory.com/guides/security)** — untrusted, internal, privileged, system. Agents get compromised. Aegis limits the blast radius.
+4. **[Cryptographic agent binding](https://docs.aegismemory.com/guides/security)** — API keys bound to agent identity. No more trusting a request body that says "I'm the admin agent."
+5. **[ACE loop](https://docs.aegismemory.com/guides/ace-patterns)** — generation, reflection, curation. Agents that learn from their own mistakes and promote what works.
+6. **[Multi-agent coordination](https://docs.aegismemory.com/quickstart/installation)** — scoped access control, cross-agent query, structured handoffs. Memory sharing with boundaries.
 
-```python
-from aegis_memory import SmartMemory
+## Get Running in 2 Minutes
 
-memory = SmartMemory(
-    aegis_api_key="your-key",
-    llm_api_key="your-openai-key"
-)
-
-# Automatically extracts and stores valuable information
-memory.process_turn(
-    user_input="I'm John, a Python developer from Manchester. I prefer dark mode.",
-    ai_response="Nice to meet you, John!",
-    user_id="user_123"
-)
-# Stores: "User's name is John", "User is a Python developer", 
-#         "User is based in Manchester", "User prefers dark mode"
-
-# Get relevant context for any query
-context = memory.get_context("What theme should I use?", user_id="user_123")
-print(context.context_string)
-# "- User prefers dark mode"
-```
-
-**Smart Memory handles the hard part:** deciding what's worth remembering. It filters out greetings and noise, extracts atomic facts, and stores them with proper categorization.
-
-[📚 Full Smart Memory Guide](https://docs.aegismemory.com/guides/smart-memory)
-
-## Manual Control: AegisClient
-
-For full control over what gets stored:
-
-```python
-from aegis_memory import AegisClient
-
-client = AegisClient(api_key="your-key")
-
-# Add a memory
-client.add("User prefers concise responses", agent_id="assistant")
-
-# Query memories
-memories = client.query("user preferences", agent_id="assistant")
-
-# Vote on usefulness (ACE pattern)
-client.vote(memories[0].id, "helpful", voter_agent_id="assistant")
-```
-
-## Why Aegis Memory?
-
-| Challenge | DIY Solution | Aegis Memory |
-|-----------|--------------|--------------|
-| Multi-agent memory sharing | Custom access control | Built-in scopes (`agent-private`/`agent-shared`/`global`) |
-| Long-running agent state | File-based progress tracking | Structured session & feature tracking |
-| Context window limits | Dump everything in prompt | Semantic search + effectiveness scoring |
-| Learning from mistakes | Manual prompt tuning | Memory voting + reflection patterns |
-| Typed cognitive memory (episodic/semantic/procedural/control) | Custom schema per type | Built-in typed memory API with session timelines & entity facts |
-| Multi-agent collaboration history | Custom event logs | Interaction Events — temporal + causal chain history without graph database complexity |
-| Stale memory pollution | Manual pruning / TTLs | Temporal decay scoring — memories fade by type-specific half-life, re-ranked automatically |
-
-**Aegis Memory is not another vector database.** It's an *agent-native memory fabric* with primitives designed for how AI agents actually work.
-
-## Choosing the Right Memory Solution
-
-Different memory tools solve different memory problems. This comparison stays focused on capabilities that are clearly documented in public docs/repos.[^comparison]
-
-| If you need... | Usually pick | Reason |
-|---|---|---|
-| Personalized assistant memory (user/profile facts, retrieval) | **mem0** | Designed around persistent user/agent memory for assistants and copilots |
-| Personal/team "second brain" with ingestion + retrieval | **Supermemory** | Knowledge-base style memory with connectors and retrieval workflows |
-| Graph-native episodic memory over agent events | **Graphiti / Zep** | Focused on temporal + knowledge graph memory models |
-| Stateful agent runtime + built-in memory blocks | **Letta** | Agent framework centered on durable state and memory editing |
-| Multi-agent coordination with explicit access boundaries | **Aegis Memory** | Scope-aware ACLs (`agent-private` / `agent-shared` / `global`) plus cross-agent query APIs |
-| Cross-agent handoffs that preserve task context | **Aegis Memory** | Handoff baton primitives for structured state transfer between agents |
-| Self-improving memory loops (what worked / failed) | **Aegis Memory** | ACE patterns: vote, reflection, playbook |
-
-### Quick Feature Comparison
-
-| Capability | mem0 | Supermemory | Graphiti / Zep | Letta | Aegis Memory |
-|---|---|---|---|---|---|
-| **Primary focus** | Assistant personalization memory | Knowledge retrieval + synced context | Graph-based episodic/relational memory | Stateful agents with editable memory | Multi-agent memory coordination |
-| **Open source** | ✓ | ✓ | ✓ | ✓ | ✓ |
-| **Self-host posture** | Self-host options available | Self-host options available | Self-host options available | Self-host options available | Self-host-first |
-| **Graph-native memory model** | Partial / optional | — | ✓ | — | — |
-| **Built for multi-agent ACL/scopes** | — | — | — | — | ✓ |
-| **Cross-agent query with policy boundaries** | — | — | — | — | ✓ |
-| **Handoff baton / structured handoff state** | — | — | — | — | ✓ |
-| **ACE loop (vote / reflect / curate / run tracking)** | — | — | — | — | ✓ |
-| **Typed memory model** | — | — | — | — | ✓ |
-| **Interaction Events (collaboration history + causal chains)** | — | — | Partial | — | ✓ (Aegis Interaction Events provide 80% of G-Memory's value via temporal + causal chaining without graph database complexity) |
-| **Temporal decay / memory freshness** | — | — | Partial | — | ✓ |
-
-### When to pick Aegis (quick checklist)
-
-Pick **Aegis Memory** when most of these are true:
-
-- You need **multiple agents** to share memory safely with explicit ACL/scopes.
-- You need **handoffs** where one agent passes a reliable baton/state bundle to another.
-- You want **ACE patterns** (vote/reflection/playbook) to continuously improve memory quality.
-- You prefer a **self-host posture** with operational control over storage and deployment.
-- You need **temporal decay** so stale memories don't pollute retrieval over time.
-
-> Compliance, pricing, and managed-service nuances are intentionally omitted from the main table; keep those in footnotes/docs so the core comparison remains verifiable.[^comparison]
-
-## 15-Second Demo
-
-See Aegis Memory in action with built-in CLI commands:
-
-```bash
-# Start the server
-docker compose up -d
-
-# Configure defaults (creates local profile)
-pip install aegis-memory
-aegis init --non-interactive
-
-# Check connectivity
-aegis status
-
-# Add and retrieve a memory
-aegis add "User prefers dark mode"
-aegis query "What does the user prefer?" --top-k 3
-
-# Optionally browse results interactively
-aegis explore --query "user preferences" --top-k 5
-```
-
-This quick flow shows:
-1. **Initialization** — Configure CLI defaults for your environment
-2. **Connectivity** — Verify server health before writing memories
-3. **Persistence** — Add a memory that survives agent context resets
-4. **Retrieval** — Semantically query what was stored
-5. **Exploration** — Iterate on results from an interactive terminal explorer
-
-```bash
-# JSON output for scripting / logs
-aegis status --json
-aegis query "What does the user prefer?" --json
-```
-
-> **Tip:** Set `OPENAI_API_KEY` to enable embedding-backed semantic retrieval on the server.
-
-## Features
-
-### Core Memory
-- **Semantic Search** — pgvector HNSW index for O(log n) queries at scale
-- **Scope-Aware Access** — `agent-private`, `agent-shared`, `global` with automatic ACL
-- **Multi-Agent Handoffs** — Structured state transfer between agents
-- **Auto-Deduplication** — Hash-based O(1) duplicate detection
-- **Typed Memory** — Cognitive memory types: episodic, semantic, procedural, control
-
-### ACE Patterns
-- **Memory Voting** — Track which memories help vs harm task completion
-- **Delta Updates** — Incremental changes that prevent context collapse
-- **Reflections** — Store insights from failures for future reference
-- **Session Progress** — Track work across context windows
-- **Feature Tracking** — Prevent premature task completion
-
-### Production Ready
-- **Self-Hostable** — Docker, Kubernetes, any cloud
-- **Observable** — Prometheus metrics, structured logging
-- **Fast** — Sub-100ms writes, 85 ops/s concurrent throughput
-- **Safe** — Data export, migrations, no vendor lock-in
-
-### Observability & Evaluation
-- **Metrics endpoint** — `/metrics` for Prometheus scraping (request, operation, cache, and ACE counters)
-- **Evaluation harness APIs** — `/memories/ace/eval/metrics` and `/memories/ace/eval/correlation`
-- **Dashboard APIs** — `/memories/ace/dashboard/stats`, `/activity`, `/sessions`
-- **Design roadmap** — Memory analytics, timeline events, effectiveness attribution, and Langfuse/LangSmith export plan
-
-**[→ Observability Guide](https://docs.aegismemory.com/guides/observability)**
-
-## Quick Start
-
-### 1. Start the Server (2 min)
-
-Requires **Python 3.10+** (matches `pyproject.toml`).
+### Start the server
 
 ```bash
 git clone https://github.com/quantifylabs/aegis-memory.git
@@ -242,14 +80,13 @@ curl http://localhost:8000/health
 # {"status": "healthy"}
 ```
 
-### 2. Install the SDK
+### Install the SDK
 
 ```bash
-# Python 3.10+
 pip install aegis-memory
 ```
 
-### 3. Use It
+### Multi-agent memory in 10 lines
 
 ```python
 from aegis_memory import AegisClient
@@ -273,48 +110,13 @@ memories = client.query_cross_agent(
 print(memories[0].content)
 ```
 
-**[→ Full Quickstart Guide](https://docs.aegismemory.com/quickstart/installation)**
+**[Full Quickstart Guide](https://docs.aegismemory.com/quickstart/installation)**
 
-## Async Usage (FastAPI / LangGraph / CrewAI)
+## Agents That Learn From Their Own Mistakes
 
-`AsyncAegisClient` mirrors the core `AegisClient` APIs for async applications.
+Aegis is the first memory engine with a complete ACE loop — the Generation → Reflection → Curation cycle from Stanford/SambaNova's research, engineered for production.
 
-```python
-from aegis_memory import AsyncAegisClient
-
-async def handle_turn(user_id: str, text: str):
-    async with AsyncAegisClient(api_key="dev-key", base_url="http://localhost:8000") as client:
-        await client.add(text, user_id=user_id, agent_id="assistant")
-        memories = await client.query("user preferences", user_id=user_id)
-        return memories
-```
-
-Use this pattern in:
-- **FastAPI** request handlers (`async def` endpoints)
-- **LangGraph** async nodes (`await client.query(...)`)
-- **CrewAI** async tools/callbacks that run in event loops
-
-## Framework Integrations
-
-Drop-in support for popular agent frameworks:
-
-```python
-# LangChain
-from aegis_memory.integrations.langchain import AegisMemory
-chain = ConversationChain(llm=llm, memory=AegisMemory(agent_id="assistant"))
-
-# CrewAI
-from aegis_memory.integrations.crewai import AegisCrewMemory
-crew = Crew(agents=[...], memory=AegisCrewMemory())
-```
-
-**[→ Integration Guides](https://docs.aegismemory.com/integrations/crewai)**
-
-## ACE Loop: Production-Grade Agentic Context Engineering
-
-Aegis is the first memory engine with a **complete ACE loop** -- the Generation -> Reflection -> Curation cycle from Stanford/SambaNova's research, engineered for production use.
-
-**The problem ACE solves:** Your agent made the same mistake 5 times? ACE loop remembers the fix forever. Agents forget what worked last session? Run tracking closes that feedback loop. Stale memories polluting retrieval? Curation auto-cleans your playbook.
+Your agent made the same mistake 5 times? ACE loop remembers the fix forever. Stale memories polluting retrieval? Curation auto-cleans your playbook.
 
 ```
 Generation          Execution          Reflection          Curation
@@ -371,85 +173,49 @@ curation = client.curate(namespace="production")
 | Run tracking | Not tracked | First-class `ace_runs` table linking memories to outcomes |
 | Agent-specific playbook | Generic query | Filtered by agent_id + task_type |
 
-### Memory Voting
-```python
-# After a memory helped complete a task
-client.vote(memory.id, "helpful", voter_agent_id="executor")
+**[ACE Patterns Guide](https://docs.aegismemory.com/guides/ace-patterns)**
 
-# Query only effective strategies
-strategies = client.query_playbook("API pagination", agent_id="executor", min_effectiveness=0.3)
-```
+## Choosing the Right Memory Solution
 
-### Session Progress
-```python
-# Track work across context windows
-session = client.create_session("build-dashboard", agent_id="coding-agent")
-client.update_session("build-dashboard",
-    completed_items=["auth", "routing"],
-    in_progress_item="api-client",
-    blocked_items=[{"item": "payments", "reason": "Waiting for API keys"}]
-)
-```
+Different tools solve different problems. This comparison stays focused on capabilities clearly documented in public repos and docs.[^comparison]
 
-### Reflections
-```python
-# Store lessons from failures
-client.add_reflection(
-    content="Always use while True for pagination, not range(n)",
-    agent_id="reflector",
-    error_pattern="pagination_incomplete"
-)
-```
+| If you need... | Usually pick | Reason |
+|---|---|---|
+| Personalized assistant memory (user/profile facts) | **mem0** | Designed around persistent user/agent memory for assistants |
+| Personal/team "second brain" with ingestion | **Supermemory** | Knowledge-base style memory with connectors |
+| Graph-native episodic memory over agent events | **Graphiti / Zep** | Focused on temporal + knowledge graph memory models |
+| Stateful agent runtime + built-in memory blocks | **Letta** | Agent framework centered on durable state |
+| Security-first multi-agent memory | **Aegis Memory** | Only memory layer with content security, integrity, and trust hierarchy |
+| Multi-agent coordination with access boundaries | **Aegis Memory** | Scope-aware ACLs + cross-agent query APIs |
+| Self-improving memory loops (what worked / failed) | **Aegis Memory** | ACE patterns: vote, reflection, playbook |
 
-**[-> ACE Patterns Guide](https://docs.aegismemory.com/guides/ace-patterns)**
+### Quick Feature Comparison
 
-## Typed Memory API
+| Capability | mem0 | Graphiti / Zep | Letta | Aegis Memory |
+|---|---|---|---|---|
+| **Primary focus** | Assistant personalization | Graph-based episodic memory | Stateful agents | Secure multi-agent coordination |
+| **Open source** | Yes | Yes | Yes | Yes |
+| **Self-host posture** | Available | Available | Available | Self-host-first |
+| **Content security pipeline** | — | — | — | 3-stage (validation, PII, injection) |
+| **Memory integrity** | — | — | — | HMAC-SHA256 |
+| **Trust hierarchy** | — | — | — | 4-tier OWASP model |
+| **Multi-agent ACL/scopes** | — | — | — | Yes |
+| **Cross-agent query** | — | — | — | Yes |
+| **Handoff baton** | — | — | — | Yes |
+| **ACE loop** | — | — | — | Yes |
+| **Typed memory model** | — | — | — | Yes |
+| **Temporal decay** | — | Partial | — | Yes |
 
-Aegis supports 4 cognitive memory types inspired by research SOTA systems for multi-layered agent memory:
+### When to Pick Aegis
 
-```python
-# Episodic — record interaction trace
-client.post("/memories/typed/episodic", json={
-    "content": "User asked about pricing",
-    "agent_id": "sales",
-    "session_id": "conv-42",
-    "sequence_number": 1,
-})
+Pick **Aegis Memory** when most of these are true:
 
-# Semantic — store extracted fact
-client.post("/memories/typed/semantic", json={
-    "content": "User is a Python developer",
-    "entity_id": "user_123",
-})
-
-# Procedural — save reusable strategy
-client.post("/memories/typed/procedural", json={
-    "content": "For API pagination, use cursor-based approach",
-    "agent_id": "executor",
-    "steps": ["Init cursor", "Fetch page", "Check has_more"],
-})
-
-# Control — record meta-rule
-client.post("/memories/typed/control", json={
-    "content": "Never use range() for unknown-length pagination",
-    "agent_id": "reflector",
-    "error_pattern": "pagination_incomplete",
-})
-
-# Query by type
-client.post("/memories/typed/query", json={
-    "query": "pagination strategies",
-    "memory_types": ["procedural", "control"],
-})
-
-# Session timeline
-client.get("/memories/typed/episodic/session/conv-42")
-
-# Entity facts
-client.get("/memories/typed/semantic/entity/user_123")
-```
-
-**[→ Typed Memory Guide](https://docs.aegismemory.com/guides/typed-memory)**
+- You need **content security** — injection detection, integrity verification, sensitive data protection.
+- You need **multiple agents** to share memory safely with explicit ACL/scopes.
+- You need **handoffs** where one agent passes a reliable state bundle to another.
+- You want **ACE patterns** (vote/reflection/playbook) to continuously improve memory quality.
+- You prefer a **self-host posture** with operational control over storage and deployment.
+- You need **temporal decay** so stale memories don't pollute retrieval over time.
 
 ## Performance
 
@@ -466,17 +232,7 @@ Benchmarked on 8 vCPU / 7.6 GB RAM (Intel 13th Gen), 1000 memories, Docker Compo
 | Vote | 64ms | 176ms | 176ms | 14.1 ops/s |
 | Deduplication | 75ms | 112ms | 112ms | 13.6 ops/s |
 
-> **Note:** Query tail latency (p95/p99) is dominated by the external OpenAI embedding call, not Aegis or PostgreSQL. Write and vote operations that skip embedding are consistently under 100ms at p50.
-
-## Documentation
-
-**📚 [docs.aegismemory.com](https://docs.aegismemory.com)** — Full documentation
-
-- **[Quickstart](https://docs.aegismemory.com/quickstart/installation)** — Get running in 5 minutes
-- **[Smart Memory](https://docs.aegismemory.com/guides/smart-memory)** — Zero-config memory extraction
-- **[ACE Patterns](https://docs.aegismemory.com/guides/ace-patterns)** — Self-improving agent patterns
-- **[Integrations](https://docs.aegismemory.com/integrations/crewai)** — CrewAI, LangChain guides
-- **[CLI Reference](https://docs.aegismemory.com/api-reference/cli)** — Command-line tools
+> Query tail latency (p95/p99) is dominated by the external OpenAI embedding call, not Aegis or PostgreSQL. Write and vote operations that skip embedding are consistently under 100ms at p50.
 
 ## Deployment
 
@@ -499,99 +255,21 @@ kubectl apply -f k8s/
 | `DATABASE_URL` | `postgresql+asyncpg://...` | PostgreSQL connection |
 | `OPENAI_API_KEY` | — | For embeddings |
 | `AEGIS_API_KEY` | `dev-key` | API authentication |
+| `CONTENT_POLICY_INJECTION` | `flag` | `reject` / `redact` / `flag` / `allow` |
+| `CONTENT_POLICY_SECRETS` | `reject` | `reject` / `redact` / `flag` / `allow` |
 
-**[→ Full Configuration](https://docs.aegismemory.com/guides/production-deployment)**
+**[Full Configuration](https://docs.aegismemory.com/guides/production-deployment)**
 
-## Troubleshooting
+## Documentation
 
-### Connection Refused / Cannot Connect to Server
+**[docs.aegismemory.com](https://docs.aegismemory.com)** — Full documentation
 
-```
-Cannot connect to Aegis server
-  URL: http://localhost:8000
-```
-
-**Fix:**
-1. Verify the server is running: `docker compose ps`
-2. Check the server URL in your config: `aegis config show`
-3. Ensure the port is not blocked by a firewall
-4. If using a custom URL, pass it explicitly: `AegisClient(api_key="...", base_url="http://your-host:8000")`
-
-### Authentication Failed / Invalid API Key
-
-```
-Authentication failed: Invalid API key
-```
-
-**Fix:**
-1. Check your configured key: `aegis config show`
-2. Reconfigure: `aegis config init`
-3. Or set via environment variable: `export AEGIS_API_KEY=your-key`
-4. The default development key is `dev-key`
-
-### Missing OPENAI_API_KEY
-
-```
-RuntimeError: OPENAI_API_KEY is required for embeddings
-```
-
-**Fix:**
-1. Set the environment variable: `export OPENAI_API_KEY=sk-...`
-2. Or pass it in your `docker-compose.yml` under the server service environment
-
-### Database Connection Errors
-
-```
-asyncpg.exceptions: could not connect to server
-```
-
-**Fix:**
-1. Ensure PostgreSQL is running: `docker compose ps`
-2. Check `DATABASE_URL` in your environment matches the running database
-3. Verify pgvector extension is installed: `CREATE EXTENSION IF NOT EXISTS vector;`
-4. Run migrations if upgrading: `psql -f migrations/002_ace_tables.sql`
-
-### Smart Memory Returns No Extractions
-
-If `process_turn()` always returns empty results:
-
-1. **Check the filter** — Short or generic messages are filtered out by design. Use `force_extract=True` to bypass:
-   ```python
-   result = memory.process_turn(user_input="...", ai_response="...", force_extract=True)
-   ```
-2. **Check the LLM key** — Extraction requires a valid OpenAI or Anthropic API key
-3. **Lower the sensitivity** — `SmartMemory(..., sensitivity="high")` passes more messages to the LLM
-
-### Import Errors (ModuleNotFoundError)
-
-```
-ModuleNotFoundError: No module named 'aegis_memory.integrations.langchain'
-```
-
-**Fix:** Install the optional dependency group:
-```bash
-# Python 3.10+
-pip install aegis-memory[langchain]   # For LangChain
-pip install aegis-memory[crewai]      # For CrewAI
-pip install aegis-memory[server]      # For server components
-pip install aegis-memory[all]         # Everything
-```
-
-### Rate Limit Exceeded (429)
-
-**Fix:**
-1. Wait and retry — the `Retry-After` header indicates how long
-2. Reduce request frequency or batch operations with `add_batch()`
-3. Adjust server-side limits via `RATE_LIMIT_*` environment variables
-
-### Slow Queries on Large Datasets
-
-If queries take longer than expected on 100K+ memories:
-
-1. Verify the HNSW index exists: check `migrations/` scripts were applied
-2. Increase `DB_POOL_SIZE` for concurrent workloads
-3. Use a read replica via `DATABASE_READ_REPLICA_URL` for query-heavy traffic
-4. Filter by `namespace` or `agent_id` to narrow the search space
+- **[Quickstart](https://docs.aegismemory.com/quickstart/installation)** — Get running in 5 minutes
+- **[Security Guide](https://docs.aegismemory.com/guides/security)** — Content security, integrity, trust hierarchy
+- **[ACE Patterns](https://docs.aegismemory.com/guides/ace-patterns)** — Self-improving agent patterns
+- **[Smart Memory](https://docs.aegismemory.com/guides/smart-memory)** — Zero-config memory extraction
+- **[Integrations](https://docs.aegismemory.com/integrations/crewai)** — CrewAI, LangChain guides
+- **[CLI Reference](https://docs.aegismemory.com/api-reference/cli)** — Command-line tools
 
 ## Contributing
 
@@ -618,6 +296,10 @@ Apache 2.0 — Use it however you want. See [LICENSE](LICENSE).
 
 ---
 
-Built with ❤️ for the agent community
+Built by engineers who read the [OWASP reports](https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html) and acted on them.
 
-[^comparison]: Sources: [mem0 docs/repo](https://docs.mem0.ai/) · [Supermemory repo/docs](https://github.com/supermemoryai/supermemory) · [Graphiti repo](https://github.com/getzep/graphiti) and [Zep docs](https://help.getzep.com/) · [Letta docs/repo](https://github.com/letta-ai/letta) · [Aegis Memory docs](https://docs.aegismemory.com/).
+[^echoleak]: EchoLeak: Zero-click exfiltration from M365 Copilot. [arxiv.org/html/2509.10540v1](https://arxiv.org/html/2509.10540v1)
+[^crewai]: Multi-agent exfiltration study (COLM 2025). [openreview.net/pdf?id=DAozI4etUp](https://openreview.net/pdf?id=DAozI4etUp)
+[^drift]: CVE-2025-32711 zero-click AI vulnerability analysis. [socprime.com/blog/cve-2025-32711-zero-click-ai-vulnerability/](https://socprime.com/blog/cve-2025-32711-zero-click-ai-vulnerability/)
+[^owasp-top10]: OWASP Top 10 for Agentic Applications (2026). [genai.owasp.org](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/)
+[^comparison]: Security comparison based on public documentation and open-source repositories as of February 2026. Sources: [mem0 docs](https://docs.mem0.ai/) | [Zep docs](https://help.getzep.com/) | [Letta repo](https://github.com/letta-ai/letta) | [Aegis docs](https://docs.aegismemory.com/)
