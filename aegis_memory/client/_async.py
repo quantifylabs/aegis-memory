@@ -1,0 +1,877 @@
+"""Aegis SDK asynchronous client."""
+
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
+
+import httpx
+
+from ._models import (
+    AddResult,
+    AgentInteractionsResult,
+    ContentScanResult,
+    CurationResult,
+    DeltaResult,
+    DeltaResultItem,
+    EventWithChainResult,
+    Feature,
+    FeatureList,
+    HandoffBaton,
+    IntegrityCheckResult,
+    InteractionEventResult,
+    InteractionSearchResult,
+    InteractionSearchResultItem,
+    Memory,
+    PlaybookEntry,
+    PlaybookResult,
+    RunResult,
+    SecurityAuditEvent,
+    SessionProgress,
+    SessionTimelineResult,
+    VoteResult,
+)
+from ._parsers import (
+    _parse_curation_data,
+    _parse_feature_data,
+    _parse_interaction_event,
+    _parse_memory_data,
+    _parse_run_data,
+    _parse_session_data,
+)
+
+
+class AsyncAegisClient:
+    """Async version of AegisClient using httpx.AsyncClient."""
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "http://localhost:8000",
+        timeout: float = 30.0,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.client = httpx.AsyncClient(
+            base_url=self.base_url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+        )
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        await self.client.aclose()
+
+    async def aclose(self):
+        """Close the async client."""
+        await self.client.aclose()
+
+    async def add(
+        self,
+        content: str,
+        *,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        namespace: str = "default",
+        metadata: Optional[Dict[str, Any]] = None,
+        ttl_seconds: Optional[int] = None,
+        scope: Optional[str] = None,
+        shared_with_agents: Optional[List[str]] = None,
+        derived_from_agents: Optional[List[str]] = None,
+        coordination_metadata: Optional[Dict[str, Any]] = None,
+    ) -> AddResult:
+        body = {
+            "content": content,
+            "user_id": user_id,
+            "agent_id": agent_id,
+            "namespace": namespace,
+            "metadata": metadata,
+            "ttl_seconds": ttl_seconds,
+            "scope": scope,
+            "shared_with_agents": shared_with_agents,
+            "derived_from_agents": derived_from_agents,
+            "coordination_metadata": coordination_metadata,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post("/memories/add", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return AddResult(
+            id=data["id"],
+            deduped_from=data.get("deduped_from"),
+            inferred_scope=data.get("inferred_scope"),
+        )
+
+    async def query(
+        self,
+        query: str,
+        *,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        namespace: str = "default",
+        top_k: int = 10,
+        min_score: float = 0.0,
+        apply_decay: bool = False,
+    ) -> List[Memory]:
+        body = {
+            "query": query,
+            "user_id": user_id,
+            "agent_id": agent_id,
+            "namespace": namespace,
+            "top_k": top_k,
+            "min_score": min_score,
+            "apply_decay": apply_decay,
+        }
+        resp = await self.client.post("/memories/query", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return [_parse_memory_data(m) for m in data["memories"]]
+
+    async def query_cross_agent(
+        self,
+        query: str,
+        requesting_agent_id: str,
+        *,
+        target_agent_ids: Optional[List[str]] = None,
+        user_id: Optional[str] = None,
+        namespace: str = "default",
+        top_k: int = 10,
+        min_score: float = 0.0,
+        apply_decay: bool = False,
+    ) -> List[Memory]:
+        body = {
+            "query": query,
+            "requesting_agent_id": requesting_agent_id,
+            "target_agent_ids": target_agent_ids,
+            "user_id": user_id,
+            "namespace": namespace,
+            "top_k": top_k,
+            "min_score": min_score,
+            "apply_decay": apply_decay,
+        }
+        resp = await self.client.post("/memories/query_cross_agent", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return [_parse_memory_data(m) for m in data["memories"]]
+
+    async def vote(
+        self,
+        memory_id: str,
+        vote: Literal["helpful", "harmful"],
+        voter_agent_id: str,
+        *,
+        context: Optional[str] = None,
+        task_id: Optional[str] = None,
+    ) -> VoteResult:
+        body = {
+            "vote": vote,
+            "voter_agent_id": voter_agent_id,
+            "context": context,
+            "task_id": task_id,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post(f"/memories/ace/vote/{memory_id}", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return VoteResult(
+            memory_id=data["memory_id"],
+            bullet_helpful=data["bullet_helpful"],
+            bullet_harmful=data["bullet_harmful"],
+            effectiveness_score=data["effectiveness_score"],
+        )
+
+    async def create_session(
+        self,
+        session_id: str,
+        *,
+        agent_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        namespace: str = "default",
+    ) -> SessionProgress:
+        body = {
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "user_id": user_id,
+            "namespace": namespace,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post("/memories/ace/session", json=body)
+        resp.raise_for_status()
+        return _parse_session_data(resp.json())
+
+    async def get_session(self, session_id: str) -> SessionProgress:
+        resp = await self.client.get(f"/memories/ace/session/{session_id}")
+        resp.raise_for_status()
+        return _parse_session_data(resp.json())
+
+    async def update_session(
+        self,
+        session_id: str,
+        *,
+        completed_items: Optional[List[str]] = None,
+        in_progress_item: Optional[str] = None,
+        next_items: Optional[List[str]] = None,
+        blocked_items: Optional[List[Dict[str, str]]] = None,
+        summary: Optional[str] = None,
+        last_action: Optional[str] = None,
+        status: Optional[str] = None,
+        total_items: Optional[int] = None,
+    ) -> SessionProgress:
+        body = {
+            "completed_items": completed_items,
+            "in_progress_item": in_progress_item,
+            "next_items": next_items,
+            "blocked_items": blocked_items,
+            "summary": summary,
+            "last_action": last_action,
+            "status": status,
+            "total_items": total_items,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.patch(f"/memories/ace/session/{session_id}", json=body)
+        resp.raise_for_status()
+        return _parse_session_data(resp.json())
+
+    async def create_feature(
+        self,
+        feature_id: str,
+        description: str,
+        *,
+        session_id: Optional[str] = None,
+        namespace: str = "default",
+        category: Optional[str] = None,
+        test_steps: Optional[List[str]] = None,
+    ) -> Feature:
+        body = {
+            "feature_id": feature_id,
+            "description": description,
+            "session_id": session_id,
+            "namespace": namespace,
+            "category": category,
+            "test_steps": test_steps,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post("/memories/ace/feature", json=body)
+        resp.raise_for_status()
+        return _parse_feature_data(resp.json())
+
+    async def get_feature(self, feature_id: str, namespace: str = "default") -> Feature:
+        resp = await self.client.get(
+            f"/memories/ace/feature/{feature_id}",
+            params={"namespace": namespace},
+        )
+        resp.raise_for_status()
+        return _parse_feature_data(resp.json())
+
+    async def update_feature(
+        self,
+        feature_id: str,
+        *,
+        namespace: str = "default",
+        status: Optional[str] = None,
+        passes: Optional[bool] = None,
+        implemented_by: Optional[str] = None,
+        verified_by: Optional[str] = None,
+        implementation_notes: Optional[str] = None,
+        failure_reason: Optional[str] = None,
+    ) -> Feature:
+        body = {
+            "status": status,
+            "passes": passes,
+            "implemented_by": implemented_by,
+            "verified_by": verified_by,
+            "implementation_notes": implementation_notes,
+            "failure_reason": failure_reason,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.patch(
+            f"/memories/ace/feature/{feature_id}",
+            params={"namespace": namespace},
+            json=body,
+        )
+        resp.raise_for_status()
+        return _parse_feature_data(resp.json())
+
+    async def list_features(
+        self,
+        *,
+        namespace: str = "default",
+        session_id: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> FeatureList:
+        params = {"namespace": namespace}
+        if session_id:
+            params["session_id"] = session_id
+        if status:
+            params["status"] = status
+
+        resp = await self.client.get("/memories/ace/features", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        return FeatureList(
+            features=[_parse_feature_data(f) for f in data["features"]],
+            total=data["total"],
+            passing=data["passing"],
+            failing=data["failing"],
+            in_progress=data["in_progress"],
+        )
+
+    async def export_json(
+        self,
+        output_path: str,
+        *,
+        namespace: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        include_embeddings: bool = False,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        import json
+
+        body: Dict[str, Any] = {"format": "json"}
+        if namespace:
+            body["namespace"] = namespace
+        if agent_id:
+            body["agent_id"] = agent_id
+        if include_embeddings:
+            body["include_embeddings"] = True
+        if limit:
+            body["limit"] = limit
+
+        resp = await self.client.post("/memories/export", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str, ensure_ascii=False)
+
+        return data.get("stats", {"total_exported": len(data.get("memories", []))})
+
+    async def add_batch(self, items: List[Dict[str, Any]]) -> List[AddResult]:
+        resp = await self.client.post("/memories/add_batch", json={"items": items})
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            AddResult(
+                id=r["id"],
+                deduped_from=r.get("deduped_from"),
+                inferred_scope=r.get("inferred_scope"),
+            )
+            for r in data["results"]
+        ]
+
+    async def get(self, memory_id: str) -> Memory:
+        resp = await self.client.get(f"/memories/{memory_id}")
+        resp.raise_for_status()
+        return _parse_memory_data(resp.json())
+
+    async def delete(self, memory_id: str) -> bool:
+        resp = await self.client.delete(f"/memories/{memory_id}")
+        return resp.status_code == 204
+
+    async def handoff(
+        self,
+        source_agent_id: str,
+        target_agent_id: str,
+        *,
+        namespace: str = "default",
+        user_id: Optional[str] = None,
+        task_context: Optional[str] = None,
+        max_memories: int = 20,
+    ) -> HandoffBaton:
+        body = {
+            "source_agent_id": source_agent_id,
+            "target_agent_id": target_agent_id,
+            "namespace": namespace,
+            "user_id": user_id,
+            "task_context": task_context,
+            "max_memories": max_memories,
+        }
+        resp = await self.client.post("/memories/handoff", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return HandoffBaton(
+            source_agent_id=data["source_agent_id"],
+            target_agent_id=data["target_agent_id"],
+            namespace=data["namespace"],
+            user_id=data.get("user_id"),
+            task_context=data.get("task_context"),
+            summary=data.get("summary"),
+            active_tasks=data.get("active_tasks", []),
+            blocked_on=data.get("blocked_on", []),
+            recent_decisions=data.get("recent_decisions", []),
+            key_facts=data.get("key_facts", []),
+            memory_ids=data.get("memory_ids", []),
+        )
+
+    async def apply_delta(self, operations: List[Dict[str, Any]]) -> DeltaResult:
+        resp = await self.client.post("/memories/ace/delta", json={"operations": operations})
+        resp.raise_for_status()
+        data = resp.json()
+        return DeltaResult(
+            results=[
+                DeltaResultItem(
+                    operation=r["operation"],
+                    success=r["success"],
+                    memory_id=r.get("memory_id"),
+                    error=r.get("error"),
+                )
+                for r in data["results"]
+            ],
+            total_time_ms=data["total_time_ms"],
+        )
+
+    async def add_delta(
+        self,
+        content: str,
+        *,
+        memory_type: str = "standard",
+        agent_id: Optional[str] = None,
+        namespace: str = "default",
+        scope: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        result = await self.apply_delta([{
+            "type": "add",
+            "content": content,
+            "memory_type": memory_type,
+            "agent_id": agent_id,
+            "namespace": namespace,
+            "scope": scope,
+            "metadata": metadata,
+        }])
+        if result.results[0].success:
+            return result.results[0].memory_id
+        raise Exception(f"Delta add failed: {result.results[0].error}")
+
+    async def deprecate(
+        self,
+        memory_id: str,
+        *,
+        agent_id: Optional[str] = None,
+        superseded_by: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> bool:
+        result = await self.apply_delta([{
+            "type": "deprecate",
+            "memory_id": memory_id,
+            "agent_id": agent_id,
+            "superseded_by": superseded_by,
+            "deprecation_reason": reason,
+        }])
+        return result.results[0].success
+
+    async def add_reflection(
+        self,
+        content: str,
+        agent_id: str,
+        *,
+        user_id: Optional[str] = None,
+        namespace: str = "default",
+        source_trajectory_id: Optional[str] = None,
+        error_pattern: Optional[str] = None,
+        correct_approach: Optional[str] = None,
+        applicable_contexts: Optional[List[str]] = None,
+        scope: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        body = {
+            "content": content,
+            "agent_id": agent_id,
+            "user_id": user_id,
+            "namespace": namespace,
+            "source_trajectory_id": source_trajectory_id,
+            "error_pattern": error_pattern,
+            "correct_approach": correct_approach,
+            "applicable_contexts": applicable_contexts,
+            "scope": scope,
+            "metadata": metadata,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+        resp = await self.client.post("/memories/ace/reflection", json=body)
+        resp.raise_for_status()
+        return resp.json()["id"]
+
+    async def query_playbook(
+        self,
+        query: str,
+        agent_id: str,
+        *,
+        namespace: str = "default",
+        include_types: Optional[List[str]] = None,
+        top_k: int = 20,
+        min_effectiveness: float = -1.0,
+    ) -> PlaybookResult:
+        body = {
+            "query": query,
+            "agent_id": agent_id,
+            "namespace": namespace,
+            "include_types": include_types or ["strategy", "reflection"],
+            "top_k": top_k,
+            "min_effectiveness": min_effectiveness,
+        }
+        resp = await self.client.post("/memories/ace/playbook", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return PlaybookResult(
+            entries=[
+                PlaybookEntry(
+                    id=e["id"],
+                    content=e["content"],
+                    memory_type=e["memory_type"],
+                    effectiveness_score=e["effectiveness_score"],
+                    bullet_helpful=e["bullet_helpful"],
+                    bullet_harmful=e["bullet_harmful"],
+                    error_pattern=e.get("error_pattern"),
+                    created_at=datetime.fromisoformat(e["created_at"].replace("Z", "+00:00")),
+                )
+                for e in data["entries"]
+            ],
+            query_time_ms=data["query_time_ms"],
+        )
+
+    async def mark_complete(self, session_id: str, item: str) -> SessionProgress:
+        return await self.update_session(session_id, completed_items=[item])
+
+    async def set_in_progress(self, session_id: str, item: str) -> SessionProgress:
+        return await self.update_session(session_id, in_progress_item=item)
+
+    async def mark_feature_complete(
+        self,
+        feature_id: str,
+        verified_by: str,
+        *,
+        namespace: str = "default",
+        notes: Optional[str] = None,
+    ) -> Feature:
+        return await self.update_feature(
+            feature_id,
+            namespace=namespace,
+            status="complete",
+            passes=True,
+            verified_by=verified_by,
+            implementation_notes=notes,
+        )
+
+    async def mark_feature_failed(
+        self,
+        feature_id: str,
+        reason: str,
+        *,
+        namespace: str = "default",
+    ) -> Feature:
+        return await self.update_feature(
+            feature_id,
+            namespace=namespace,
+            status="failed",
+            passes=False,
+            failure_reason=reason,
+        )
+
+    # ---------- ACE: Run Tracking ----------
+
+    async def start_run(
+        self,
+        run_id: str,
+        agent_id: Optional[str] = None,
+        *,
+        task_type: Optional[str] = None,
+        namespace: str = "default",
+        memory_ids_used: Optional[List[str]] = None,
+    ) -> RunResult:
+        body: Dict[str, Any] = {
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "task_type": task_type,
+            "namespace": namespace,
+            "memory_ids_used": memory_ids_used,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post("/memories/ace/run", json=body)
+        resp.raise_for_status()
+        return _parse_run_data(resp.json())
+
+    async def complete_run(
+        self,
+        run_id: str,
+        *,
+        success: bool,
+        evaluation: Optional[Dict[str, Any]] = None,
+        logs: Optional[Dict[str, Any]] = None,
+        auto_vote: bool = True,
+        auto_reflect: bool = True,
+    ) -> RunResult:
+        body: Dict[str, Any] = {
+            "success": success,
+            "evaluation": evaluation,
+            "logs": logs,
+            "auto_vote": auto_vote,
+            "auto_reflect": auto_reflect,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post(f"/memories/ace/run/{run_id}/complete", json=body)
+        resp.raise_for_status()
+        return _parse_run_data(resp.json())
+
+    async def get_run(self, run_id: str) -> RunResult:
+        resp = await self.client.get(f"/memories/ace/run/{run_id}")
+        resp.raise_for_status()
+        return _parse_run_data(resp.json())
+
+    async def get_playbook_for_agent(
+        self,
+        agent_id: str,
+        *,
+        query: str = "general task strategies",
+        task_type: Optional[str] = None,
+        namespace: str = "default",
+        top_k: int = 20,
+        min_effectiveness: float = -1.0,
+    ) -> PlaybookResult:
+        body: Dict[str, Any] = {
+            "query": query,
+            "agent_id": agent_id,
+            "task_type": task_type,
+            "namespace": namespace,
+            "top_k": top_k,
+            "min_effectiveness": min_effectiveness,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post("/memories/ace/playbook/agent", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return PlaybookResult(
+            entries=[
+                PlaybookEntry(
+                    id=e["id"],
+                    content=e["content"],
+                    memory_type=e["memory_type"],
+                    effectiveness_score=e["effectiveness_score"],
+                    bullet_helpful=e["bullet_helpful"],
+                    bullet_harmful=e["bullet_harmful"],
+                    error_pattern=e.get("error_pattern"),
+                    created_at=datetime.fromisoformat(e["created_at"].replace("Z", "+00:00")),
+                )
+                for e in data["entries"]
+            ],
+            query_time_ms=data["query_time_ms"],
+        )
+
+    async def curate(
+        self,
+        *,
+        namespace: str = "default",
+        agent_id: Optional[str] = None,
+        top_k: int = 10,
+        min_effectiveness_threshold: float = -0.3,
+    ) -> CurationResult:
+        body: Dict[str, Any] = {
+            "namespace": namespace,
+            "agent_id": agent_id,
+            "top_k": top_k,
+            "min_effectiveness_threshold": min_effectiveness_threshold,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post("/memories/ace/curate", json=body)
+        resp.raise_for_status()
+        return _parse_curation_data(resp.json())
+
+    # ---------- Interaction Events ----------
+
+    async def record_interaction(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        agent_id: Optional[str] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        parent_event_id: Optional[str] = None,
+        namespace: str = "default",
+        extra_metadata: Optional[Dict[str, Any]] = None,
+        embed: bool = False,
+    ) -> InteractionEventResult:
+        """
+        Record an interaction event for a session.
+
+        Set embed=True to generate a vector embedding for later semantic search.
+        Link events causally by setting parent_event_id to a prior event's ID.
+        """
+        body: Dict[str, Any] = {
+            "session_id": session_id,
+            "content": content,
+            "agent_id": agent_id,
+            "tool_calls": tool_calls,
+            "parent_event_id": parent_event_id,
+            "namespace": namespace,
+            "extra_metadata": extra_metadata,
+            "embed": embed,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+        body["embed"] = embed  # always include embed flag
+
+        resp = await self.client.post("/interaction-events/", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return InteractionEventResult(
+            event_id=data["event_id"],
+            session_id=data["session_id"],
+            namespace=data["namespace"],
+            has_embedding=data["has_embedding"],
+        )
+
+    async def get_session_interactions(
+        self,
+        session_id: str,
+        *,
+        namespace: str = "default",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> SessionTimelineResult:
+        """Get interaction events for a session ordered by timestamp ASC."""
+        params = {"namespace": namespace, "limit": limit, "offset": offset}
+        resp = await self.client.get(f"/interaction-events/session/{session_id}", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        return SessionTimelineResult(
+            session_id=data["session_id"],
+            namespace=data["namespace"],
+            events=[_parse_interaction_event(e) for e in data["events"]],
+            count=data["count"],
+        )
+
+    async def get_agent_interactions(
+        self,
+        agent_id: str,
+        *,
+        namespace: str = "default",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> AgentInteractionsResult:
+        """Get interaction events for an agent ordered by timestamp DESC (most recent first)."""
+        params = {"namespace": namespace, "limit": limit, "offset": offset}
+        resp = await self.client.get(f"/interaction-events/agent/{agent_id}", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        return AgentInteractionsResult(
+            agent_id=data["agent_id"],
+            namespace=data["namespace"],
+            events=[_parse_interaction_event(e) for e in data["events"]],
+            count=data["count"],
+        )
+
+    async def search_interactions(
+        self,
+        query: str,
+        *,
+        namespace: str = "default",
+        session_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        top_k: int = 10,
+        min_score: float = 0.0,
+    ) -> InteractionSearchResult:
+        """
+        Semantic search over interaction events.
+
+        Only events created with embed=True are searchable.
+        """
+        body: Dict[str, Any] = {
+            "query": query,
+            "namespace": namespace,
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "top_k": top_k,
+            "min_score": min_score,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.post("/interaction-events/search", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return InteractionSearchResult(
+            results=[
+                InteractionSearchResultItem(
+                    event=_parse_interaction_event(r["event"]),
+                    score=r["score"],
+                )
+                for r in data["results"]
+            ],
+            query_time_ms=data["query_time_ms"],
+        )
+
+    async def get_interaction_chain(self, event_id: str) -> EventWithChainResult:
+        """Get an interaction event plus its full causal chain (root -> leaf)."""
+        resp = await self.client.get(f"/interaction-events/{event_id}")
+        resp.raise_for_status()
+        data = resp.json()
+        return EventWithChainResult(
+            event=_parse_interaction_event(data["event"]),
+            chain=[_parse_interaction_event(e) for e in data["chain"]],
+            chain_depth=data["chain_depth"],
+        )
+
+    # ---------- Security Operations (v2.0.0) ----------
+
+    async def scan_content(self, content: str, metadata: Optional[Dict] = None) -> ContentScanResult:
+        """Pre-scan content without storing. Check for PII, secrets, injection."""
+        resp = await self.client.post("/security/scan", json={
+            "content": content, "metadata": metadata,
+        })
+        resp.raise_for_status()
+        data = resp.json()
+        return ContentScanResult(
+            allowed=data["allowed"], action=data["action"],
+            flags=data["flags"], detections=data["detections"],
+        )
+
+    async def verify_integrity(self, memory_id: str) -> IntegrityCheckResult:
+        """Verify HMAC integrity of a stored memory."""
+        resp = await self.client.post(f"/security/verify/{memory_id}")
+        resp.raise_for_status()
+        data = resp.json()
+        return IntegrityCheckResult(
+            memory_id=data["memory_id"], integrity_valid=data["integrity_valid"],
+            has_hash=data["has_hash"], detail=data["detail"],
+        )
+
+    async def get_flagged_memories(self, *, namespace: str = "default", limit: int = 50) -> List[Memory]:
+        """List memories with security flags (PII, injection) pending review."""
+        resp = await self.client.get("/security/flagged",
+                                     params={"namespace": namespace, "limit": limit})
+        resp.raise_for_status()
+        return [_parse_memory_data(m) for m in resp.json().get("memories", [])]
+
+    async def get_security_audit(
+        self, *, event_type: Optional[str] = None,
+        start_time: Optional[str] = None, end_time: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[SecurityAuditEvent]:
+        """Query security audit trail."""
+        params: Dict[str, Any] = {"limit": limit}
+        if event_type:
+            params["event_type"] = event_type
+        if start_time:
+            params["start_time"] = start_time
+        if end_time:
+            params["end_time"] = end_time
+        resp = await self.client.get("/security/audit", params=params)
+        resp.raise_for_status()
+        return [SecurityAuditEvent(
+            event_id=e["event_id"], event_type=e["event_type"],
+            project_id=e["project_id"], agent_id=e.get("agent_id"),
+            memory_id=e.get("memory_id"), details=e.get("event_payload", {}),
+            created_at=e["created_at"],
+        ) for e in resp.json().get("events", [])]
+
+    async def get_security_config(self) -> Dict[str, Any]:
+        """Get current security configuration."""
+        resp = await self.client.get("/security/config")
+        resp.raise_for_status()
+        return resp.json()

@@ -446,38 +446,38 @@ class TestRoutePydanticModels:
     """Verify Pydantic request/response models."""
 
     def test_run_create_model(self):
-        from routes_ace import RunCreate
+        from api.routers.ace_runs import RunCreate
         body = RunCreate(run_id="run-1", agent_id="agent-1", task_type="debug")
         assert body.run_id == "run-1"
         assert body.namespace == "default"
 
     def test_run_complete_model(self):
-        from routes_ace import RunComplete
+        from api.routers.ace_runs import RunComplete
         body = RunComplete(success=True, evaluation={"score": 0.9})
         assert body.success is True
         assert body.auto_vote is True
         assert body.auto_reflect is True
 
     def test_run_complete_no_auto(self):
-        from routes_ace import RunComplete
+        from api.routers.ace_runs import RunComplete
         body = RunComplete(success=False, auto_vote=False, auto_reflect=False)
         assert body.auto_vote is False
         assert body.auto_reflect is False
 
     def test_agent_playbook_request(self):
-        from routes_ace import AgentPlaybookRequest
+        from api.routers.ace_curation import AgentPlaybookRequest
         body = AgentPlaybookRequest(query="pagination", agent_id="executor")
         assert body.task_type is None
         assert body.top_k == 20
 
     def test_curate_request(self):
-        from routes_ace import CurateRequest
+        from api.routers.ace_curation import CurateRequest
         body = CurateRequest(namespace="prod", agent_id="agent-1")
         assert body.top_k == 10
         assert body.min_effectiveness_threshold == -0.3
 
     def test_run_response_model(self):
-        from routes_ace import RunResponse
+        from api.routers.ace_runs import RunResponse
         now = datetime.now(timezone.utc)
         resp = RunResponse(
             run_id="r1", agent_id="a1", task_type="t1", namespace="ns",
@@ -488,7 +488,7 @@ class TestRoutePydanticModels:
         assert resp.status == "running"
 
     def test_curation_response_model(self):
-        from routes_ace import CurationResponse, CurationEntryResponse, ConsolidationCandidate
+        from api.routers.ace_curation import CurationResponse, CurationEntryResponse, ConsolidationCandidate
         resp = CurationResponse(
             promoted=[CurationEntryResponse(
                 id="m1", content="test", memory_type="strategy",
@@ -876,4 +876,4 @@ class TestExports:
 
     def test_version_bumped(self):
         from aegis_memory import __version__
-        assert __version__ == "1.3.1"
+        assert __version__ == "2.0.0"

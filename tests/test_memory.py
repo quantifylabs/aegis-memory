@@ -344,7 +344,7 @@ class TestExportMemories:
     def _load_export_route():
         if "/workspace/aegis-memory/server" not in sys.path:
             sys.path.insert(0, "/workspace/aegis-memory/server")
-        from routes import ExportRequest, export_memories
+        from api.routers.memories import ExportRequest, export_memories
         return ExportRequest, export_memories
 
     @staticmethod

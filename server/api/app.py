@@ -1,10 +1,8 @@
 """
-Aegis Memory API Application (v1.7.0+ modular entry point)
+Aegis Memory API Application
 
-This module provides the new modular FastAPI application using
-the decomposed router structure from api/routers/.
-
-The original main.py continues to work as a backward-compatible entry point.
+The modular FastAPI application using the decomposed router structure
+from api/routers/.
 """
 
 import importlib.metadata
@@ -20,11 +18,13 @@ from observability import ObservabilityMiddleware
 from observability_events import get_event_pipeline
 
 from api.routers import (
+    ace_curation,
     ace_delta,
     ace_eval,
     ace_features,
     ace_progress,
     ace_reflections,
+    ace_runs,
     ace_votes,
     dashboard,
     decay,
@@ -134,6 +134,8 @@ def create_app() -> FastAPI:
     app.include_router(ace_progress.router, prefix="/memories/ace", tags=["ACE"])
     app.include_router(ace_features.router, prefix="/memories/ace", tags=["ACE"])
     app.include_router(ace_eval.router, prefix="/memories/ace", tags=["ACE"])
+    app.include_router(ace_runs.router, prefix="/memories/ace", tags=["ACE"])
+    app.include_router(ace_curation.router, prefix="/memories/ace", tags=["ACE"])
 
     # Typed Memory (v1.9.0)
     app.include_router(typed_memory.router, prefix="/memories/typed", tags=["typed-memory"])

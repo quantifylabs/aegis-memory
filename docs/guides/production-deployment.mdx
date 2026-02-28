@@ -176,7 +176,7 @@ Production deployment requires significant infrastructure expertise. This guide 
     Type=simple
     User=aegis
     WorkingDirectory=/opt/aegis
-    ExecStart=/opt/aegis/bin/uvicorn server.main:app --host 0.0.0.0 --port 8000
+    ExecStart=/opt/aegis/bin/uvicorn server.api.app:modular_app --host 0.0.0.0 --port 8000
     Restart=always
     EnvironmentFile=/etc/aegis/environment
 

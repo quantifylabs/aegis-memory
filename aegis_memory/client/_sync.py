@@ -1,0 +1,1231 @@
+"""Aegis SDK synchronous client."""
+
+from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
+
+import httpx
+
+from ._models import (
+    AddResult,
+    ContentScanResult,
+    CurationResult,
+    DeltaResult,
+    DeltaResultItem,
+    Feature,
+    FeatureList,
+    HandoffBaton,
+    IntegrityCheckResult,
+    Memory,
+    PlaybookEntry,
+    PlaybookResult,
+    RunResult,
+    SecurityAuditEvent,
+    SessionProgress,
+    VoteResult,
+)
+from ._parsers import (
+    _parse_curation_data,
+    _parse_feature_data,
+    _parse_memory_data,
+    _parse_run_data,
+    _parse_session_data,
+)
+
+
+class AegisClient:
+    """
+    Aegis Memory API client with ACE enhancements.
+
+    Args:
+        api_key: API key for authentication
+        base_url: Base URL of the Aegis API (default: http://localhost:8000)
+        timeout: Request timeout in seconds (default: 30)
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "http://localhost:8000",
+        timeout: float = 30.0,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.client = httpx.Client(
+            base_url=self.base_url,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=timeout,
+        )
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.client.close()
+
+    def close(self):
+        """Close the client."""
+        self.client.close()
+
+    # ---------- Core Memory Operations ----------
+
+    def add(
+        self,
+        content: str,
+        *,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        namespace: str = "default",
+        metadata: Optional[Dict[str, Any]] = None,
+        ttl_seconds: Optional[int] = None,
+        scope: Optional[str] = None,
+        shared_with_agents: Optional[List[str]] = None,
+        derived_from_agents: Optional[List[str]] = None,
+        coordination_metadata: Optional[Dict[str, Any]] = None,
+    ) -> AddResult:
+        """
+        Add a single memory.
+
+        Args:
+            content: Memory content
+            user_id: Optional user ID
+            agent_id: Optional agent ID
+            namespace: Namespace (default: "default")
+            metadata: Optional metadata dict
+            ttl_seconds: Optional TTL in seconds
+            scope: Optional scope override (agent-private, agent-shared, global)
+            shared_with_agents: Optional list of agent IDs to share with
+            derived_from_agents: Optional list of source agent IDs
+            coordination_metadata: Optional coordination metadata
+
+        Returns:
+            AddResult with memory ID and dedup info
+        """
+        body = {
+            "content": content,
+            "user_id": user_id,
+            "agent_id": agent_id,
+            "namespace": namespace,
+            "metadata": metadata,
+            "ttl_seconds": ttl_seconds,
+            "scope": scope,
+            "shared_with_agents": shared_with_agents,
+            "derived_from_agents": derived_from_agents,
+            "coordination_metadata": coordination_metadata,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post("/memories/add", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        return AddResult(
+            id=data["id"],
+            deduped_from=data.get("deduped_from"),
+            inferred_scope=data.get("inferred_scope"),
+        )
+
+    def add_batch(
+        self,
+        items: List[Dict[str, Any]],
+    ) -> List[AddResult]:
+        """
+        Add multiple memories efficiently.
+
+        Args:
+            items: List of memory dicts with same fields as add()
+
+        Returns:
+            List of AddResult for each memory
+        """
+        resp = self.client.post("/memories/add_batch", json={"items": items})
+        resp.raise_for_status()
+        data = resp.json()
+
+        return [
+            AddResult(
+                id=r["id"],
+                deduped_from=r.get("deduped_from"),
+                inferred_scope=r.get("inferred_scope"),
+            )
+            for r in data["results"]
+        ]
+
+    def query(
+        self,
+        query: str,
+        *,
+        user_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        namespace: str = "default",
+        top_k: int = 10,
+        min_score: float = 0.0,
+        apply_decay: bool = False,
+    ) -> List[Memory]:
+        """
+        Semantic search over memories.
+
+        Args:
+            query: Search query
+            user_id: Optional user ID filter
+            agent_id: Optional agent ID filter
+            namespace: Namespace (default: "default")
+            top_k: Maximum results (default: 10)
+            min_score: Minimum similarity score (default: 0.0)
+            apply_decay: Re-rank results by semantic_score x decay_factor (default: False)
+
+        Returns:
+            List of matching memories with scores
+        """
+        body = {
+            "query": query,
+            "user_id": user_id,
+            "agent_id": agent_id,
+            "namespace": namespace,
+            "top_k": top_k,
+            "min_score": min_score,
+            "apply_decay": apply_decay,
+        }
+
+        resp = self.client.post("/memories/query", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        return [self._parse_memory(m) for m in data["memories"]]
+
+    def query_cross_agent(
+        self,
+        query: str,
+        requesting_agent_id: str,
+        *,
+        target_agent_ids: Optional[List[str]] = None,
+        user_id: Optional[str] = None,
+        namespace: str = "default",
+        top_k: int = 10,
+        min_score: float = 0.0,
+        apply_decay: bool = False,
+    ) -> List[Memory]:
+        """
+        Cross-agent semantic search with scope-aware access control.
+
+        Args:
+            query: Search query
+            requesting_agent_id: Agent making the request
+            target_agent_ids: Optional specific agents to search
+            user_id: Optional user ID filter
+            namespace: Namespace (default: "default")
+            top_k: Maximum results (default: 10)
+            min_score: Minimum similarity score (default: 0.0)
+            apply_decay: Re-rank results by semantic_score x decay_factor (default: False)
+
+        Returns:
+            List of accessible memories with scores
+        """
+        body = {
+            "query": query,
+            "requesting_agent_id": requesting_agent_id,
+            "target_agent_ids": target_agent_ids,
+            "user_id": user_id,
+            "namespace": namespace,
+            "top_k": top_k,
+            "min_score": min_score,
+            "apply_decay": apply_decay,
+        }
+
+        resp = self.client.post("/memories/query_cross_agent", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        return [self._parse_memory(m) for m in data["memories"]]
+
+    def get(self, memory_id: str) -> Memory:
+        """Get a memory by ID."""
+        resp = self.client.get(f"/memories/{memory_id}")
+        resp.raise_for_status()
+        return self._parse_memory(resp.json())
+
+    def delete(self, memory_id: str) -> bool:
+        """Delete a memory by ID."""
+        resp = self.client.delete(f"/memories/{memory_id}")
+        return resp.status_code == 204
+
+    def handoff(
+        self,
+        source_agent_id: str,
+        target_agent_id: str,
+        *,
+        namespace: str = "default",
+        user_id: Optional[str] = None,
+        task_context: Optional[str] = None,
+        max_memories: int = 20,
+    ) -> HandoffBaton:
+        """
+        Generate handoff baton for agent-to-agent state transfer.
+
+        Args:
+            source_agent_id: Agent handing off
+            target_agent_id: Agent receiving handoff
+            namespace: Namespace (default: "default")
+            user_id: Optional user ID
+            task_context: Optional task context for relevance ranking
+            max_memories: Maximum memories to include (default: 20)
+
+        Returns:
+            HandoffBaton with state transfer data
+        """
+        body = {
+            "source_agent_id": source_agent_id,
+            "target_agent_id": target_agent_id,
+            "namespace": namespace,
+            "user_id": user_id,
+            "task_context": task_context,
+            "max_memories": max_memories,
+        }
+
+        resp = self.client.post("/memories/handoff", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        return HandoffBaton(
+            source_agent_id=data["source_agent_id"],
+            target_agent_id=data["target_agent_id"],
+            namespace=data["namespace"],
+            user_id=data.get("user_id"),
+            task_context=data.get("task_context"),
+            summary=data.get("summary"),
+            active_tasks=data.get("active_tasks", []),
+            blocked_on=data.get("blocked_on", []),
+            recent_decisions=data.get("recent_decisions", []),
+            key_facts=data.get("key_facts", []),
+            memory_ids=data.get("memory_ids", []),
+        )
+
+    # ---------- ACE: Voting ----------
+
+    def vote(
+        self,
+        memory_id: str,
+        vote: Literal["helpful", "harmful"],
+        voter_agent_id: str,
+        *,
+        context: Optional[str] = None,
+        task_id: Optional[str] = None,
+    ) -> VoteResult:
+        """
+        Vote on a memory's usefulness.
+
+        ACE Pattern: Agents should vote on memories after using them
+        to enable self-improvement through playbook curation.
+
+        Args:
+            memory_id: ID of memory to vote on
+            vote: "helpful" or "harmful"
+            voter_agent_id: Agent casting the vote
+            context: Optional context explaining the vote
+            task_id: Optional task ID for tracking
+
+        Returns:
+            VoteResult with updated counters and effectiveness score
+        """
+        body = {
+            "vote": vote,
+            "voter_agent_id": voter_agent_id,
+            "context": context,
+            "task_id": task_id,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post(f"/memories/ace/vote/{memory_id}", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        return VoteResult(
+            memory_id=data["memory_id"],
+            bullet_helpful=data["bullet_helpful"],
+            bullet_harmful=data["bullet_harmful"],
+            effectiveness_score=data["effectiveness_score"],
+        )
+
+    # ---------- ACE: Delta Updates ----------
+
+    def apply_delta(
+        self,
+        operations: List[Dict[str, Any]],
+    ) -> DeltaResult:
+        """
+        Apply incremental delta updates to memories.
+
+        ACE Pattern: Never rewrite entire context. Instead use
+        incremental deltas that add, update, or deprecate memories.
+
+        Args:
+            operations: List of delta operations:
+                - {"type": "add", "content": "...", ...}
+                - {"type": "update", "memory_id": "...", "metadata_patch": {...}}
+                - {"type": "deprecate", "memory_id": "...", "superseded_by": "..."}
+
+        Returns:
+            DeltaResult with results for each operation
+        """
+        resp = self.client.post("/memories/ace/delta", json={"operations": operations})
+        resp.raise_for_status()
+        data = resp.json()
+
+        return DeltaResult(
+            results=[
+                DeltaResultItem(
+                    operation=r["operation"],
+                    success=r["success"],
+                    memory_id=r.get("memory_id"),
+                    error=r.get("error"),
+                )
+                for r in data["results"]
+            ],
+            total_time_ms=data["total_time_ms"],
+        )
+
+    def add_delta(
+        self,
+        content: str,
+        *,
+        memory_type: str = "standard",
+        agent_id: Optional[str] = None,
+        namespace: str = "default",
+        scope: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Convenience method to add a single memory via delta.
+
+        Returns:
+            Memory ID of created memory
+        """
+        result = self.apply_delta([{
+            "type": "add",
+            "content": content,
+            "memory_type": memory_type,
+            "agent_id": agent_id,
+            "namespace": namespace,
+            "scope": scope,
+            "metadata": metadata,
+        }])
+
+        if result.results[0].success:
+            return result.results[0].memory_id
+        raise Exception(
+            f"Delta add failed: {result.results[0].error}. "
+            f"Check that the server is running and the content is valid."
+        )
+
+    def deprecate(
+        self,
+        memory_id: str,
+        *,
+        agent_id: Optional[str] = None,
+        superseded_by: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> bool:
+        """
+        Deprecate a memory (soft delete).
+
+        ACE Pattern: Preserve history by deprecating instead of deleting.
+        Deprecated memories are excluded from queries but kept for audit.
+
+        Returns:
+            True if successful
+        """
+        result = self.apply_delta([{
+            "type": "deprecate",
+            "memory_id": memory_id,
+            "agent_id": agent_id,
+            "superseded_by": superseded_by,
+            "deprecation_reason": reason,
+        }])
+
+        return result.results[0].success
+
+    # ---------- ACE: Reflections ----------
+
+    def add_reflection(
+        self,
+        content: str,
+        agent_id: str,
+        *,
+        user_id: Optional[str] = None,
+        namespace: str = "default",
+        source_trajectory_id: Optional[str] = None,
+        error_pattern: Optional[str] = None,
+        correct_approach: Optional[str] = None,
+        applicable_contexts: Optional[List[str]] = None,
+        scope: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """
+        Create a reflection memory from trajectory analysis.
+
+        ACE Pattern: The Reflector extracts insights from successes
+        and failures. These reflections help future tasks.
+
+        Args:
+            content: The reflection/insight
+            agent_id: Agent that generated the reflection
+            user_id: Optional user ID
+            namespace: Namespace (default: "default")
+            source_trajectory_id: ID of source task/trajectory
+            error_pattern: Categorized error type
+            correct_approach: What should have been done
+            applicable_contexts: When this reflection applies
+            scope: Scope override (defaults to global)
+            metadata: Additional metadata
+
+        Returns:
+            Memory ID of created reflection
+        """
+        body = {
+            "content": content,
+            "agent_id": agent_id,
+            "user_id": user_id,
+            "namespace": namespace,
+            "source_trajectory_id": source_trajectory_id,
+            "error_pattern": error_pattern,
+            "correct_approach": correct_approach,
+            "applicable_contexts": applicable_contexts,
+            "scope": scope,
+            "metadata": metadata,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post("/memories/ace/reflection", json=body)
+        resp.raise_for_status()
+        return resp.json()["id"]
+
+    # ---------- ACE: Playbook ----------
+
+    def query_playbook(
+        self,
+        query: str,
+        agent_id: str,
+        *,
+        namespace: str = "default",
+        include_types: Optional[List[str]] = None,
+        top_k: int = 20,
+        min_effectiveness: float = -1.0,
+    ) -> PlaybookResult:
+        """
+        Query playbook for relevant strategies and reflections.
+
+        ACE Pattern: Before starting a task, consult the playbook
+        for strategies, past mistakes to avoid, and proven approaches.
+
+        Args:
+            query: Task description or context
+            agent_id: Agent making the query
+            namespace: Namespace (default: "default")
+            include_types: Memory types to include (default: strategy, reflection)
+            top_k: Maximum entries (default: 20)
+            min_effectiveness: Minimum effectiveness score (default: -1.0)
+
+        Returns:
+            PlaybookResult with ranked entries
+        """
+        body = {
+            "query": query,
+            "agent_id": agent_id,
+            "namespace": namespace,
+            "include_types": include_types or ["strategy", "reflection"],
+            "top_k": top_k,
+            "min_effectiveness": min_effectiveness,
+        }
+
+        resp = self.client.post("/memories/ace/playbook", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        return PlaybookResult(
+            entries=[
+                PlaybookEntry(
+                    id=e["id"],
+                    content=e["content"],
+                    memory_type=e["memory_type"],
+                    effectiveness_score=e["effectiveness_score"],
+                    bullet_helpful=e["bullet_helpful"],
+                    bullet_harmful=e["bullet_harmful"],
+                    error_pattern=e.get("error_pattern"),
+                    created_at=datetime.fromisoformat(e["created_at"].replace("Z", "+00:00")),
+                )
+                for e in data["entries"]
+            ],
+            query_time_ms=data["query_time_ms"],
+        )
+
+    # ---------- ACE: Session Progress ----------
+
+    def create_session(
+        self,
+        session_id: str,
+        *,
+        agent_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        namespace: str = "default",
+    ) -> SessionProgress:
+        """
+        Create a new session for progress tracking.
+
+        Anthropic Pattern: Enables agents to quickly understand
+        state when starting with fresh context.
+
+        Args:
+            session_id: Unique session identifier
+            agent_id: Optional agent ID
+            user_id: Optional user ID
+            namespace: Namespace (default: "default")
+
+        Returns:
+            SessionProgress with initial state
+        """
+        body = {
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "user_id": user_id,
+            "namespace": namespace,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post("/memories/ace/session", json=body)
+        resp.raise_for_status()
+        return self._parse_session(resp.json())
+
+    def get_session(self, session_id: str) -> SessionProgress:
+        """Get session progress by ID."""
+        resp = self.client.get(f"/memories/ace/session/{session_id}")
+        resp.raise_for_status()
+        return self._parse_session(resp.json())
+
+    def update_session(
+        self,
+        session_id: str,
+        *,
+        completed_items: Optional[List[str]] = None,
+        in_progress_item: Optional[str] = None,
+        next_items: Optional[List[str]] = None,
+        blocked_items: Optional[List[Dict[str, str]]] = None,
+        summary: Optional[str] = None,
+        last_action: Optional[str] = None,
+        status: Optional[str] = None,
+        total_items: Optional[int] = None,
+    ) -> SessionProgress:
+        """
+        Update session progress.
+
+        Args:
+            session_id: Session to update
+            completed_items: Items to mark complete
+            in_progress_item: Current work item
+            next_items: Prioritized queue
+            blocked_items: Blocked items with reasons
+            summary: Human-readable summary
+            last_action: Last action taken
+            status: Session status (active, paused, completed, failed)
+            total_items: Total items in session
+
+        Returns:
+            Updated SessionProgress
+        """
+        body = {
+            "completed_items": completed_items,
+            "in_progress_item": in_progress_item,
+            "next_items": next_items,
+            "blocked_items": blocked_items,
+            "summary": summary,
+            "last_action": last_action,
+            "status": status,
+            "total_items": total_items,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.patch(f"/memories/ace/session/{session_id}", json=body)
+        resp.raise_for_status()
+        return self._parse_session(resp.json())
+
+    def mark_complete(self, session_id: str, item: str) -> SessionProgress:
+        """Convenience method to mark an item complete."""
+        return self.update_session(session_id, completed_items=[item])
+
+    def set_in_progress(self, session_id: str, item: str) -> SessionProgress:
+        """Convenience method to set current work item."""
+        return self.update_session(session_id, in_progress_item=item)
+
+    # ---------- ACE: Feature Tracking ----------
+
+    def create_feature(
+        self,
+        feature_id: str,
+        description: str,
+        *,
+        session_id: Optional[str] = None,
+        namespace: str = "default",
+        category: Optional[str] = None,
+        test_steps: Optional[List[str]] = None,
+    ) -> Feature:
+        """
+        Create a feature to track.
+
+        Anthropic Pattern: Feature lists with pass/fail status
+        prevent agents from declaring victory prematurely.
+
+        Args:
+            feature_id: Unique feature identifier
+            description: Feature description
+            session_id: Optional session to link
+            namespace: Namespace (default: "default")
+            category: Feature category
+            test_steps: Verification steps
+
+        Returns:
+            Created Feature
+        """
+        body = {
+            "feature_id": feature_id,
+            "description": description,
+            "session_id": session_id,
+            "namespace": namespace,
+            "category": category,
+            "test_steps": test_steps,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post("/memories/ace/feature", json=body)
+        resp.raise_for_status()
+        return self._parse_feature(resp.json())
+
+    def get_feature(self, feature_id: str, namespace: str = "default") -> Feature:
+        """Get feature by ID."""
+        resp = self.client.get(
+            f"/memories/ace/feature/{feature_id}",
+            params={"namespace": namespace}
+        )
+        resp.raise_for_status()
+        return self._parse_feature(resp.json())
+
+    def update_feature(
+        self,
+        feature_id: str,
+        *,
+        namespace: str = "default",
+        status: Optional[str] = None,
+        passes: Optional[bool] = None,
+        implemented_by: Optional[str] = None,
+        verified_by: Optional[str] = None,
+        implementation_notes: Optional[str] = None,
+        failure_reason: Optional[str] = None,
+    ) -> Feature:
+        """
+        Update feature status.
+
+        Only mark passes=True after proper verification!
+
+        Args:
+            feature_id: Feature to update
+            namespace: Namespace
+            status: New status
+            passes: Whether feature passes verification
+            implemented_by: Agent that implemented
+            verified_by: Agent that verified
+            implementation_notes: Implementation notes
+            failure_reason: Reason for failure
+
+        Returns:
+            Updated Feature
+        """
+        body = {
+            "status": status,
+            "passes": passes,
+            "implemented_by": implemented_by,
+            "verified_by": verified_by,
+            "implementation_notes": implementation_notes,
+            "failure_reason": failure_reason,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.patch(
+            f"/memories/ace/feature/{feature_id}",
+            params={"namespace": namespace},
+            json=body
+        )
+        resp.raise_for_status()
+        return self._parse_feature(resp.json())
+
+    def mark_feature_complete(
+        self,
+        feature_id: str,
+        verified_by: str,
+        *,
+        namespace: str = "default",
+        notes: Optional[str] = None,
+    ) -> Feature:
+        """Convenience method to mark feature as passing."""
+        return self.update_feature(
+            feature_id,
+            namespace=namespace,
+            status="complete",
+            passes=True,
+            verified_by=verified_by,
+            implementation_notes=notes,
+        )
+
+    def mark_feature_failed(
+        self,
+        feature_id: str,
+        reason: str,
+        *,
+        namespace: str = "default",
+    ) -> Feature:
+        """Convenience method to mark feature as failed."""
+        return self.update_feature(
+            feature_id,
+            namespace=namespace,
+            status="failed",
+            passes=False,
+            failure_reason=reason,
+        )
+
+    def list_features(
+        self,
+        *,
+        namespace: str = "default",
+        session_id: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> FeatureList:
+        """
+        List all features with status summary.
+
+        Use at session start to see what's complete and what needs work.
+
+        Args:
+            namespace: Namespace
+            session_id: Optional session filter
+            status: Optional status filter
+
+        Returns:
+            FeatureList with features and summary
+        """
+        params = {"namespace": namespace}
+        if session_id:
+            params["session_id"] = session_id
+        if status:
+            params["status"] = status
+
+        resp = self.client.get("/memories/ace/features", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+
+        return FeatureList(
+            features=[self._parse_feature(f) for f in data["features"]],
+            total=data["total"],
+            passing=data["passing"],
+            failing=data["failing"],
+            in_progress=data["in_progress"],
+        )
+
+    # ---------- ACE: Run Tracking ----------
+
+    def start_run(
+        self,
+        run_id: str,
+        agent_id: Optional[str] = None,
+        *,
+        task_type: Optional[str] = None,
+        namespace: str = "default",
+        memory_ids_used: Optional[List[str]] = None,
+    ) -> RunResult:
+        """
+        Start tracking an agent run.
+
+        ACE Loop: Records which memories are being used for the current
+        task execution. Complete later with complete_run().
+        """
+        body: Dict[str, Any] = {
+            "run_id": run_id,
+            "agent_id": agent_id,
+            "task_type": task_type,
+            "namespace": namespace,
+            "memory_ids_used": memory_ids_used,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post("/memories/ace/run", json=body)
+        resp.raise_for_status()
+        return _parse_run_data(resp.json())
+
+    def complete_run(
+        self,
+        run_id: str,
+        *,
+        success: bool,
+        evaluation: Optional[Dict[str, Any]] = None,
+        logs: Optional[Dict[str, Any]] = None,
+        auto_vote: bool = True,
+        auto_reflect: bool = True,
+    ) -> RunResult:
+        """
+        Complete a run with auto-feedback.
+
+        ACE Loop: On completion, automatically:
+        - Votes on memories used (helpful on success, harmful on failure)
+        - Creates reflection memories on failure
+        """
+        body: Dict[str, Any] = {
+            "success": success,
+            "evaluation": evaluation,
+            "logs": logs,
+            "auto_vote": auto_vote,
+            "auto_reflect": auto_reflect,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post(f"/memories/ace/run/{run_id}/complete", json=body)
+        resp.raise_for_status()
+        return _parse_run_data(resp.json())
+
+    def get_run(self, run_id: str) -> RunResult:
+        """Get run details by run_id."""
+        resp = self.client.get(f"/memories/ace/run/{run_id}")
+        resp.raise_for_status()
+        return _parse_run_data(resp.json())
+
+    def get_playbook_for_agent(
+        self,
+        agent_id: str,
+        *,
+        query: str = "general task strategies",
+        task_type: Optional[str] = None,
+        namespace: str = "default",
+        top_k: int = 20,
+        min_effectiveness: float = -1.0,
+    ) -> PlaybookResult:
+        """
+        Get playbook entries filtered by agent_id and optional task_type.
+
+        ACE Loop: Before starting a task, query agent-specific strategies
+        that have been validated by past runs.
+        """
+        body: Dict[str, Any] = {
+            "query": query,
+            "agent_id": agent_id,
+            "task_type": task_type,
+            "namespace": namespace,
+            "top_k": top_k,
+            "min_effectiveness": min_effectiveness,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post("/memories/ace/playbook/agent", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        return PlaybookResult(
+            entries=[
+                PlaybookEntry(
+                    id=e["id"],
+                    content=e["content"],
+                    memory_type=e["memory_type"],
+                    effectiveness_score=e["effectiveness_score"],
+                    bullet_helpful=e["bullet_helpful"],
+                    bullet_harmful=e["bullet_harmful"],
+                    error_pattern=e.get("error_pattern"),
+                    created_at=datetime.fromisoformat(e["created_at"].replace("Z", "+00:00")),
+                )
+                for e in data["entries"]
+            ],
+            query_time_ms=data["query_time_ms"],
+        )
+
+    def curate(
+        self,
+        *,
+        namespace: str = "default",
+        agent_id: Optional[str] = None,
+        top_k: int = 10,
+        min_effectiveness_threshold: float = -0.3,
+    ) -> CurationResult:
+        """
+        Trigger a curation cycle.
+
+        ACE Loop: Identifies effective entries to promote, ineffective
+        entries to flag, and similar entries to consolidate.
+        """
+        body: Dict[str, Any] = {
+            "namespace": namespace,
+            "agent_id": agent_id,
+            "top_k": top_k,
+            "min_effectiveness_threshold": min_effectiveness_threshold,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post("/memories/ace/curate", json=body)
+        resp.raise_for_status()
+        return _parse_curation_data(resp.json())
+
+    # ---------- Interaction Events ----------
+
+    def record_interaction(
+        self,
+        session_id: str,
+        content: str,
+        *,
+        agent_id: Optional[str] = None,
+        tool_calls: Optional[List[Dict[str, Any]]] = None,
+        parent_event_id: Optional[str] = None,
+        namespace: str = "default",
+        extra_metadata: Optional[Dict[str, Any]] = None,
+        embed: bool = False,
+    ) -> "InteractionEventResult":
+        """
+        Record an interaction event for a session.
+
+        Set embed=True to generate a vector embedding for later semantic search.
+        Link events causally by setting parent_event_id to a prior event's ID.
+        """
+        from ._models import InteractionEventResult
+
+        body: Dict[str, Any] = {
+            "session_id": session_id,
+            "content": content,
+            "agent_id": agent_id,
+            "tool_calls": tool_calls,
+            "parent_event_id": parent_event_id,
+            "namespace": namespace,
+            "extra_metadata": extra_metadata,
+            "embed": embed,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+        body["embed"] = embed  # always include embed flag
+
+        resp = self.client.post("/interaction-events/", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return InteractionEventResult(
+            event_id=data["event_id"],
+            session_id=data["session_id"],
+            namespace=data["namespace"],
+            has_embedding=data["has_embedding"],
+        )
+
+    def get_session_interactions(
+        self,
+        session_id: str,
+        *,
+        namespace: str = "default",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> "SessionTimelineResult":
+        """Get interaction events for a session ordered by timestamp ASC."""
+        from ._models import SessionTimelineResult
+        from ._parsers import _parse_interaction_event
+
+        params = {"namespace": namespace, "limit": limit, "offset": offset}
+        resp = self.client.get(f"/interaction-events/session/{session_id}", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        return SessionTimelineResult(
+            session_id=data["session_id"],
+            namespace=data["namespace"],
+            events=[_parse_interaction_event(e) for e in data["events"]],
+            count=data["count"],
+        )
+
+    def get_agent_interactions(
+        self,
+        agent_id: str,
+        *,
+        namespace: str = "default",
+        limit: int = 100,
+        offset: int = 0,
+    ) -> "AgentInteractionsResult":
+        """Get interaction events for an agent ordered by timestamp DESC (most recent first)."""
+        from ._models import AgentInteractionsResult
+        from ._parsers import _parse_interaction_event
+
+        params = {"namespace": namespace, "limit": limit, "offset": offset}
+        resp = self.client.get(f"/interaction-events/agent/{agent_id}", params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        return AgentInteractionsResult(
+            agent_id=data["agent_id"],
+            namespace=data["namespace"],
+            events=[_parse_interaction_event(e) for e in data["events"]],
+            count=data["count"],
+        )
+
+    def search_interactions(
+        self,
+        query: str,
+        *,
+        namespace: str = "default",
+        session_id: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        top_k: int = 10,
+        min_score: float = 0.0,
+    ) -> "InteractionSearchResult":
+        """
+        Semantic search over interaction events.
+
+        Only events created with embed=True are searchable.
+        """
+        from ._models import InteractionSearchResult, InteractionSearchResultItem
+        from ._parsers import _parse_interaction_event
+
+        body: Dict[str, Any] = {
+            "query": query,
+            "namespace": namespace,
+            "session_id": session_id,
+            "agent_id": agent_id,
+            "top_k": top_k,
+            "min_score": min_score,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.post("/interaction-events/search", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+        return InteractionSearchResult(
+            results=[
+                InteractionSearchResultItem(
+                    event=_parse_interaction_event(r["event"]),
+                    score=r["score"],
+                )
+                for r in data["results"]
+            ],
+            query_time_ms=data["query_time_ms"],
+        )
+
+    def get_interaction_chain(self, event_id: str) -> "EventWithChainResult":
+        """Get an interaction event plus its full causal chain (root -> leaf)."""
+        from ._models import EventWithChainResult
+        from ._parsers import _parse_interaction_event
+
+        resp = self.client.get(f"/interaction-events/{event_id}")
+        resp.raise_for_status()
+        data = resp.json()
+        return EventWithChainResult(
+            event=_parse_interaction_event(data["event"]),
+            chain=[_parse_interaction_event(e) for e in data["chain"]],
+            chain_depth=data["chain_depth"],
+        )
+
+    # ---------- Security Operations (v2.0.0) ----------
+
+    def scan_content(self, content: str, metadata: Optional[Dict] = None) -> ContentScanResult:
+        """Pre-scan content without storing. Check for PII, secrets, injection."""
+        resp = self.client.post("/security/scan", json={
+            "content": content, "metadata": metadata,
+        })
+        resp.raise_for_status()
+        data = resp.json()
+        return ContentScanResult(
+            allowed=data["allowed"], action=data["action"],
+            flags=data["flags"], detections=data["detections"],
+        )
+
+    def verify_integrity(self, memory_id: str) -> IntegrityCheckResult:
+        """Verify HMAC integrity of a stored memory."""
+        resp = self.client.post(f"/security/verify/{memory_id}")
+        resp.raise_for_status()
+        data = resp.json()
+        return IntegrityCheckResult(
+            memory_id=data["memory_id"], integrity_valid=data["integrity_valid"],
+            has_hash=data["has_hash"], detail=data["detail"],
+        )
+
+    def get_flagged_memories(self, *, namespace: str = "default", limit: int = 50) -> List[Memory]:
+        """List memories with security flags (PII, injection) pending review."""
+        resp = self.client.get("/security/flagged",
+                               params={"namespace": namespace, "limit": limit})
+        resp.raise_for_status()
+        return [self._parse_memory(m) for m in resp.json().get("memories", [])]
+
+    def get_security_audit(
+        self, *, event_type: Optional[str] = None,
+        start_time: Optional[str] = None, end_time: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[SecurityAuditEvent]:
+        """Query security audit trail."""
+        params: Dict[str, Any] = {"limit": limit}
+        if event_type:
+            params["event_type"] = event_type
+        if start_time:
+            params["start_time"] = start_time
+        if end_time:
+            params["end_time"] = end_time
+        resp = self.client.get("/security/audit", params=params)
+        resp.raise_for_status()
+        return [SecurityAuditEvent(
+            event_id=e["event_id"], event_type=e["event_type"],
+            project_id=e["project_id"], agent_id=e.get("agent_id"),
+            memory_id=e.get("memory_id"), details=e.get("event_payload", {}),
+            created_at=e["created_at"],
+        ) for e in resp.json().get("events", [])]
+
+    def get_security_config(self) -> Dict[str, Any]:
+        """Get current security configuration."""
+        resp = self.client.get("/security/config")
+        resp.raise_for_status()
+        return resp.json()
+
+    # ---------- Export ----------
+
+    def export_json(
+        self,
+        output_path: str,
+        *,
+        namespace: Optional[str] = None,
+        agent_id: Optional[str] = None,
+        include_embeddings: bool = False,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Export memories to a JSON file.
+
+        Args:
+            output_path: Path to write the JSON file
+            namespace: Optional namespace filter
+            agent_id: Optional agent ID filter
+            include_embeddings: Include embedding vectors (default: False)
+            limit: Maximum number of memories to export
+
+        Returns:
+            Export stats dict with total_exported, namespaces, and agents
+
+        Example:
+            stats = client.export_json("backup.json", namespace="production")
+            print(f"Exported {stats['total_exported']} memories")
+        """
+        import json
+
+        body: Dict[str, Any] = {"format": "json"}
+        if namespace:
+            body["namespace"] = namespace
+        if agent_id:
+            body["agent_id"] = agent_id
+        if include_embeddings:
+            body["include_embeddings"] = True
+        if limit:
+            body["limit"] = limit
+
+        resp = self.client.post("/memories/export", json=body)
+        resp.raise_for_status()
+        data = resp.json()
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, default=str, ensure_ascii=False)
+
+        return data.get("stats", {"total_exported": len(data.get("memories", []))})
+
+    # ---------- Helpers ----------
+
+    def _parse_memory(self, data: Dict) -> Memory:
+        return _parse_memory_data(data)
+
+    def _parse_session(self, data: Dict) -> SessionProgress:
+        return _parse_session_data(data)
+
+    def _parse_feature(self, data: Dict) -> Feature:
+        return _parse_feature_data(data)

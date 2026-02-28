@@ -363,8 +363,8 @@ class TestBackwardCompatibility:
         assert "sequence_number" in fields
 
     def test_memory_out_includes_new_fields_in_legacy_routes(self):
-        """MemoryOut in routes.py should include typed memory fields."""
-        from routes import MemoryOut
+        """MemoryOut in memories router should include typed memory fields."""
+        from api.routers.memories import MemoryOut
         fields = MemoryOut.model_fields
         assert "memory_type" in fields
         assert "session_id" in fields
@@ -384,8 +384,8 @@ class TestBackwardCompatibility:
         assert q.memory_types is None
 
     def test_legacy_memory_query_supports_memory_types(self):
-        """MemoryQuery in routes.py should accept memory_types."""
-        from routes import MemoryQuery
+        """MemoryQuery in memories router should accept memory_types."""
+        from api.routers.memories import MemoryQuery
         q = MemoryQuery(query="test", memory_types=["standard"])
         assert q.memory_types == ["standard"]
 
