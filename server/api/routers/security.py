@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from api.dependencies.auth import AuthContext, get_auth_context
 from api.dependencies.database import get_db, get_read_db
 from config import get_settings
-from content_security import ContentSecurityScanner
+from content_security import ContentSecurityScanner, InjectionClassifier
 from event_repository import EventRepository
 from integrity import verify_integrity
 from memory_repository import MemoryRepository
@@ -33,6 +33,15 @@ from trust_levels import TrustPolicy
 router = APIRouter()
 settings = get_settings()
 scanner = ContentSecurityScanner(settings)
+
+if settings.enable_llm_injection_classifier:
+    from aegis_memory.extractors import AnthropicAdapter, OpenAIAdapter
+    _sec_api_key = settings.injection_classifier_api_key or settings.openai_api_key
+    if settings.injection_classifier_provider == "openai":
+        _sec_adapter = OpenAIAdapter(api_key=_sec_api_key, model=settings.injection_classifier_model)
+    else:
+        _sec_adapter = AnthropicAdapter(api_key=_sec_api_key, model=settings.injection_classifier_model)
+    scanner.set_classifier(InjectionClassifier(_sec_adapter, threshold=settings.injection_classifier_confidence_threshold))
 
 SECURITY_EVENT_TYPES = [
     MemoryEventType.SECURITY_FLAGGED.value,
@@ -85,6 +94,7 @@ class SecurityConfigResponse(BaseModel):
     per_agent_rate_limit_per_hour: int
     agent_memory_limit: int
     enable_trust_levels: bool
+    llm_classifier_enabled: bool = False
 
 
 class AuditEventOut(BaseModel):
@@ -242,6 +252,7 @@ async def get_security_config(auth: AuthContext = Depends(require_admin)):
         per_agent_rate_limit_per_hour=settings.per_agent_rate_limit_per_hour,
         agent_memory_limit=settings.agent_memory_limit,
         enable_trust_levels=settings.enable_trust_levels,
+        llm_classifier_enabled=settings.enable_llm_injection_classifier,
     )
 
 
@@ -251,7 +262,7 @@ async def scan_content(
     auth: AuthContext = Depends(require_admin),
 ):
     """Dry-run content scan without storing. For client-side pre-validation."""
-    verdict = scanner.scan(body.content, body.metadata)
+    verdict = await scanner.scan_async(body.content, body.metadata, trust_level="system", scope="global")
     return ScanResponse(
         allowed=verdict.allowed,
         action=verdict.action.value,

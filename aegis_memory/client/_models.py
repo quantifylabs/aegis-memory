@@ -35,6 +35,7 @@ class ContentScanResult:
     action: str
     flags: List[str]
     detections: List[Dict[str, Any]]
+    llm_checked: bool = False
 
 
 @dataclass

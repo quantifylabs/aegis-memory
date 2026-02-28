@@ -24,12 +24,21 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporal_decay import compute_relevance_score
 from config import get_settings
-from content_security import ContentSecurityScanner
+from content_security import ContentSecurityScanner, InjectionClassifier
 from integrity import compute_integrity_hash
 
 router = APIRouter()
 _settings = get_settings()
 _scanner = ContentSecurityScanner(_settings)
+
+if _settings.enable_llm_injection_classifier:
+    from aegis_memory.extractors import AnthropicAdapter, OpenAIAdapter
+    _cls_api_key = _settings.injection_classifier_api_key or _settings.openai_api_key
+    if _settings.injection_classifier_provider == "openai":
+        _cls_adapter = OpenAIAdapter(api_key=_cls_api_key, model=_settings.injection_classifier_model)
+    else:
+        _cls_adapter = AnthropicAdapter(api_key=_cls_api_key, model=_settings.injection_classifier_model)
+    _scanner.set_classifier(InjectionClassifier(_cls_adapter, threshold=_settings.injection_classifier_confidence_threshold))
 
 
 # ---------- Request/Response Models ----------
@@ -181,8 +190,12 @@ async def add_memory(body: MemoryCreate, project_id: str = Depends(check_rate_li
                 record_operation(OperationNames.MEMORY_ADD, "success")
                 return AddResult(id=existing.id, deduped_from=existing.id)
 
-            # Content security scan
-            verdict = _scanner.scan(body.content, body.metadata)
+            # Content security scan (Stages 1-4)
+            verdict = await _scanner.scan_async(
+                body.content, body.metadata,
+                trust_level="internal",
+                scope=body.scope or "agent-private",
+            )
             if not verdict.allowed:
                 await _emit(db, project_id=project_id, namespace=body.namespace, event_type=MemoryEventType.SECURITY_REJECTED.value, payload={"flags": verdict.flags, "detections": [d.detection_type.value for d in verdict.detections]})
                 raise HTTPException(status_code=422, detail=f"Content rejected by security policy: {verdict.flags}")
@@ -226,13 +239,26 @@ async def add_memory_batch(body: MemoryCreateBatch, project_id: str = Depends(ch
     results = []
     to_insert = []
     for i, item in enumerate(body.items):
-        hash_val = content_hash(item.content)
+        # Content security scan (Stages 1-4)
+        verdict = await _scanner.scan_async(
+            item.content, item.metadata,
+            trust_level="internal",
+            scope=item.scope or "agent-private",
+        )
+        if not verdict.allowed:
+            await _emit(db, project_id=project_id, namespace=item.namespace, event_type=MemoryEventType.SECURITY_REJECTED.value, payload={"flags": verdict.flags, "detections": [d.detection_type.value for d in verdict.detections], "source": "add_batch"})
+            raise HTTPException(status_code=422, detail=f"Batch item {i} rejected by security policy: {verdict.flags}")
+        if verdict.flags:
+            await _emit(db, project_id=project_id, namespace=item.namespace, event_type=MemoryEventType.SECURITY_FLAGGED.value, payload={"flags": verdict.flags, "source": "add_batch"})
+        content_to_store = verdict.content
+
+        hash_val = content_hash(content_to_store)
         existing = await MemoryRepository.find_duplicates(db, content_hash=hash_val, project_id=project_id, namespace=item.namespace, user_id=item.user_id, agent_id=item.agent_id)
         if existing:
             results.append(AddResult(id=existing.id, deduped_from=existing.id))
             continue
-        resolved_scope = ScopeInference.infer_scope(content=item.content, explicit_scope=item.scope, agent_id=item.agent_id, metadata=item.metadata or {})
-        to_insert.append({"project_id": project_id, "content": item.content, "embedding": embeddings[i], "user_id": item.user_id, "agent_id": item.agent_id, "namespace": item.namespace, "metadata": item.metadata, "ttl_seconds": item.ttl_seconds, "scope": resolved_scope.value, "shared_with_agents": item.shared_with_agents, "derived_from_agents": item.derived_from_agents, "coordination_metadata": item.coordination_metadata})
+        resolved_scope = ScopeInference.infer_scope(content=content_to_store, explicit_scope=item.scope, agent_id=item.agent_id, metadata=item.metadata or {})
+        to_insert.append({"project_id": project_id, "content": content_to_store, "embedding": embeddings[i], "user_id": item.user_id, "agent_id": item.agent_id, "namespace": item.namespace, "metadata": item.metadata, "ttl_seconds": item.ttl_seconds, "scope": resolved_scope.value, "shared_with_agents": item.shared_with_agents, "derived_from_agents": item.derived_from_agents, "coordination_metadata": item.coordination_metadata, "content_flags": verdict.flags})
         results.append(None)
     if to_insert:
         memories = await MemoryRepository.add_batch(db, to_insert)

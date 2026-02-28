@@ -99,6 +99,14 @@ class Settings(BaseSettings):
     content_policy_pii: str = Field(default="flag", alias="CONTENT_POLICY_PII")
     content_policy_secrets: str = Field(default="reject", alias="CONTENT_POLICY_SECRETS")
     content_policy_injection: str = Field(default="flag", alias="CONTENT_POLICY_INJECTION")
+
+    # ---------- LLM Injection Classifier (Stage 4) ----------
+    enable_llm_injection_classifier: bool = Field(default=False, alias="ENABLE_LLM_INJECTION_CLASSIFIER")
+    injection_classifier_provider: str = Field(default="openai", alias="INJECTION_CLASSIFIER_PROVIDER")
+    injection_classifier_model: str = Field(default="gpt-4o-mini", alias="INJECTION_CLASSIFIER_MODEL")
+    injection_classifier_api_key: str | None = Field(default=None, alias="INJECTION_CLASSIFIER_API_KEY")
+    injection_classifier_confidence_threshold: float = Field(default=0.7, alias="INJECTION_CLASSIFIER_CONFIDENCE_THRESHOLD")
+
     enable_integrity_check: bool = Field(default=True, alias="ENABLE_INTEGRITY_CHECK")
     per_agent_rate_limit_per_minute: int = Field(default=30, alias="PER_AGENT_RATE_LIMIT_PER_MINUTE")
     per_agent_rate_limit_per_hour: int = Field(default=500, alias="PER_AGENT_RATE_LIMIT_PER_HOUR")
