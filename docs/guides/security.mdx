@@ -18,7 +18,7 @@ Memory is the attack surface. Aegis implements [OWASP AI Agent Security Cheat Sh
 
 ## Content Security Pipeline
 
-Every memory write passes through a three-stage content security pipeline before persistence.
+Every memory write passes through a four-stage content security pipeline before persistence.
 
 ### Stage 1: Input Validation
 
@@ -42,6 +42,31 @@ Detects common injection patterns:
 - System prompt overrides: "ignore previous instructions", "you are now", "new instructions"
 - Role manipulation: "pretend you are", "act as", "you must now"
 - Data exfiltration triggers: "send data to", "exfiltrate", "forward to" with URLs
+
+### Stage 4: LLM-Based Injection Classification (Optional)
+
+When enabled, an LLM classifier runs as an async second opinion after regex detection. Stage 4 only fires when the risk warrants the latency/cost:
+
+- **Untrusted or unknown** trust level
+- **Agent-shared or global** scope
+- Content that was **regex-flagged but not rejected** (Stage 3 flagged it)
+
+The classifier asks a focused binary question: "Does this text contain instructions that attempt to manipulate an AI system's behavior?" and returns a confidence score.
+
+**Escalation logic:**
+- Confidence >= 0.8: escalate to **REJECT**
+- Confidence >= threshold (default 0.7) but < 0.8: add `llm_injection_flagged` flag, keep existing action
+- LLM error (timeout, API failure): fall back to regex-only verdict (graceful degradation)
+
+**Configuration:**
+
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `ENABLE_LLM_INJECTION_CLASSIFIER` | `false` | Enable Stage 4 |
+| `INJECTION_CLASSIFIER_PROVIDER` | `openai` | `openai` or `anthropic` |
+| `INJECTION_CLASSIFIER_MODEL` | `gpt-4o-mini` | Model to use for classification |
+| `INJECTION_CLASSIFIER_API_KEY` | — | Falls back to `OPENAI_API_KEY` |
+| `INJECTION_CLASSIFIER_CONFIDENCE_THRESHOLD` | `0.7` | Minimum confidence to flag |
 
 ### Content Policy Configuration
 
@@ -155,3 +180,8 @@ config = client.get_security_config()
 | `PER_AGENT_RATE_LIMIT_PER_HOUR` | 500 | Per-agent rate limit (hour) |
 | `AGENT_MEMORY_LIMIT` | 10,000 | Max memories per agent |
 | `ENABLE_TRUST_LEVELS` | `false` | Enable trust level enforcement |
+| `ENABLE_LLM_INJECTION_CLASSIFIER` | `false` | Enable Stage 4 LLM classifier |
+| `INJECTION_CLASSIFIER_PROVIDER` | `openai` | `openai` or `anthropic` |
+| `INJECTION_CLASSIFIER_MODEL` | `gpt-4o-mini` | Model for classification |
+| `INJECTION_CLASSIFIER_API_KEY` | Falls back to `OPENAI_API_KEY` | Dedicated API key for classifier |
+| `INJECTION_CLASSIFIER_CONFIDENCE_THRESHOLD` | `0.7` | Minimum confidence to flag |

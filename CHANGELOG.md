@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **LLM-Based Injection Classifier (Stage 4)** — optional async LLM classifier for prompt injection detection
+  - `InjectionClassifier` class in `content_security.py` wrapping any `LLMAdapter` (OpenAI or Anthropic)
+  - `scan_async()` method on `ContentSecurityScanner` — runs Stages 1-3, then conditionally triggers Stage 4
+  - Trigger conditions: untrusted/unknown trust level, agent-shared/global scope, or regex-flagged content
+  - Tiered escalation: confidence >= 0.8 → REJECT, threshold <= confidence < 0.8 → flag only
+  - Graceful degradation: LLM errors fall back to regex-only verdict
+  - 5 new config settings: `ENABLE_LLM_INJECTION_CLASSIFIER`, `INJECTION_CLASSIFIER_PROVIDER`, `INJECTION_CLASSIFIER_MODEL`, `INJECTION_CLASSIFIER_API_KEY`, `INJECTION_CLASSIFIER_CONFIDENCE_THRESHOLD`
+  - `llm_classifier_enabled` field on `/security/config` response
+  - `llm_checked` field on SDK `ContentScanResult`
+  - Security scanning added to `/memories/add_batch` (was missing)
+  - 9 new tests in `TestLLMInjectionClassifier`
+
+### Changed
+
+- `/memories/add` now uses `scan_async()` with trust/scope context
+- `/security/scan` now uses `scan_async()` with `trust_level="system"`, `scope="global"`
+- Content security pipeline docs updated from "three-stage" to "four-stage"
+
 ## [2.0.0] - 2026-02-25
 
 ### Added

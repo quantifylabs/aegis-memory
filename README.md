@@ -46,7 +46,7 @@ We checked the docs, repos, and changelogs of every major competitor.[^compariso
 
 | Security Feature | mem0 | Zep | Letta | Aegis |
 |---|---|---|---|---|
-| Content injection detection | — | — | — | 3-stage pipeline |
+| Content injection detection | — | — | — | 4-stage pipeline |
 | Memory integrity | — | — | — | HMAC-SHA256 |
 | Agent identity binding | — | — | — | Cryptographic API key |
 | Trust hierarchy | — | — | — | 4-tier OWASP model |
@@ -58,7 +58,7 @@ We checked the docs, repos, and changelogs of every major competitor.[^compariso
 
 Aegis implements [OWASP AI Agent Security](https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html) recommendations natively. Six capabilities, none optional:
 
-1. **[3-stage content security pipeline](https://docs.aegismemory.com/guides/security)** — input validation, sensitive data scanning, prompt injection detection. Every memory write. Not optional.
+1. **[4-stage content security pipeline](https://docs.aegismemory.com/guides/security)** — input validation, sensitive data scanning, prompt injection detection, optional LLM-based injection classification. Every memory write. Not optional.
 2. **[HMAC-SHA256 integrity signing](https://docs.aegismemory.com/guides/security)** — tamper detection on store, verification on demand. You know if a memory was modified.
 3. **[OWASP 4-tier trust hierarchy](https://docs.aegismemory.com/guides/security)** — untrusted, internal, privileged, system. Agents get compromised. Aegis limits the blast radius.
 4. **[Cryptographic agent binding](https://docs.aegismemory.com/guides/security)** — API keys bound to agent identity. No more trusting a request body that says "I'm the admin agent."
@@ -196,7 +196,7 @@ Different tools solve different problems. This comparison stays focused on capab
 | **Primary focus** | Assistant personalization | Graph-based episodic memory | Stateful agents | Secure multi-agent coordination |
 | **Open source** | Yes | Yes | Yes | Yes |
 | **Self-host posture** | Available | Available | Available | Self-host-first |
-| **Content security pipeline** | — | — | — | 3-stage (validation, PII, injection) |
+| **Content security pipeline** | — | — | — | 4-stage (validation, PII, injection, LLM) |
 | **Memory integrity** | — | — | — | HMAC-SHA256 |
 | **Trust hierarchy** | — | — | — | 4-tier OWASP model |
 | **Multi-agent ACL/scopes** | — | — | — | Yes |
@@ -257,6 +257,8 @@ kubectl apply -f k8s/
 | `AEGIS_API_KEY` | `dev-key` | API authentication |
 | `CONTENT_POLICY_INJECTION` | `flag` | `reject` / `redact` / `flag` / `allow` |
 | `CONTENT_POLICY_SECRETS` | `reject` | `reject` / `redact` / `flag` / `allow` |
+| `ENABLE_LLM_INJECTION_CLASSIFIER` | `false` | Enable Stage 4 LLM classifier |
+| `INJECTION_CLASSIFIER_MODEL` | `gpt-4o-mini` | Model for injection classification |
 
 **[Full Configuration](https://docs.aegismemory.com/guides/production-deployment)**
 
