@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-03-01
+
 ### Added
 
 - **LLM-Based Injection Classifier (Stage 4)** — optional async LLM classifier for prompt injection detection
@@ -26,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/memories/add` now uses `scan_async()` with trust/scope context
 - `/security/scan` now uses `scan_async()` with `trust_level="system"`, `scope="global"`
 - Content security pipeline docs updated from "three-stage" to "four-stage"
+
+### Repositioned
+
+- Aegis Memory is now positioned as **Secure Context Engineering for AI Agents**
+- Memory remains a core capability; security, integrity, trust, and compliance lead the narrative
+- Updated README, docs, pyproject.toml, and all public-facing copy
+- GitHub description and topics updated for context engineering positioning
 
 ## [2.0.0] - 2026-02-25
 

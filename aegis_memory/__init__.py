@@ -1,12 +1,13 @@
 """
-Aegis Memory - Agent-native memory fabric for AI agents.
+Aegis Memory — Secure Context Engineering for AI Agents.
 
-Aegis Memory is an open-source, self-hostable memory engine for LLM agents with:
-- Agent-native semantics (namespace, scope, multi-agent ACLs)
-- First-class multi-agent support (cross-agent queries, structured handoffs)
+Aegis Memory is an open-source, self-hostable context engineering layer for LLM agents with:
+- Content security pipeline (input validation, PII scanning, injection detection, LLM classification)
+- HMAC-SHA256 integrity verification (tamper detection on every memory write)
+- OWASP 4-tier trust hierarchy (untrusted, internal, privileged, system)
 - Context-engineering patterns (ACE-style voting, deltas, reflections, playbooks)
+- First-class multi-agent support (cross-agent queries, structured handoffs, scoped ACLs)
 - Production-oriented design (FastAPI + Postgres + pgvector)
-- Smart Memory extraction (automatic extraction of valuable information)
 
 Quick Start (Manual Control):
     from aegis_memory import AegisClient
@@ -53,7 +54,7 @@ Quick Start (Smart Agent - Full Auto):
 For more examples, see: https://github.com/quantifylabs/aegis-memory/tree/main/examples
 """
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 # Core client (manual control)
 from aegis_memory.client import (

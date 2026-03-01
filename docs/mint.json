@@ -69,10 +69,10 @@
     {
       "group": "Guides",
       "pages": [
+        "guides/security",
         "guides/smart-memory",
         "guides/ace-patterns",
         "guides/typed-memory",
-        "guides/security",
         "guides/production-deployment",
         "guides/observability",
         "guides/performance-benchmarks"

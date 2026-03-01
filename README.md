@@ -3,12 +3,12 @@
 </p>
 
 <p align="center">
-  <strong>Your memory layer is your attack surface. Act accordingly.</strong>
+  <strong>Your agent's context is your attack surface. Act accordingly.</strong>
 </p>
 
 <p align="center">
-  Open-source memory engine for multi-agent AI.<br/>
-  Content security. Memory integrity. Trust hierarchy. Self-improving agents.
+  Secure context engineering for production AI agents.<br/>
+  Content security. Integrity verification. Trust hierarchy. Context that improves itself.
 </p>
 
 <p align="center">
@@ -40,9 +40,9 @@ Agents are getting compromised. Not theoretically — right now.
 
 Every other memory layer trusts content by default. That is the vulnerability.
 
-## What Your Memory Layer Is Missing
+## What Your Context Layer Is Missing
 
-We checked the docs, repos, and changelogs of every major competitor.[^comparison] These protections do not exist anywhere else:
+We audited the docs, repos, and changelogs of every major memory tool.[^comparison] These protections do not exist anywhere else:
 
 | Security Feature | mem0 | Zep | Letta | Aegis |
 |---|---|---|---|---|
@@ -86,7 +86,7 @@ curl http://localhost:8000/health
 pip install aegis-memory
 ```
 
-### Multi-agent memory in 10 lines
+### Multi-agent context in 10 lines
 
 ```python
 from aegis_memory import AegisClient
@@ -112,9 +112,9 @@ print(memories[0].content)
 
 **[Full Quickstart Guide](https://docs.aegismemory.com/quickstart/installation)**
 
-## Agents That Learn From Their Own Mistakes
+## Context That Improves Itself
 
-Aegis is the first memory engine with a complete ACE loop — the Generation → Reflection → Curation cycle from Stanford/SambaNova's research, engineered for production.
+Aegis Memory is the first context layer with a complete ACE loop — the Generation → Reflection → Curation cycle from Stanford/SambaNova's research, engineered for production.
 
 Your agent made the same mistake 5 times? ACE loop remembers the fix forever. Stale memories polluting retrieval? Curation auto-cleans your playbook.
 
@@ -175,7 +175,7 @@ curation = client.curate(namespace="production")
 
 **[ACE Patterns Guide](https://docs.aegismemory.com/guides/ace-patterns)**
 
-## Choosing the Right Memory Solution
+## Choosing the Right Tool
 
 Different tools solve different problems. This comparison stays focused on capabilities clearly documented in public repos and docs.[^comparison]
 
@@ -185,15 +185,15 @@ Different tools solve different problems. This comparison stays focused on capab
 | Personal/team "second brain" with ingestion | **Supermemory** | Knowledge-base style memory with connectors |
 | Graph-native episodic memory over agent events | **Graphiti / Zep** | Focused on temporal + knowledge graph memory models |
 | Stateful agent runtime + built-in memory blocks | **Letta** | Agent framework centered on durable state |
-| Security-first multi-agent memory | **Aegis Memory** | Only memory layer with content security, integrity, and trust hierarchy |
+| Secure context engineering with built-in security, trust, and compliance | **Aegis Memory** | Only context layer with content security, integrity verification, and trust hierarchy |
 | Multi-agent coordination with access boundaries | **Aegis Memory** | Scope-aware ACLs + cross-agent query APIs |
-| Self-improving memory loops (what worked / failed) | **Aegis Memory** | ACE patterns: vote, reflection, playbook |
+| Self-improving context loops (what worked / failed) | **Aegis Memory** | ACE patterns: vote, reflection, playbook |
 
 ### Quick Feature Comparison
 
 | Capability | mem0 | Graphiti / Zep | Letta | Aegis Memory |
 |---|---|---|---|---|
-| **Primary focus** | Assistant personalization | Graph-based episodic memory | Stateful agents | Secure multi-agent coordination |
+| **Primary focus** | Assistant personalization | Graph-based episodic memory | Stateful agents | Secure context engineering |
 | **Open source** | Yes | Yes | Yes | Yes |
 | **Self-host posture** | Available | Available | Available | Self-host-first |
 | **Content security pipeline** | — | — | — | 4-stage (validation, PII, injection, LLM) |

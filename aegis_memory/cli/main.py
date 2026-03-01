@@ -27,7 +27,7 @@ from aegis_memory.cli.utils.errors import set_debug_mode
 # Create main app
 app = typer.Typer(
     name="aegis",
-    help="Aegis Memory CLI - The memory engine for multi-agent systems",
+    help="Aegis Memory CLI - Secure context engineering for AI agents",
     no_args_is_help=True,
     rich_markup_mode="rich",
 )
@@ -45,7 +45,7 @@ def main_callback(
     ),
 ) -> None:
     """
-    Aegis Memory CLI - The memory engine for multi-agent systems.
+    Aegis Memory CLI - Secure context engineering for AI agents.
 
     Use --debug to see full stack traces when errors occur.
     """

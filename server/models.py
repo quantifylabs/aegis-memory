@@ -1,5 +1,5 @@
 """
-Aegis Production Models - Scalable Multi-Agent Memory Layer
+Aegis Production Models - Secure Context Engineering Layer
 
 Key changes from v0:
 1. HNSW index on embeddings for O(log n) vector search

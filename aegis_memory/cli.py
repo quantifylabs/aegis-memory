@@ -17,7 +17,7 @@ from aegis_memory import __version__
 @click.group()
 @click.version_option(version=__version__, prog_name="aegis")
 def main():
-    """Aegis Memory - The Memory Layer for AI Agents"""
+    """Aegis Memory - Secure Context Engineering for AI Agents"""
     pass
 
 

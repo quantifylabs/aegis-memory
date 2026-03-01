@@ -1,6 +1,6 @@
 # Aegis Memory Quickstart
 
-**Get from zero to working agent memory in under 15 minutes.**
+**Get from zero to secure agent context in under 15 minutes.**
 
 ## Prerequisites
 

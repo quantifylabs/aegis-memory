@@ -1,11 +1,11 @@
 ---
 title: 'What is Aegis Memory?'
-description: 'The memory layer for AI agents that actually remember'
+description: 'The secure context engineering layer for AI agents'
 ---
 
 # Aegis Memory
 
-**Aegis Memory** is an open-source, agent-native memory engine for multi-agent AI systems. It gives your agents persistent, semantic memory that survives context window resets.
+**Aegis Memory** is an open-source, self-hostable context engineering layer for production AI agents. It provides content security, integrity verification, and trust hierarchy — plus persistent, semantic memory that survives context window resets.
 
 <CardGroup cols={2}>
   <Card title="Quick Start" icon="rocket" href="/quickstart/installation">
@@ -47,17 +47,17 @@ After analyzing 200+ production agent deployments, we found **40-80% fail due to
 Aegis Memory provides:
 
 <Steps>
-  <Step title="Semantic Memory">
-    Store and retrieve memories by meaning, not just keywords
+  <Step title="Content Security">
+    4-stage pipeline: input validation, PII scanning, injection detection, LLM classification
   </Step>
-  <Step title="ACE Patterns">
-    Self-improving agents that learn what works (voting, reflections, playbooks)
+  <Step title="Integrity & Trust">
+    HMAC-SHA256 tamper detection, OWASP 4-tier trust hierarchy, cryptographic agent binding
+  </Step>
+  <Step title="Context Quality">
+    ACE patterns — self-improving agents that learn what works (voting, reflections, playbooks)
   </Step>
   <Step title="Multi-Agent Coordination">
-    Scoped memory sharing with structured handoffs
-  </Step>
-  <Step title="Session Persistence">
-    Resume work across context window resets
+    Scoped memory sharing with structured handoffs and access boundaries
   </Step>
 </Steps>
 

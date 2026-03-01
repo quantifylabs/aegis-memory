@@ -130,7 +130,7 @@ def print_banner():
 
     print(f"\n{C.CYAN}╔{'═' * W}╗{C.RESET}")
     print_line(f"{C.BOLD}{C.WHITE}🛡️  AEGIS MEMORY DEMO{C.RESET}")
-    print_line(f"{C.WHITE}The Memory Layer for AI Agents{C.RESET}")
+    print_line(f"{C.WHITE}Secure Context Engineering for AI Agents{C.RESET}")
     print(f"{C.CYAN}╚{'═' * W}╝{C.RESET}")
 
 

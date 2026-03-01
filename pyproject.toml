@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aegis-memory"
-version = "2.0.0"
-description = "Secure agent-native memory fabric for multi-agent AI systems. Scoped, integrity-verified, self-hosted."
+version = "2.1.0"
+description = "Secure context engineering layer for AI agents. Content security, integrity verification, trust hierarchy. Self-hosted, Apache 2.0."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
@@ -15,16 +15,22 @@ authors = [
 keywords = [
     "ai",
     "agents",
+    "context-engineering",
+    "agent-security",
     "memory",
     "llm",
     "langchain",
     "langgraph",
     "crewai",
     "multi-agent",
-    "context-engineering",
+    "mcp",
+    "trust",
+    "owasp",
     "vector-database",
     "pgvector",
     "security",
+    "compliance",
+    "audit-trail",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

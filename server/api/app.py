@@ -81,7 +81,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Aegis Memory API",
         version=__version__,
-        description="The secure memory layer for multi-agent AI. Production-grade with OWASP-compliant security.",
+        description="Secure context engineering layer for AI agents. Content security, integrity verification, trust hierarchy. OWASP-compliant.",
         lifespan=lifespan,
         docs_url="/docs",
         redoc_url="/redoc",

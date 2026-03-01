@@ -876,4 +876,4 @@ class TestExports:
 
     def test_version_bumped(self):
         from aegis_memory import __version__
-        assert __version__ == "2.0.0"
+        assert __version__ == "2.1.0"
