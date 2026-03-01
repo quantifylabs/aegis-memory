@@ -11,7 +11,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
+from pgvector.sqlalchemy import Vector
 
 # revision identifiers, used by Alembic.
 revision: str = "0001"
@@ -60,7 +60,7 @@ def upgrade() -> None:
         sa.Column("memory_type", sa.String(16), nullable=False, server_default="standard"),
         sa.Column("content", sa.Text, nullable=False),
         sa.Column("content_hash", sa.String(64), nullable=False),
-        sa.Column("embedding", postgresql.ARRAY(sa.Float), nullable=False),  # pgvector Vector(1536) at DB level
+        sa.Column("embedding", Vector(1536), nullable=False),
         sa.Column("metadata", sa.JSON, nullable=False, server_default="{}"),
         sa.Column("scope", sa.String(16), nullable=False, server_default="agent-private"),
         sa.Column("shared_with_agents", sa.JSON, nullable=False, server_default="[]"),
@@ -172,7 +172,7 @@ def upgrade() -> None:
     op.create_table(
         "embedding_cache",
         sa.Column("content_hash", sa.String(64), primary_key=True),
-        sa.Column("embedding", postgresql.ARRAY(sa.Float), nullable=False),
+        sa.Column("embedding", Vector(1536), nullable=False),
         sa.Column("model", sa.String(64), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("hit_count", sa.Integer, nullable=False, server_default="0"),

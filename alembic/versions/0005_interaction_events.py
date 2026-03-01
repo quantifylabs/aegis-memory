@@ -14,6 +14,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from pgvector.sqlalchemy import Vector
 
 # revision identifiers, used by Alembic.
 revision: str = "0005"
@@ -42,7 +43,7 @@ def upgrade() -> None:
         sa.Column("extra_metadata", sa.JSON(), nullable=True),
         # Nullable: only populated when embed=True is requested at creation time.
         # pgvector >= 0.5.0 automatically skips NULL rows in HNSW indexes.
-        sa.Column("embedding", sa.Text(), nullable=True),  # stored as vector by pgvector
+        sa.Column("embedding", Vector(1536), nullable=True),
     )
 
     op.create_index(
