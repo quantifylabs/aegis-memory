@@ -15,6 +15,7 @@
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
   <a href="https://docs.aegismemory.com"><img src="https://img.shields.io/badge/docs-aegismemory.com-6366F1" alt="Docs"></a>
+  <a href="https://deepwiki.com/quantifylabs/aegis-memory"><img src="https://img.shields.io/badge/DeepWiki-quantifylabs%2Faegis--memory-blue.svg" alt="DeepWiki"></a>
 </p>
 
 <p align="center">
