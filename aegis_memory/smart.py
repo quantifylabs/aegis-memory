@@ -93,7 +93,7 @@ class SmartMemory:
     This avoids expensive LLM calls for obvious non-memories.
     
     Args:
-        aegis_api_key: API key for Aegis Memory server
+        aegis_api_key: API key for Aegis Memory server (optional in local mode)
         aegis_base_url: Aegis server URL (default: http://localhost:8000)
         llm_api_key: API key for LLM (OpenAI or Anthropic)
         llm_provider: "openai" or "anthropic" (default: "openai")
@@ -103,11 +103,13 @@ class SmartMemory:
         auto_store: Automatically store extracted memories (default: True)
         namespace: Aegis namespace for memories (default: "default")
         default_agent_id: Default agent ID if not specified per-call
+        mode: "remote" (default) or "local" for in-process SQLite mode
+        db_path: SQLite path for local mode (default: ~/.aegis/memory.db)
     """
-    
+
     def __init__(
         self,
-        aegis_api_key: str,
+        aegis_api_key: str = "",
         aegis_base_url: str = "http://localhost:8000",
         llm_api_key: str = None,
         llm_provider: str = "openai",
@@ -118,12 +120,22 @@ class SmartMemory:
         namespace: str = "default",
         default_agent_id: str = "smart-memory",
         custom_llm: LLMAdapter = None,
+        *,
+        mode: str = "remote",
+        db_path: Optional[str] = None,
     ):
         # Aegis client for storage
-        self.client = AegisClient(
-            api_key=aegis_api_key,
-            base_url=aegis_base_url
-        )
+        if mode == "local":
+            self.client = AegisClient(
+                mode="local",
+                db_path=db_path,
+                openai_api_key=llm_api_key if llm_provider == "openai" else None,
+            )
+        else:
+            self.client = AegisClient(
+                api_key=aegis_api_key,
+                base_url=aegis_base_url,
+            )
         
         # Filter for fast pre-checking
         self.filter = MessageFilter(sensitivity=sensitivity)
@@ -532,27 +544,29 @@ class SmartAgent:
     to "just work" with minimal code.
     
     Args:
-        aegis_api_key: Aegis Memory API key
+        aegis_api_key: Aegis Memory API key (optional in local mode)
         llm_api_key: LLM API key (OpenAI or Anthropic)
         llm_provider: "openai" or "anthropic"
         chat_model: Model for chat responses
         memory_model: Model for memory extraction (cheaper model recommended)
         use_case: Memory extraction profile
         system_prompt: System prompt for the agent
-        
+        mode: "remote" (default) or "local" for in-process SQLite mode
+        db_path: SQLite path for local mode (default: ~/.aegis/memory.db)
+
     Example:
         agent = SmartAgent(
             aegis_api_key="...",
             llm_api_key="...",
             system_prompt="You are a helpful coding assistant."
         )
-        
+
         # The agent handles memory automatically
         response = agent.chat(
             message="I'm John, I prefer Python over JavaScript",
             user_id="user_123"
         )
-        
+
         # Later conversation automatically has context
         response = agent.chat(
             message="What language should I use for this project?",
@@ -560,11 +574,11 @@ class SmartAgent:
         )
         # Agent knows user prefers Python!
     """
-    
+
     def __init__(
         self,
-        aegis_api_key: str,
-        llm_api_key: str,
+        aegis_api_key: str = "",
+        llm_api_key: str = "",
         aegis_base_url: str = "http://localhost:8000",
         llm_provider: str = "openai",
         chat_model: str = None,
@@ -572,6 +586,9 @@ class SmartAgent:
         use_case: str = "conversational",
         system_prompt: str = "You are a helpful assistant.",
         namespace: str = "default",
+        *,
+        mode: str = "remote",
+        db_path: Optional[str] = None,
     ):
         # Smart memory for extraction/retrieval
         self.memory = SmartMemory(
@@ -582,6 +599,8 @@ class SmartAgent:
             llm_model=memory_model,
             use_case=use_case,
             namespace=namespace,
+            mode=mode,
+            db_path=db_path,
         )
         
         # Chat LLM

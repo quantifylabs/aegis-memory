@@ -1,5 +1,6 @@
 """Aegis SDK asynchronous client."""
 
+import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
@@ -40,30 +41,71 @@ from ._parsers import (
 
 
 class AsyncAegisClient:
-    """Async version of AegisClient using httpx.AsyncClient."""
+    """
+    Async version of AegisClient using httpx.AsyncClient.
+
+    Supports ``mode="local"`` for in-process SQLite + numpy.
+    Local operations are wrapped with ``asyncio.to_thread()``.
+    """
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str = "",
         base_url: str = "http://localhost:8000",
         timeout: float = 30.0,
+        *,
+        mode: str = "remote",
+        db_path: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+        embedding_model: Optional[str] = None,
+        embedding_provider: Any = None,
     ):
-        self.base_url = base_url.rstrip("/")
-        self.client = httpx.AsyncClient(
-            base_url=self.base_url,
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=timeout,
-        )
+        self._mode = mode
+        self._local_backend = None
+
+        if mode == "local":
+            from ..local import LocalBackend
+            self._local_backend = LocalBackend(
+                db_path=db_path,
+                openai_api_key=openai_api_key,
+                embedding_model=embedding_model,
+                embedding_provider=embedding_provider,
+            )
+            self.base_url = ""
+            self.client = None
+        else:
+            self.base_url = base_url.rstrip("/")
+            self.client = httpx.AsyncClient(
+                base_url=self.base_url,
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=timeout,
+            )
+
+    @property
+    def is_local(self) -> bool:
+        return self._mode == "local"
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, *args):
-        await self.client.aclose()
+        await self.aclose()
 
     async def aclose(self):
         """Close the async client."""
-        await self.client.aclose()
+        if self._local_backend:
+            self._local_backend.close()
+        elif self.client:
+            await self.client.aclose()
+
+    def _get_sync_client(self):
+        """Lazily create a sync AegisClient for local mode delegation."""
+        if not hasattr(self, '_sync_client_ref'):
+            from ._sync import AegisClient
+            self._sync_client_ref = AegisClient(mode="local")
+            # Share the same local backend
+            self._sync_client_ref._local_backend = self._local_backend
+        return self._sync_client_ref
 
     async def add(
         self,
@@ -79,6 +121,16 @@ class AsyncAegisClient:
         derived_from_agents: Optional[List[str]] = None,
         coordination_metadata: Optional[Dict[str, Any]] = None,
     ) -> AddResult:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().add, content,
+                user_id=user_id, agent_id=agent_id, namespace=namespace,
+                metadata=metadata, ttl_seconds=ttl_seconds, scope=scope,
+                shared_with_agents=shared_with_agents,
+                derived_from_agents=derived_from_agents,
+                coordination_metadata=coordination_metadata,
+            )
+
         body = {
             "content": content,
             "user_id": user_id,
@@ -113,6 +165,13 @@ class AsyncAegisClient:
         min_score: float = 0.0,
         apply_decay: bool = False,
     ) -> List[Memory]:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().query, query,
+                user_id=user_id, agent_id=agent_id, namespace=namespace,
+                top_k=top_k, min_score=min_score, apply_decay=apply_decay,
+            )
+
         body = {
             "query": query,
             "user_id": user_id,
@@ -139,6 +198,15 @@ class AsyncAegisClient:
         min_score: float = 0.0,
         apply_decay: bool = False,
     ) -> List[Memory]:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().query_cross_agent,
+                query, requesting_agent_id,
+                target_agent_ids=target_agent_ids, user_id=user_id,
+                namespace=namespace, top_k=top_k, min_score=min_score,
+                apply_decay=apply_decay,
+            )
+
         body = {
             "query": query,
             "requesting_agent_id": requesting_agent_id,
@@ -163,6 +231,13 @@ class AsyncAegisClient:
         context: Optional[str] = None,
         task_id: Optional[str] = None,
     ) -> VoteResult:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().vote,
+                memory_id, vote, voter_agent_id,
+                context=context, task_id=task_id,
+            )
+
         body = {
             "vote": vote,
             "voter_agent_id": voter_agent_id,
@@ -189,6 +264,12 @@ class AsyncAegisClient:
         user_id: Optional[str] = None,
         namespace: str = "default",
     ) -> SessionProgress:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().create_session,
+                session_id, agent_id=agent_id, user_id=user_id, namespace=namespace,
+            )
+
         body = {
             "session_id": session_id,
             "agent_id": agent_id,
@@ -202,6 +283,11 @@ class AsyncAegisClient:
         return _parse_session_data(resp.json())
 
     async def get_session(self, session_id: str) -> SessionProgress:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().get_session, session_id,
+            )
+
         resp = await self.client.get(f"/memories/ace/session/{session_id}")
         resp.raise_for_status()
         return _parse_session_data(resp.json())
@@ -219,6 +305,15 @@ class AsyncAegisClient:
         status: Optional[str] = None,
         total_items: Optional[int] = None,
     ) -> SessionProgress:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().update_session, session_id,
+                completed_items=completed_items, in_progress_item=in_progress_item,
+                next_items=next_items, blocked_items=blocked_items,
+                summary=summary, last_action=last_action,
+                status=status, total_items=total_items,
+            )
+
         body = {
             "completed_items": completed_items,
             "in_progress_item": in_progress_item,
@@ -245,6 +340,13 @@ class AsyncAegisClient:
         category: Optional[str] = None,
         test_steps: Optional[List[str]] = None,
     ) -> Feature:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().create_feature,
+                feature_id, description, session_id=session_id,
+                namespace=namespace, category=category, test_steps=test_steps,
+            )
+
         body = {
             "feature_id": feature_id,
             "description": description,
@@ -260,6 +362,11 @@ class AsyncAegisClient:
         return _parse_feature_data(resp.json())
 
     async def get_feature(self, feature_id: str, namespace: str = "default") -> Feature:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().get_feature, feature_id, namespace,
+            )
+
         resp = await self.client.get(
             f"/memories/ace/feature/{feature_id}",
             params={"namespace": namespace},
@@ -279,6 +386,15 @@ class AsyncAegisClient:
         implementation_notes: Optional[str] = None,
         failure_reason: Optional[str] = None,
     ) -> Feature:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().update_feature, feature_id,
+                namespace=namespace, status=status, passes=passes,
+                implemented_by=implemented_by, verified_by=verified_by,
+                implementation_notes=implementation_notes,
+                failure_reason=failure_reason,
+            )
+
         body = {
             "status": status,
             "passes": passes,
@@ -304,6 +420,12 @@ class AsyncAegisClient:
         session_id: Optional[str] = None,
         status: Optional[str] = None,
     ) -> FeatureList:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().list_features,
+                namespace=namespace, session_id=session_id, status=status,
+            )
+
         params = {"namespace": namespace}
         if session_id:
             params["session_id"] = session_id
@@ -330,6 +452,13 @@ class AsyncAegisClient:
         include_embeddings: bool = False,
         limit: Optional[int] = None,
     ) -> Dict[str, Any]:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().export_json, output_path,
+                namespace=namespace, agent_id=agent_id,
+                include_embeddings=include_embeddings, limit=limit,
+            )
+
         import json
 
         body: Dict[str, Any] = {"format": "json"}
@@ -352,6 +481,9 @@ class AsyncAegisClient:
         return data.get("stats", {"total_exported": len(data.get("memories", []))})
 
     async def add_batch(self, items: List[Dict[str, Any]]) -> List[AddResult]:
+        if self._local_backend:
+            return await asyncio.to_thread(self._get_sync_client().add_batch, items)
+
         resp = await self.client.post("/memories/add_batch", json={"items": items})
         resp.raise_for_status()
         data = resp.json()
@@ -365,11 +497,17 @@ class AsyncAegisClient:
         ]
 
     async def get(self, memory_id: str) -> Memory:
+        if self._local_backend:
+            return await asyncio.to_thread(self._get_sync_client().get, memory_id)
+
         resp = await self.client.get(f"/memories/{memory_id}")
         resp.raise_for_status()
         return _parse_memory_data(resp.json())
 
     async def delete(self, memory_id: str) -> bool:
+        if self._local_backend:
+            return await asyncio.to_thread(self._get_sync_client().delete, memory_id)
+
         resp = await self.client.delete(f"/memories/{memory_id}")
         return resp.status_code == 204
 
@@ -383,6 +521,14 @@ class AsyncAegisClient:
         task_context: Optional[str] = None,
         max_memories: int = 20,
     ) -> HandoffBaton:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().handoff,
+                source_agent_id, target_agent_id,
+                namespace=namespace, user_id=user_id,
+                task_context=task_context, max_memories=max_memories,
+            )
+
         body = {
             "source_agent_id": source_agent_id,
             "target_agent_id": target_agent_id,
@@ -409,6 +555,11 @@ class AsyncAegisClient:
         )
 
     async def apply_delta(self, operations: List[Dict[str, Any]]) -> DeltaResult:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().apply_delta, operations,
+            )
+
         resp = await self.client.post("/memories/ace/delta", json={"operations": operations})
         resp.raise_for_status()
         data = resp.json()
@@ -479,6 +630,16 @@ class AsyncAegisClient:
         scope: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().add_reflection, content, agent_id,
+                user_id=user_id, namespace=namespace,
+                source_trajectory_id=source_trajectory_id,
+                error_pattern=error_pattern, correct_approach=correct_approach,
+                applicable_contexts=applicable_contexts,
+                scope=scope, metadata=metadata,
+            )
+
         body = {
             "content": content,
             "agent_id": agent_id,
@@ -506,6 +667,14 @@ class AsyncAegisClient:
         top_k: int = 20,
         min_effectiveness: float = -1.0,
     ) -> PlaybookResult:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().query_playbook,
+                query, agent_id, namespace=namespace,
+                include_types=include_types, top_k=top_k,
+                min_effectiveness=min_effectiveness,
+            )
+
         body = {
             "query": query,
             "agent_id": agent_id,
@@ -583,6 +752,13 @@ class AsyncAegisClient:
         namespace: str = "default",
         memory_ids_used: Optional[List[str]] = None,
     ) -> RunResult:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().start_run, run_id, agent_id,
+                task_type=task_type, namespace=namespace,
+                memory_ids_used=memory_ids_used,
+            )
+
         body: Dict[str, Any] = {
             "run_id": run_id,
             "agent_id": agent_id,
@@ -606,6 +782,13 @@ class AsyncAegisClient:
         auto_vote: bool = True,
         auto_reflect: bool = True,
     ) -> RunResult:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().complete_run, run_id,
+                success=success, evaluation=evaluation, logs=logs,
+                auto_vote=auto_vote, auto_reflect=auto_reflect,
+            )
+
         body: Dict[str, Any] = {
             "success": success,
             "evaluation": evaluation,
@@ -620,6 +803,9 @@ class AsyncAegisClient:
         return _parse_run_data(resp.json())
 
     async def get_run(self, run_id: str) -> RunResult:
+        if self._local_backend:
+            return await asyncio.to_thread(self._get_sync_client().get_run, run_id)
+
         resp = await self.client.get(f"/memories/ace/run/{run_id}")
         resp.raise_for_status()
         return _parse_run_data(resp.json())
@@ -634,6 +820,13 @@ class AsyncAegisClient:
         top_k: int = 20,
         min_effectiveness: float = -1.0,
     ) -> PlaybookResult:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().get_playbook_for_agent, agent_id,
+                query=query, namespace=namespace, top_k=top_k,
+                min_effectiveness=min_effectiveness,
+            )
+
         body: Dict[str, Any] = {
             "query": query,
             "agent_id": agent_id,
@@ -672,6 +865,13 @@ class AsyncAegisClient:
         top_k: int = 10,
         min_effectiveness_threshold: float = -0.3,
     ) -> CurationResult:
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().curate,
+                namespace=namespace, agent_id=agent_id,
+                top_k=top_k, min_effectiveness_threshold=min_effectiveness_threshold,
+            )
+
         body: Dict[str, Any] = {
             "namespace": namespace,
             "agent_id": agent_id,
@@ -704,6 +904,14 @@ class AsyncAegisClient:
         Set embed=True to generate a vector embedding for later semantic search.
         Link events causally by setting parent_event_id to a prior event's ID.
         """
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().record_interaction,
+                session_id, content, agent_id=agent_id, tool_calls=tool_calls,
+                parent_event_id=parent_event_id, namespace=namespace,
+                extra_metadata=extra_metadata, embed=embed,
+            )
+
         body: Dict[str, Any] = {
             "session_id": session_id,
             "content": content,
@@ -736,6 +944,12 @@ class AsyncAegisClient:
         offset: int = 0,
     ) -> SessionTimelineResult:
         """Get interaction events for a session ordered by timestamp ASC."""
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().get_session_interactions,
+                session_id, namespace=namespace, limit=limit, offset=offset,
+            )
+
         params = {"namespace": namespace, "limit": limit, "offset": offset}
         resp = await self.client.get(f"/interaction-events/session/{session_id}", params=params)
         resp.raise_for_status()
@@ -756,6 +970,12 @@ class AsyncAegisClient:
         offset: int = 0,
     ) -> AgentInteractionsResult:
         """Get interaction events for an agent ordered by timestamp DESC (most recent first)."""
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().get_agent_interactions,
+                agent_id, namespace=namespace, limit=limit, offset=offset,
+            )
+
         params = {"namespace": namespace, "limit": limit, "offset": offset}
         resp = await self.client.get(f"/interaction-events/agent/{agent_id}", params=params)
         resp.raise_for_status()
@@ -782,6 +1002,13 @@ class AsyncAegisClient:
 
         Only events created with embed=True are searchable.
         """
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().search_interactions,
+                query, namespace=namespace, session_id=session_id,
+                agent_id=agent_id, top_k=top_k, min_score=min_score,
+            )
+
         body: Dict[str, Any] = {
             "query": query,
             "namespace": namespace,
@@ -808,6 +1035,11 @@ class AsyncAegisClient:
 
     async def get_interaction_chain(self, event_id: str) -> EventWithChainResult:
         """Get an interaction event plus its full causal chain (root -> leaf)."""
+        if self._local_backend:
+            return await asyncio.to_thread(
+                self._get_sync_client().get_interaction_chain, event_id,
+            )
+
         resp = await self.client.get(f"/interaction-events/{event_id}")
         resp.raise_for_status()
         data = resp.json()
@@ -821,6 +1053,9 @@ class AsyncAegisClient:
 
     async def scan_content(self, content: str, metadata: Optional[Dict] = None) -> ContentScanResult:
         """Pre-scan content without storing. Check for PII, secrets, injection."""
+        if self._local_backend:
+            self._local_backend.scan_content(content, metadata=metadata)
+
         resp = await self.client.post("/security/scan", json={
             "content": content, "metadata": metadata,
         })
@@ -833,6 +1068,9 @@ class AsyncAegisClient:
 
     async def verify_integrity(self, memory_id: str) -> IntegrityCheckResult:
         """Verify HMAC integrity of a stored memory."""
+        if self._local_backend:
+            self._local_backend.verify_integrity(memory_id)
+
         resp = await self.client.post(f"/security/verify/{memory_id}")
         resp.raise_for_status()
         data = resp.json()
@@ -843,6 +1081,9 @@ class AsyncAegisClient:
 
     async def get_flagged_memories(self, *, namespace: str = "default", limit: int = 50) -> List[Memory]:
         """List memories with security flags (PII, injection) pending review."""
+        if self._local_backend:
+            self._local_backend.get_flagged_memories(namespace=namespace, limit=limit)
+
         resp = await self.client.get("/security/flagged",
                                      params={"namespace": namespace, "limit": limit})
         resp.raise_for_status()
@@ -854,6 +1095,12 @@ class AsyncAegisClient:
         limit: int = 100,
     ) -> List[SecurityAuditEvent]:
         """Query security audit trail."""
+        if self._local_backend:
+            self._local_backend.get_security_audit(
+                event_type=event_type, start_time=start_time,
+                end_time=end_time, limit=limit,
+            )
+
         params: Dict[str, Any] = {"limit": limit}
         if event_type:
             params["event_type"] = event_type
@@ -872,6 +1119,9 @@ class AsyncAegisClient:
 
     async def get_security_config(self) -> Dict[str, Any]:
         """Get current security configuration."""
+        if self._local_backend:
+            self._local_backend.get_security_config()
+
         resp = await self.client.get("/security/config")
         resp.raise_for_status()
         return resp.json()

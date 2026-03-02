@@ -9,15 +9,22 @@ Aegis Memory is an open-source, self-hostable context engineering layer for LLM 
 - First-class multi-agent support (cross-agent queries, structured handoffs, scoped ACLs)
 - Production-oriented design (FastAPI + Postgres + pgvector)
 
-Quick Start (Manual Control):
+Quick Start (Local Mode - Zero Config):
+    from aegis_memory import local_client
+
+    client = local_client()
+    client.add("User prefers dark mode", agent_id="ui-agent")
+    memories = client.query("user preferences", agent_id="ui-agent")
+
+Quick Start (Remote Server):
     from aegis_memory import AegisClient
-    
+
     client = AegisClient(api_key="your-key", base_url="http://localhost:8000")
-    
+
     # Add a memory
     result = client.add("User prefers dark mode", agent_id="ui-agent")
-    
-    # Query memories  
+
+    # Query memories
     memories = client.query("user preferences", agent_id="ui-agent")
 
 Quick Start (Smart Memory - Zero Config):
@@ -54,7 +61,7 @@ Quick Start (Smart Agent - Full Auto):
 For more examples, see: https://github.com/quantifylabs/aegis-memory/tree/main/examples
 """
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 # Core client (manual control)
 from aegis_memory.client import (
@@ -69,6 +76,41 @@ from aegis_memory.client import (
     CurationEntry,
     ConsolidationCandidate,
 )
+
+
+def local_client(
+    *,
+    db_path: str = None,
+    openai_api_key: str = None,
+    embedding_model: str = None,
+    embedding_provider=None,
+    signing_key: str = "aegis-local-default-key",
+) -> AegisClient:
+    """
+    Create a local-mode AegisClient (SQLite + numpy, no server needed).
+
+    Usage::
+
+        from aegis_memory import local_client
+        client = local_client()
+        client.add("User prefers dark mode", agent_id="ui-agent")
+        memories = client.query("user preferences", agent_id="ui-agent")
+
+    Args:
+        db_path: SQLite database path (default: ~/.aegis/memory.db)
+        openai_api_key: OpenAI key for embeddings (or set OPENAI_API_KEY env var).
+            If omitted and sentence-transformers is installed, uses local embeddings.
+        embedding_model: Override the embedding model name.
+        embedding_provider: Custom EmbeddingProvider instance.
+        signing_key: HMAC signing key for integrity hashes.
+    """
+    return AegisClient(
+        mode="local",
+        db_path=db_path,
+        openai_api_key=openai_api_key,
+        embedding_model=embedding_model,
+        embedding_provider=embedding_provider,
+    )
 
 # Smart memory (automatic extraction)
 from aegis_memory.smart import (
@@ -103,6 +145,7 @@ __all__ = [
     # Core
     "AegisClient",
     "AsyncAegisClient",
+    "local_client",
     "Memory",
     "PlaybookEntry",
     "SessionProgress",

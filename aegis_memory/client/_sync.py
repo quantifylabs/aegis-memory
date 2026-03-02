@@ -36,34 +36,73 @@ class AegisClient:
     """
     Aegis Memory API client with ACE enhancements.
 
+    Supports two modes:
+    - ``mode="remote"`` (default): HTTP client connecting to Aegis server.
+    - ``mode="local"``: In-process SQLite + numpy. No server required.
+
     Args:
-        api_key: API key for authentication
+        api_key: API key for authentication (optional in local mode)
         base_url: Base URL of the Aegis API (default: http://localhost:8000)
         timeout: Request timeout in seconds (default: 30)
+        mode: "remote" (default) or "local"
+        db_path: SQLite database path for local mode (default: ~/.aegis/memory.db)
+        openai_api_key: OpenAI API key for embeddings in local mode
+        embedding_model: Embedding model name override
+        embedding_provider: Custom EmbeddingProvider instance
     """
 
     def __init__(
         self,
-        api_key: str,
+        api_key: str = "",
         base_url: str = "http://localhost:8000",
         timeout: float = 30.0,
+        *,
+        mode: str = "remote",
+        db_path: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+        embedding_model: Optional[str] = None,
+        embedding_provider: Any = None,
     ):
-        self.base_url = base_url.rstrip("/")
-        self.client = httpx.Client(
-            base_url=self.base_url,
-            headers={"Authorization": f"Bearer {api_key}"},
-            timeout=timeout,
-        )
+        self._mode = mode
+        self._local_backend = None
+
+        if mode == "local":
+            from ..local import LocalBackend
+            self._local_backend = LocalBackend(
+                db_path=db_path,
+                openai_api_key=openai_api_key,
+                embedding_model=embedding_model,
+                embedding_provider=embedding_provider,
+            )
+            # Create a minimal httpx client to satisfy any attribute access,
+            # but it won't be used for local mode operations.
+            self.base_url = ""
+            self.client = None
+        else:
+            self.base_url = base_url.rstrip("/")
+            self.client = httpx.Client(
+                base_url=self.base_url,
+                headers={"Authorization": f"Bearer {api_key}"},
+                timeout=timeout,
+            )
+
+    @property
+    def is_local(self) -> bool:
+        """True if using local/in-process mode."""
+        return self._mode == "local"
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
-        self.client.close()
+        self.close()
 
     def close(self):
         """Close the client."""
-        self.client.close()
+        if self._local_backend:
+            self._local_backend.close()
+        elif self.client:
+            self.client.close()
 
     # ---------- Core Memory Operations ----------
 
@@ -99,6 +138,20 @@ class AegisClient:
         Returns:
             AddResult with memory ID and dedup info
         """
+        if self._local_backend:
+            data = self._local_backend.add(
+                content, user_id=user_id, agent_id=agent_id, namespace=namespace,
+                metadata=metadata, ttl_seconds=ttl_seconds, scope=scope,
+                shared_with_agents=shared_with_agents,
+                derived_from_agents=derived_from_agents,
+                coordination_metadata=coordination_metadata,
+            )
+            return AddResult(
+                id=data["id"],
+                deduped_from=data.get("deduped_from"),
+                inferred_scope=data.get("inferred_scope"),
+            )
+
         body = {
             "content": content,
             "user_id": user_id,
@@ -136,6 +189,17 @@ class AegisClient:
         Returns:
             List of AddResult for each memory
         """
+        if self._local_backend:
+            results = self._local_backend.add_batch(items)
+            return [
+                AddResult(
+                    id=r["id"],
+                    deduped_from=r.get("deduped_from"),
+                    inferred_scope=r.get("inferred_scope"),
+                )
+                for r in results
+            ]
+
         resp = self.client.post("/memories/add_batch", json={"items": items})
         resp.raise_for_status()
         data = resp.json()
@@ -185,6 +249,14 @@ class AegisClient:
             "apply_decay": apply_decay,
         }
 
+        if self._local_backend:
+            results = self._local_backend.query(
+                query, user_id=user_id, agent_id=agent_id,
+                namespace=namespace, top_k=top_k, min_score=min_score,
+                apply_decay=apply_decay,
+            )
+            return [self._parse_memory(m) for m in results]
+
         resp = self.client.post("/memories/query", json=body)
         resp.raise_for_status()
         data = resp.json()
@@ -230,6 +302,15 @@ class AegisClient:
             "apply_decay": apply_decay,
         }
 
+        if self._local_backend:
+            results = self._local_backend.query_cross_agent(
+                query, requesting_agent_id,
+                target_agent_ids=target_agent_ids, user_id=user_id,
+                namespace=namespace, top_k=top_k, min_score=min_score,
+                apply_decay=apply_decay,
+            )
+            return [self._parse_memory(m) for m in results]
+
         resp = self.client.post("/memories/query_cross_agent", json=body)
         resp.raise_for_status()
         data = resp.json()
@@ -238,12 +319,23 @@ class AegisClient:
 
     def get(self, memory_id: str) -> Memory:
         """Get a memory by ID."""
+        if self._local_backend:
+            data = self._local_backend.get(memory_id)
+            if data is None:
+                raise httpx.HTTPStatusError(
+                    "Not found", request=None, response=None,
+                )
+            return self._parse_memory(data)
+
         resp = self.client.get(f"/memories/{memory_id}")
         resp.raise_for_status()
         return self._parse_memory(resp.json())
 
     def delete(self, memory_id: str) -> bool:
         """Delete a memory by ID."""
+        if self._local_backend:
+            return self._local_backend.delete(memory_id)
+
         resp = self.client.delete(f"/memories/{memory_id}")
         return resp.status_code == 204
 
@@ -279,6 +371,26 @@ class AegisClient:
             "task_context": task_context,
             "max_memories": max_memories,
         }
+
+        if self._local_backend:
+            data = self._local_backend.handoff(
+                source_agent_id, target_agent_id,
+                namespace=namespace, user_id=user_id,
+                task_context=task_context, max_memories=max_memories,
+            )
+            return HandoffBaton(
+                source_agent_id=data["source_agent_id"],
+                target_agent_id=data["target_agent_id"],
+                namespace=data["namespace"],
+                user_id=data.get("user_id"),
+                task_context=data.get("task_context"),
+                summary=data.get("summary"),
+                active_tasks=data.get("active_tasks", []),
+                blocked_on=data.get("blocked_on", []),
+                recent_decisions=data.get("recent_decisions", []),
+                key_facts=data.get("key_facts", []),
+                memory_ids=data.get("memory_ids", []),
+            )
 
         resp = self.client.post("/memories/handoff", json=body)
         resp.raise_for_status()
@@ -325,6 +437,18 @@ class AegisClient:
         Returns:
             VoteResult with updated counters and effectiveness score
         """
+        if self._local_backend:
+            data = self._local_backend.vote(
+                memory_id, vote, voter_agent_id,
+                context=context, task_id=task_id,
+            )
+            return VoteResult(
+                memory_id=data["memory_id"],
+                bullet_helpful=data["bullet_helpful"],
+                bullet_harmful=data["bullet_harmful"],
+                effectiveness_score=data["effectiveness_score"],
+            )
+
         body = {
             "vote": vote,
             "voter_agent_id": voter_agent_id,
@@ -365,6 +489,21 @@ class AegisClient:
         Returns:
             DeltaResult with results for each operation
         """
+        if self._local_backend:
+            data = self._local_backend.apply_delta(operations)
+            return DeltaResult(
+                results=[
+                    DeltaResultItem(
+                        operation=r["operation"],
+                        success=r["success"],
+                        memory_id=r.get("memory_id"),
+                        error=r.get("error"),
+                    )
+                    for r in data["results"]
+                ],
+                total_time_ms=data["total_time_ms"],
+            )
+
         resp = self.client.post("/memories/ace/delta", json={"operations": operations})
         resp.raise_for_status()
         data = resp.json()
@@ -479,6 +618,17 @@ class AegisClient:
         Returns:
             Memory ID of created reflection
         """
+        if self._local_backend:
+            return self._local_backend.add_reflection(
+                content, agent_id,
+                user_id=user_id, namespace=namespace,
+                source_trajectory_id=source_trajectory_id,
+                error_pattern=error_pattern,
+                correct_approach=correct_approach,
+                applicable_contexts=applicable_contexts,
+                scope=scope, metadata=metadata,
+            )
+
         body = {
             "content": content,
             "agent_id": agent_id,
@@ -526,6 +676,14 @@ class AegisClient:
         Returns:
             PlaybookResult with ranked entries
         """
+        if self._local_backend:
+            data = self._local_backend.query_playbook(
+                query, agent_id, namespace=namespace,
+                include_types=include_types, top_k=top_k,
+                min_effectiveness=min_effectiveness,
+            )
+            return self._parse_playbook_data(data)
+
         body = {
             "query": query,
             "agent_id": agent_id,
@@ -539,22 +697,7 @@ class AegisClient:
         resp.raise_for_status()
         data = resp.json()
 
-        return PlaybookResult(
-            entries=[
-                PlaybookEntry(
-                    id=e["id"],
-                    content=e["content"],
-                    memory_type=e["memory_type"],
-                    effectiveness_score=e["effectiveness_score"],
-                    bullet_helpful=e["bullet_helpful"],
-                    bullet_harmful=e["bullet_harmful"],
-                    error_pattern=e.get("error_pattern"),
-                    created_at=datetime.fromisoformat(e["created_at"].replace("Z", "+00:00")),
-                )
-                for e in data["entries"]
-            ],
-            query_time_ms=data["query_time_ms"],
-        )
+        return self._parse_playbook_data(data)
 
     # ---------- ACE: Session Progress ----------
 
@@ -581,6 +724,12 @@ class AegisClient:
         Returns:
             SessionProgress with initial state
         """
+        if self._local_backend:
+            data = self._local_backend.create_session(
+                session_id, agent_id=agent_id, user_id=user_id, namespace=namespace,
+            )
+            return self._parse_session(data)
+
         body = {
             "session_id": session_id,
             "agent_id": agent_id,
@@ -595,6 +744,12 @@ class AegisClient:
 
     def get_session(self, session_id: str) -> SessionProgress:
         """Get session progress by ID."""
+        if self._local_backend:
+            data = self._local_backend.get_session(session_id)
+            if data is None:
+                raise ValueError(f"Session not found: {session_id}")
+            return self._parse_session(data)
+
         resp = self.client.get(f"/memories/ace/session/{session_id}")
         resp.raise_for_status()
         return self._parse_session(resp.json())
@@ -629,6 +784,15 @@ class AegisClient:
         Returns:
             Updated SessionProgress
         """
+        if self._local_backend:
+            data = self._local_backend.update_session(
+                session_id, completed_items=completed_items,
+                in_progress_item=in_progress_item, next_items=next_items,
+                blocked_items=blocked_items, summary=summary,
+                last_action=last_action, status=status, total_items=total_items,
+            )
+            return self._parse_session(data)
+
         body = {
             "completed_items": completed_items,
             "in_progress_item": in_progress_item,
@@ -682,6 +846,13 @@ class AegisClient:
         Returns:
             Created Feature
         """
+        if self._local_backend:
+            data = self._local_backend.create_feature(
+                feature_id, description, session_id=session_id,
+                namespace=namespace, category=category, test_steps=test_steps,
+            )
+            return self._parse_feature(data)
+
         body = {
             "feature_id": feature_id,
             "description": description,
@@ -698,6 +869,12 @@ class AegisClient:
 
     def get_feature(self, feature_id: str, namespace: str = "default") -> Feature:
         """Get feature by ID."""
+        if self._local_backend:
+            data = self._local_backend.get_feature(feature_id, namespace)
+            if data is None:
+                raise ValueError(f"Feature not found: {feature_id}")
+            return self._parse_feature(data)
+
         resp = self.client.get(
             f"/memories/ace/feature/{feature_id}",
             params={"namespace": namespace}
@@ -735,6 +912,14 @@ class AegisClient:
         Returns:
             Updated Feature
         """
+        if self._local_backend:
+            data = self._local_backend.update_feature(
+                feature_id, namespace=namespace, status=status, passes=passes,
+                implemented_by=implemented_by, verified_by=verified_by,
+                implementation_notes=implementation_notes, failure_reason=failure_reason,
+            )
+            return self._parse_feature(data)
+
         body = {
             "status": status,
             "passes": passes,
@@ -807,6 +992,18 @@ class AegisClient:
         Returns:
             FeatureList with features and summary
         """
+        if self._local_backend:
+            data = self._local_backend.list_features(
+                namespace=namespace, session_id=session_id, status=status,
+            )
+            return FeatureList(
+                features=[self._parse_feature(f) for f in data["features"]],
+                total=data["total"],
+                passing=data["passing"],
+                failing=data["failing"],
+                in_progress=data["in_progress"],
+            )
+
         params = {"namespace": namespace}
         if session_id:
             params["session_id"] = session_id
@@ -842,6 +1039,13 @@ class AegisClient:
         ACE Loop: Records which memories are being used for the current
         task execution. Complete later with complete_run().
         """
+        if self._local_backend:
+            data = self._local_backend.start_run(
+                run_id, agent_id, task_type=task_type,
+                namespace=namespace, memory_ids_used=memory_ids_used,
+            )
+            return _parse_run_data(data)
+
         body: Dict[str, Any] = {
             "run_id": run_id,
             "agent_id": agent_id,
@@ -872,6 +1076,13 @@ class AegisClient:
         - Votes on memories used (helpful on success, harmful on failure)
         - Creates reflection memories on failure
         """
+        if self._local_backend:
+            data = self._local_backend.complete_run(
+                run_id, success=success, evaluation=evaluation,
+                logs=logs, auto_vote=auto_vote, auto_reflect=auto_reflect,
+            )
+            return _parse_run_data(data)
+
         body: Dict[str, Any] = {
             "success": success,
             "evaluation": evaluation,
@@ -887,6 +1098,12 @@ class AegisClient:
 
     def get_run(self, run_id: str) -> RunResult:
         """Get run details by run_id."""
+        if self._local_backend:
+            data = self._local_backend.get_run(run_id)
+            if data is None:
+                raise ValueError(f"Run not found: {run_id}")
+            return _parse_run_data(data)
+
         resp = self.client.get(f"/memories/ace/run/{run_id}")
         resp.raise_for_status()
         return _parse_run_data(resp.json())
@@ -907,6 +1124,13 @@ class AegisClient:
         ACE Loop: Before starting a task, query agent-specific strategies
         that have been validated by past runs.
         """
+        if self._local_backend:
+            data = self._local_backend.query_playbook(
+                query, agent_id, namespace=namespace,
+                top_k=top_k, min_effectiveness=min_effectiveness,
+            )
+            return self._parse_playbook_data(data)
+
         body: Dict[str, Any] = {
             "query": query,
             "agent_id": agent_id,
@@ -921,22 +1145,7 @@ class AegisClient:
         resp.raise_for_status()
         data = resp.json()
 
-        return PlaybookResult(
-            entries=[
-                PlaybookEntry(
-                    id=e["id"],
-                    content=e["content"],
-                    memory_type=e["memory_type"],
-                    effectiveness_score=e["effectiveness_score"],
-                    bullet_helpful=e["bullet_helpful"],
-                    bullet_harmful=e["bullet_harmful"],
-                    error_pattern=e.get("error_pattern"),
-                    created_at=datetime.fromisoformat(e["created_at"].replace("Z", "+00:00")),
-                )
-                for e in data["entries"]
-            ],
-            query_time_ms=data["query_time_ms"],
-        )
+        return self._parse_playbook_data(data)
 
     def curate(
         self,
@@ -952,6 +1161,13 @@ class AegisClient:
         ACE Loop: Identifies effective entries to promote, ineffective
         entries to flag, and similar entries to consolidate.
         """
+        if self._local_backend:
+            data = self._local_backend.curate(
+                namespace=namespace, agent_id=agent_id,
+                top_k=top_k, min_effectiveness_threshold=min_effectiveness_threshold,
+            )
+            return _parse_curation_data(data)
+
         body: Dict[str, Any] = {
             "namespace": namespace,
             "agent_id": agent_id,
@@ -985,6 +1201,19 @@ class AegisClient:
         Link events causally by setting parent_event_id to a prior event's ID.
         """
         from ._models import InteractionEventResult
+
+        if self._local_backend:
+            data = self._local_backend.record_interaction(
+                session_id, content, agent_id=agent_id, tool_calls=tool_calls,
+                parent_event_id=parent_event_id, namespace=namespace,
+                extra_metadata=extra_metadata, embed=embed,
+            )
+            return InteractionEventResult(
+                event_id=data["event_id"],
+                session_id=data["session_id"],
+                namespace=data["namespace"],
+                has_embedding=data["has_embedding"],
+            )
 
         body: Dict[str, Any] = {
             "session_id": session_id,
@@ -1021,6 +1250,17 @@ class AegisClient:
         from ._models import SessionTimelineResult
         from ._parsers import _parse_interaction_event
 
+        if self._local_backend:
+            data = self._local_backend.get_session_interactions(
+                session_id, namespace=namespace, limit=limit, offset=offset,
+            )
+            return SessionTimelineResult(
+                session_id=data["session_id"],
+                namespace=data["namespace"],
+                events=[_parse_interaction_event(e) for e in data["events"]],
+                count=data["count"],
+            )
+
         params = {"namespace": namespace, "limit": limit, "offset": offset}
         resp = self.client.get(f"/interaction-events/session/{session_id}", params=params)
         resp.raise_for_status()
@@ -1043,6 +1283,17 @@ class AegisClient:
         """Get interaction events for an agent ordered by timestamp DESC (most recent first)."""
         from ._models import AgentInteractionsResult
         from ._parsers import _parse_interaction_event
+
+        if self._local_backend:
+            data = self._local_backend.get_agent_interactions(
+                agent_id, namespace=namespace, limit=limit, offset=offset,
+            )
+            return AgentInteractionsResult(
+                agent_id=data["agent_id"],
+                namespace=data["namespace"],
+                events=[_parse_interaction_event(e) for e in data["events"]],
+                count=data["count"],
+            )
 
         params = {"namespace": namespace, "limit": limit, "offset": offset}
         resp = self.client.get(f"/interaction-events/agent/{agent_id}", params=params)
@@ -1073,6 +1324,22 @@ class AegisClient:
         from ._models import InteractionSearchResult, InteractionSearchResultItem
         from ._parsers import _parse_interaction_event
 
+        if self._local_backend:
+            data = self._local_backend.search_interactions(
+                query, namespace=namespace, session_id=session_id,
+                agent_id=agent_id, top_k=top_k, min_score=min_score,
+            )
+            return InteractionSearchResult(
+                results=[
+                    InteractionSearchResultItem(
+                        event=_parse_interaction_event(r["event"]),
+                        score=r["score"],
+                    )
+                    for r in data["results"]
+                ],
+                query_time_ms=data["query_time_ms"],
+            )
+
         body: Dict[str, Any] = {
             "query": query,
             "namespace": namespace,
@@ -1102,6 +1369,14 @@ class AegisClient:
         from ._models import EventWithChainResult
         from ._parsers import _parse_interaction_event
 
+        if self._local_backend:
+            data = self._local_backend.get_interaction_chain(event_id)
+            return EventWithChainResult(
+                event=_parse_interaction_event(data["event"]),
+                chain=[_parse_interaction_event(e) for e in data["chain"]],
+                chain_depth=data["chain_depth"],
+            )
+
         resp = self.client.get(f"/interaction-events/{event_id}")
         resp.raise_for_status()
         data = resp.json()
@@ -1115,6 +1390,9 @@ class AegisClient:
 
     def scan_content(self, content: str, metadata: Optional[Dict] = None) -> ContentScanResult:
         """Pre-scan content without storing. Check for PII, secrets, injection."""
+        if self._local_backend:
+            self._local_backend.scan_content(content, metadata)
+
         resp = self.client.post("/security/scan", json={
             "content": content, "metadata": metadata,
         })
@@ -1127,6 +1405,9 @@ class AegisClient:
 
     def verify_integrity(self, memory_id: str) -> IntegrityCheckResult:
         """Verify HMAC integrity of a stored memory."""
+        if self._local_backend:
+            self._local_backend.verify_integrity(memory_id)
+
         resp = self.client.post(f"/security/verify/{memory_id}")
         resp.raise_for_status()
         data = resp.json()
@@ -1137,6 +1418,9 @@ class AegisClient:
 
     def get_flagged_memories(self, *, namespace: str = "default", limit: int = 50) -> List[Memory]:
         """List memories with security flags (PII, injection) pending review."""
+        if self._local_backend:
+            self._local_backend.get_flagged_memories(namespace=namespace, limit=limit)
+
         resp = self.client.get("/security/flagged",
                                params={"namespace": namespace, "limit": limit})
         resp.raise_for_status()
@@ -1148,6 +1432,12 @@ class AegisClient:
         limit: int = 100,
     ) -> List[SecurityAuditEvent]:
         """Query security audit trail."""
+        if self._local_backend:
+            self._local_backend.get_security_audit(
+                event_type=event_type, start_time=start_time,
+                end_time=end_time, limit=limit,
+            )
+
         params: Dict[str, Any] = {"limit": limit}
         if event_type:
             params["event_type"] = event_type
@@ -1166,6 +1456,9 @@ class AegisClient:
 
     def get_security_config(self) -> Dict[str, Any]:
         """Get current security configuration."""
+        if self._local_backend:
+            self._local_backend.get_security_config()
+
         resp = self.client.get("/security/config")
         resp.raise_for_status()
         return resp.json()
@@ -1200,6 +1493,15 @@ class AegisClient:
         """
         import json
 
+        if self._local_backend:
+            data = self._local_backend.export_json(
+                namespace=namespace, agent_id=agent_id,
+                include_embeddings=include_embeddings, limit=limit,
+            )
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, default=str, ensure_ascii=False)
+            return data.get("stats", {"total_exported": len(data.get("memories", []))})
+
         body: Dict[str, Any] = {"format": "json"}
         if namespace:
             body["namespace"] = namespace
@@ -1229,3 +1531,23 @@ class AegisClient:
 
     def _parse_feature(self, data: Dict) -> Feature:
         return _parse_feature_data(data)
+
+    def _parse_playbook_data(self, data: Dict) -> PlaybookResult:
+        return PlaybookResult(
+            entries=[
+                PlaybookEntry(
+                    id=e["id"],
+                    content=e["content"],
+                    memory_type=e["memory_type"],
+                    effectiveness_score=e["effectiveness_score"],
+                    bullet_helpful=e["bullet_helpful"],
+                    bullet_harmful=e["bullet_harmful"],
+                    error_pattern=e.get("error_pattern"),
+                    created_at=datetime.fromisoformat(
+                        str(e["created_at"]).replace("Z", "+00:00")
+                    ) if isinstance(e["created_at"], str) else e["created_at"],
+                )
+                for e in data["entries"]
+            ],
+            query_time_ms=data["query_time_ms"],
+        )
