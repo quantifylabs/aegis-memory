@@ -149,6 +149,11 @@ class MemoryEventType(str, Enum):
     AUTH_FAILED = "auth_failed"
     DELETED = "deleted"
     INTEGRITY_FAILED = "integrity_failed"
+    # Context Hub (v2.3.0)
+    PROMPT_CREATED = "prompt_created"
+    SKILL_CREATED = "skill_created"
+    SUBAGENT_CREATED = "subagent_created"
+    CONTEXT_LOADED = "context_loaded"
 
 
 class Memory(Base):
@@ -565,6 +570,136 @@ class InteractionEvent(Base):
             postgresql_with={'m': 16, 'ef_construction': 64},
             postgresql_ops={'embedding': 'vector_cosine_ops'},
         ),
+    )
+
+
+class Prompt(Base):
+    """
+    Versioned prompt template (Context Hub v2.3.0).
+
+    One name can have multiple versions; exactly one is_active=True per
+    (project_id, namespace, name). Variables in {{var}} syntax are
+    auto-extracted into `variables` column for downstream rendering.
+    """
+    __tablename__ = "prompts"
+
+    id = Column(String(32), primary_key=True)
+    project_id = Column(String(64), nullable=False)
+    namespace = Column(String(64), nullable=False, default="default")
+
+    name = Column(String(128), nullable=False)
+    version = Column(Integer, nullable=False, default=1)
+    content = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    variables = Column(JSON, nullable=False, default=list)
+    tags = Column(JSON, nullable=False, default=list)
+
+    is_active = Column(Boolean, nullable=False, default=False)
+    created_by_agent_id = Column(String(64), nullable=True)
+
+    # Security
+    integrity_hash = Column(String(64), nullable=True)
+    content_flags = Column(JSON, nullable=False, default=list)
+    trust_level = Column(String(16), nullable=False, default="internal")
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('ix_prompts_lookup', 'project_id', 'namespace', 'name'),
+        Index('ix_prompts_active', 'project_id', 'namespace', 'name',
+              postgresql_where=text('is_active = true')),
+        Index('ix_prompts_version_unique', 'project_id', 'namespace', 'name', 'version', unique=True),
+    )
+
+
+class Skill(Base):
+    """
+    Skill following Anthropic's open Agent Skills spec (Context Hub v2.3.0).
+
+    A skill is a SKILL.md body plus optional bundled files (scripts, references,
+    assets). Description is embedded for semantic activation matching — the agent
+    only loads the full skill body when the description matches the task.
+
+    Trust default = privileged because skills can ship executable code.
+    """
+    __tablename__ = "skills"
+
+    id = Column(String(32), primary_key=True)
+    project_id = Column(String(64), nullable=False)
+    namespace = Column(String(64), nullable=False, default="default")
+
+    name = Column(String(128), nullable=False)            # frontmatter "name"
+    description = Column(Text, nullable=False)             # frontmatter "description"
+    description_embedding = Column(Vector(1536), nullable=True)
+    version = Column(String(32), nullable=False, default="1.0.0")
+
+    skill_md = Column(Text, nullable=False)                # raw SKILL.md content
+    bundled_files = Column(JSON, nullable=False, default=dict)  # {"scripts/foo.py": "...", ...}
+    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_by_agent_id = Column(String(64), nullable=True)
+
+    # Security — skills can ship code, so privileged by default
+    integrity_hash = Column(String(64), nullable=True)
+    content_flags = Column(JSON, nullable=False, default=list)
+    trust_level = Column(String(16), nullable=False, default="privileged")
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('ix_skills_lookup', 'project_id', 'namespace', 'name', unique=True),
+        Index('ix_skills_active', 'project_id', 'namespace',
+              postgresql_where=text('is_active = true')),
+        Index(
+            'ix_skills_desc_hnsw',
+            'description_embedding',
+            postgresql_using='hnsw',
+            postgresql_with={'m': 16, 'ef_construction': 64},
+            postgresql_ops={'description_embedding': 'vector_cosine_ops'},
+        ),
+    )
+
+
+class Subagent(Base):
+    """
+    Subagent definition (Context Hub v2.3.0).
+
+    Declares a delegation target: name, description, model, allowed tools,
+    allowed memory scopes, allowed skills, and either an inline system prompt
+    or a reference to a versioned Prompt by name.
+    """
+    __tablename__ = "subagents"
+
+    id = Column(String(32), primary_key=True)
+    project_id = Column(String(64), nullable=False)
+    namespace = Column(String(64), nullable=False, default="default")
+
+    name = Column(String(128), nullable=False)
+    description = Column(Text, nullable=False)
+
+    # Either inline OR reference a Prompt by name
+    system_prompt = Column(Text, nullable=True)
+    system_prompt_ref = Column(String(128), nullable=True)
+
+    model = Column(String(64), nullable=True)
+    tools = Column(JSON, nullable=False, default=list)
+    allowed_scopes = Column(JSON, nullable=False, default=list)
+    allowed_skills = Column(JSON, nullable=False, default=list)
+    parent_agent_id = Column(String(64), nullable=True)
+
+    is_active = Column(Boolean, nullable=False, default=True)
+    integrity_hash = Column(String(64), nullable=True)
+    trust_level = Column(String(16), nullable=False, default="internal")
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('ix_subagents_lookup', 'project_id', 'namespace', 'name', unique=True),
+        Index('ix_subagents_parent', 'project_id', 'parent_agent_id'),
     )
 
 

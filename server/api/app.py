@@ -26,12 +26,16 @@ from api.routers import (
     ace_reflections,
     ace_runs,
     ace_votes,
+    context_bundle,
     dashboard,
     decay,
     handoffs,
     interaction_events,
     memories,
+    prompts,
     security,
+    skills,
+    subagents,
     typed_memory,
 )
 
@@ -148,6 +152,12 @@ def create_app() -> FastAPI:
 
     # Security (v2.0.0)
     app.include_router(security.router, prefix="/security", tags=["security"])
+
+    # Context Hub (v2.3.0)
+    app.include_router(prompts.router, prefix="/prompts", tags=["context-hub", "prompts"])
+    app.include_router(skills.router, prefix="/skills", tags=["context-hub", "skills"])
+    app.include_router(subagents.router, prefix="/subagents", tags=["context-hub", "subagents"])
+    app.include_router(context_bundle.router, prefix="/context", tags=["context-hub"])
 
     # Dashboard
     app.include_router(dashboard.router)

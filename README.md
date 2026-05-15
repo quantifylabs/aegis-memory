@@ -55,6 +55,36 @@ We audited the docs, repos, and changelogs of every major memory tool.[^comparis
 | Security audit trail | — | — | — | Immutable event log |
 | Sensitive data protection | — | — | — | Auto-detect + reject/redact/flag |
 
+## The Context Hub (v2.3.0)
+
+Aegis is the only OSS context hub. Four artifacts, one secure surface, one API call to load them all:
+
+| Artifact | What it is | Endpoint |
+|---|---|---|
+| **Prompts** | Versioned, with one active version per name | `/prompts/*` |
+| **Memory** | What we've always done — secure, ranked, decayed | `/memories/*` |
+| **Skills** | Anthropic Agent Skills spec, semantic activation | `/skills/*` |
+| **Subagents** | Delegation surface with tool + scope policy | `/subagents/*` |
+| **Bundle** | Load all four in one call, token-budgeted | `POST /context/load` |
+
+Every artifact: HMAC integrity-signed. Content-scanned. Trust-gated. Audit-logged.
+
+```python
+from aegis_memory import AegisClient
+client = AegisClient(api_key="...")
+
+bundle = client.load_context(
+    agent_id="executor",
+    query="paginate the orders API",
+    token_budget=8000,
+)
+# → ranked memories + active prompt + matched skills + available subagents
+# → integrity-verified across all four
+# → token-budgeted to fit your model
+```
+
+Other context hubs (LangSmith, MindStudio) are closed-source. Other memory layers (mem0, Zep, Letta) stop at memory. Aegis does both, with security as the foundation.
+
 ## Built for a World Where Agents Get Compromised
 
 Aegis implements [OWASP AI Agent Security](https://cheatsheetseries.owasp.org/cheatsheets/AI_Agent_Security_Cheat_Sheet.html) recommendations natively. Six capabilities, none optional:

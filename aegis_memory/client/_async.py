@@ -1125,3 +1125,157 @@ class AsyncAegisClient:
         resp = await self.client.get("/security/config")
         resp.raise_for_status()
         return resp.json()
+
+    # ---------- Context Hub: Prompts (v2.3.0) ----------
+
+    async def create_prompt(
+        self,
+        name: str,
+        content: str,
+        namespace: str = "default",
+        description: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        agent_id: Optional[str] = None,
+        activate: bool = True,
+    ) -> Dict[str, Any]:
+        resp = await self.client.post("/prompts/", json={
+            "name": name, "content": content, "namespace": namespace,
+            "description": description, "tags": tags, "agent_id": agent_id,
+            "activate": activate,
+        })
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_prompt(self, name: str, namespace: str = "default") -> Dict[str, Any]:
+        resp = await self.client.get(f"/prompts/{name}", params={"namespace": namespace})
+        resp.raise_for_status()
+        return resp.json()
+
+    async def list_prompt_versions(
+        self, name: str, namespace: str = "default"
+    ) -> List[Dict[str, Any]]:
+        resp = await self.client.get(f"/prompts/{name}/versions", params={"namespace": namespace})
+        resp.raise_for_status()
+        return resp.json()
+
+    async def activate_prompt_version(
+        self, name: str, version: int, namespace: str = "default"
+    ) -> Dict[str, Any]:
+        resp = await self.client.post(
+            f"/prompts/{name}/activate/{version}", params={"namespace": namespace}
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    # ---------- Context Hub: Skills (v2.3.0) ----------
+
+    async def create_skill(
+        self,
+        name: str,
+        description: str,
+        skill_md: str,
+        bundled_files: Optional[Dict[str, str]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        version: str = "1.0.0",
+        namespace: str = "default",
+        agent_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        resp = await self.client.post("/skills/", json={
+            "name": name, "description": description, "skill_md": skill_md,
+            "bundled_files": bundled_files or {}, "metadata": metadata or {},
+            "version": version, "namespace": namespace, "agent_id": agent_id,
+        })
+        resp.raise_for_status()
+        return resp.json()
+
+    async def list_skills(self, namespace: str = "default") -> List[Dict[str, Any]]:
+        resp = await self.client.get("/skills/", params={"namespace": namespace})
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_skill(self, name: str, namespace: str = "default") -> Dict[str, Any]:
+        resp = await self.client.get(f"/skills/{name}", params={"namespace": namespace})
+        resp.raise_for_status()
+        return resp.json()
+
+    async def match_skills(
+        self,
+        query: str,
+        namespace: str = "default",
+        top_k: int = 3,
+        min_score: float = 0.3,
+    ) -> List[Dict[str, Any]]:
+        resp = await self.client.post("/skills/search", json={
+            "query": query, "namespace": namespace,
+            "top_k": top_k, "min_score": min_score,
+        })
+        resp.raise_for_status()
+        return resp.json()
+
+    # ---------- Context Hub: Subagents (v2.3.0) ----------
+
+    async def create_subagent(
+        self,
+        name: str,
+        description: str,
+        system_prompt: Optional[str] = None,
+        system_prompt_ref: Optional[str] = None,
+        model: Optional[str] = None,
+        tools: Optional[List[str]] = None,
+        allowed_scopes: Optional[List[str]] = None,
+        allowed_skills: Optional[List[str]] = None,
+        parent_agent_id: Optional[str] = None,
+        namespace: str = "default",
+    ) -> Dict[str, Any]:
+        resp = await self.client.post("/subagents/", json={
+            "name": name, "description": description,
+            "system_prompt": system_prompt, "system_prompt_ref": system_prompt_ref,
+            "model": model, "tools": tools, "allowed_scopes": allowed_scopes,
+            "allowed_skills": allowed_skills, "parent_agent_id": parent_agent_id,
+            "namespace": namespace,
+        })
+        resp.raise_for_status()
+        return resp.json()
+
+    async def list_subagents(
+        self,
+        parent_agent_id: Optional[str] = None,
+        namespace: str = "default",
+    ) -> List[Dict[str, Any]]:
+        params: Dict[str, Any] = {"namespace": namespace}
+        if parent_agent_id:
+            params["parent_agent_id"] = parent_agent_id
+        resp = await self.client.get("/subagents/", params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+    # ---------- Context Hub: Load (the unifying call) (v2.3.0) ----------
+
+    async def load_context(
+        self,
+        agent_id: str,
+        query: Optional[str] = None,
+        task_type: Optional[str] = None,
+        namespace: str = "default",
+        token_budget: int = 8000,
+        prompt_name: Optional[str] = None,
+        include_skills: bool = True,
+        include_subagents: bool = True,
+        memory_top_k: int = 10,
+        skill_top_k: int = 3,
+        apply_decay: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        The unifying call: returns prompt + memories + skills + subagents
+        for an agent, token-budgeted and integrity-verified.
+        """
+        resp = await self.client.post("/context/load", json={
+            "agent_id": agent_id, "query": query, "task_type": task_type,
+            "namespace": namespace, "token_budget": token_budget,
+            "prompt_name": prompt_name, "include_skills": include_skills,
+            "include_subagents": include_subagents,
+            "memory_top_k": memory_top_k, "skill_top_k": skill_top_k,
+            "apply_decay": apply_decay,
+        })
+        resp.raise_for_status()
+        return resp.json()

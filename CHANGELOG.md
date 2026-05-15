@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-05-15
+
+### Added
+
+- **Context Hub** — Aegis is now a full context hub, not just a memory layer. Three new artifact types plus a unifying load endpoint:
+  - **Versioned Prompts** (`/prompts/*`) — multiple versions per name, exactly one active per `(project_id, namespace, name)`. Auto-extracts `{{variable}}` names. HMAC-signed, content-scanned, trust-gated.
+  - **Skills** (`/skills/*`) — follows Anthropic's open Agent Skills spec. SKILL.md body + optional bundled files (scripts, references). Description is embedded for semantic activation matching (HNSW index). Default `trust_level=privileged` because skills can ship executable code.
+  - **Subagents** (`/subagents/*`) — declarative delegation surface: name, description, model, allowed tools, allowed memory scopes, allowed skills, parent agent. Requires either inline `system_prompt` or `system_prompt_ref` to a versioned Prompt.
+  - **`POST /context/load`** — the unifying call. Returns prompt + ranked memories + matched skills + available subagents in a single token-budgeted, integrity-verified bundle. Configurable budget split (defaults: 15% prompt / 55% memories / 25% skills / 5% subagents).
+- New ORM classes: `Prompt`, `Skill`, `Subagent` in `server/models.py`
+- New repositories: `PromptRepository`, `SkillRepository`, `SubagentRepository` (static async methods, repository pattern)
+- New service: `ContextBundleService` in `server/context_bundle.py` — token-budgeted assembly across all four artifact types
+- Alembic migration `0008_context_hub` — single transactional unit, includes HNSW index on skill description embeddings
+- 4 new `MemoryEventType` entries: `PROMPT_CREATED`, `SKILL_CREATED`, `SUBAGENT_CREATED`, `CONTEXT_LOADED` (all written through `EventRepository.create_event` for audit logging)
+- SDK methods on `AegisClient` and `AsyncAegisClient`: `create_prompt`, `get_prompt`, `list_prompt_versions`, `activate_prompt_version`, `create_skill`, `list_skills`, `get_skill`, `match_skills`, `create_subagent`, `list_subagents`, `load_context`
+- Integration tests in `tests/test_context_hub.py` (prompt versioning, skill semantic match, subagent contract, full bundle assembly)
+
+### Changed
+
+- `pyproject.toml`: 2.2.0 → 2.3.0
+- README: new "The Context Hub" section before the security comparison table
+- `server/api/app.py`: mounts 4 new routers under `/prompts`, `/skills`, `/subagents`, `/context`
+
+### Security
+
+- All four artifact types pass through the existing 4-stage content security pipeline
+- HMAC-SHA256 integrity hashes computed at create time, verified during `/context/load` assembly
+- `Skill` defaults to `trust_level=privileged`; `Subagent` and `Prompt` default to `internal`
+- Bundled skill files (`scripts/*`, `references/*`) are not run through the prompt-injection regex (false positives on legitimate code) — only the description + SKILL.md body are scanned
+
 ## [2.1.0] - 2026-03-01
 
 ### Added

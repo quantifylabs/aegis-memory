@@ -152,6 +152,7 @@ temp/
 # Internal planning files (do not commit)
 ROADMAP.md
 TUTORIALS.md
+CONTEXT_HUB_BUILD.md
 aegis-deploy/
 aegis_www/
 tmpclaude-*/
