@@ -81,7 +81,8 @@ class TestAceRunModel:
 
     def test_event_type_total_count(self):
         from models import MemoryEventType
-        assert len(MemoryEventType) == 16
+        # 16 baseline + 4 Context Hub (v2.3.0) + 4 Memory Depth (v2.4.0)
+        assert len(MemoryEventType) == 24
 
 
 # ============================================================================
@@ -876,4 +877,4 @@ class TestExports:
 
     def test_version_bumped(self):
         from aegis_memory import __version__
-        assert __version__ == "2.1.0"
+        assert __version__ == "2.4.0"

@@ -83,6 +83,16 @@ class MemoryQuery(BaseModel):
     apply_decay: bool = False
 
 
+class MemoryHybridQuery(BaseModel):
+    query: str = Field(..., min_length=1, max_length=10_000)
+    user_id: str | None = None
+    agent_id: str | None = None
+    namespace: str = "default"
+    top_k: int = Field(default=10, ge=1, le=100)
+    candidate_pool: int = Field(default=40, ge=10, le=200)
+    apply_decay: bool = False
+
+
 class CrossAgentQuery(BaseModel):
     query: str = Field(..., min_length=1, max_length=10_000)
     requesting_agent_id: str = Field(..., min_length=1, max_length=64)
@@ -293,6 +303,44 @@ async def query_memories(body: MemoryQuery, project_id: str = Depends(check_rate
         await MemoryRepository.touch_accessed(db, retrieved_ids)
         record_operation(OperationNames.MEMORY_QUERY, "success")
         return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2), retrieval_event_id=event.event_id)
+    except Exception:
+        record_operation(OperationNames.MEMORY_QUERY, "error")
+        raise
+
+
+@router.post("/hybrid_query")
+async def hybrid_query(body: MemoryHybridQuery, project_id: str = Depends(check_rate_limit), db: AsyncSession = Depends(get_read_db)):
+    """Hybrid retrieval: dense + sparse + RRF fusion (Memory Depth v2.4.0)."""
+    start = time.monotonic()
+    try:
+        with track_latency(OperationNames.MEMORY_QUERY):
+            embed_service = get_embedding_service()
+            query_embedding = await embed_service.embed_single(body.query, db)
+            results, meta = await MemoryRepository.hybrid_search(
+                db,
+                query=body.query,
+                query_embedding=query_embedding,
+                project_id=project_id,
+                namespace=body.namespace,
+                requesting_agent_id=body.agent_id,
+                top_k=body.top_k,
+                candidate_pool=body.candidate_pool,
+                apply_decay=body.apply_decay,
+            )
+        elapsed_ms = (time.monotonic() - start) * 1000
+        record_operation(OperationNames.MEMORY_QUERY, "success")
+        return {
+            "results": [
+                {
+                    "id": m.id, "content": m.content, "score": s,
+                    "memory_type": m.memory_type, "scope": m.scope,
+                    "effectiveness": m.get_effectiveness_score(),
+                    "agent_id": m.agent_id,
+                } for m, s in results
+            ],
+            "meta": meta,
+            "query_time_ms": round(elapsed_ms, 2),
+        }
     except Exception:
         record_operation(OperationNames.MEMORY_QUERY, "error")
         raise

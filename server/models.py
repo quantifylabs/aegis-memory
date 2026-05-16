@@ -21,7 +21,9 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Column,
+    Computed,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -30,6 +32,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
@@ -154,6 +157,11 @@ class MemoryEventType(str, Enum):
     SKILL_CREATED = "skill_created"
     SUBAGENT_CREATED = "subagent_created"
     CONTEXT_LOADED = "context_loaded"
+    # Memory Depth (v2.4.0)
+    CONTRADICTION_DETECTED = "contradiction_detected"
+    EDGE_CREATED = "edge_created"
+    EDGE_RESOLVED = "edge_resolved"
+    MEMORIES_CONSOLIDATED = "memories_consolidated"
 
 
 class Memory(Base):
@@ -224,6 +232,14 @@ class Memory(Base):
     integrity_hash = Column(String(64), nullable=True)          # HMAC-SHA256 tamper detection
     content_flags = Column(JSON, nullable=False, default=list)   # ["pii_detected", "injection_flagged", ...]
     trust_level = Column(String(16), nullable=False, default="internal")  # TrustLevel enum value
+
+    # Memory Depth (v2.4.0): sparse-retrieval tsvector, Postgres-generated.
+    # Maps to `GENERATED ALWAYS AS to_tsvector('english', content) STORED`.
+    content_tsv = Column(
+        TSVECTOR,
+        Computed("to_tsvector('english', content)", persisted=True),
+        nullable=True,
+    )
 
     # Relationships
     votes = relationship("VoteHistory", back_populates="memory", cascade="all, delete-orphan")
@@ -700,6 +716,44 @@ class Subagent(Base):
     __table_args__ = (
         Index('ix_subagents_lookup', 'project_id', 'namespace', 'name', unique=True),
         Index('ix_subagents_parent', 'project_id', 'parent_agent_id'),
+    )
+
+
+class MemoryEdge(Base):
+    """
+    Typed edge between two memories (Memory Depth v2.4.0).
+
+    edge_type:
+        supersedes    - source replaces target; target is stale
+        contradicts   - source and target make incompatible claims
+        generalizes   - source is the abstract case of target
+        elaborates    - source adds detail to target
+        derives_from  - source was synthesized from target
+        entity_rel    - source and target share an entity link
+
+    resolution: unresolved | kept_source | kept_target | both_valid | both_invalid
+    """
+    __tablename__ = "memory_edges"
+
+    id = Column(String(32), primary_key=True)
+    project_id = Column(String(64), nullable=False)
+    source_memory_id = Column(String(32), nullable=False)
+    target_memory_id = Column(String(32), nullable=False)
+    edge_type = Column(String(32), nullable=False)
+    confidence = Column(Float, nullable=False, default=1.0)
+    detected_by = Column(String(64), nullable=False, default="manual")
+    detected_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    metadata_json = Column("metadata", JSON, nullable=False, default=dict)
+    resolution = Column(String(32), nullable=False, default="unresolved")
+    resolved_by = Column(String(64), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index('ix_edges_source', 'project_id', 'source_memory_id'),
+        Index('ix_edges_target', 'project_id', 'target_memory_id'),
+        Index('ix_edges_type_resolution', 'project_id', 'edge_type', 'resolution'),
+        Index('ix_edges_pair_unique', 'source_memory_id', 'target_memory_id', 'edge_type', unique=True),
     )
 
 

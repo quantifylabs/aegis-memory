@@ -55,7 +55,7 @@ We audited the docs, repos, and changelogs of every major memory tool.[^comparis
 | Security audit trail | — | — | — | Immutable event log |
 | Sensitive data protection | — | — | — | Auto-detect + reject/redact/flag |
 
-## The Context Hub (v2.3.0)
+## The Context Hub (v2.3.0+)
 
 Aegis is the only OSS context hub. Four artifacts, one secure surface, one API call to load them all:
 
@@ -84,6 +84,33 @@ bundle = client.load_context(
 ```
 
 Other context hubs (LangSmith, MindStudio) are closed-source. Other memory layers (mem0, Zep, Letta) stop at memory. Aegis does both, with security as the foundation.
+
+## Memory Depth (v2.4.0)
+
+Beyond storing memories, Aegis owns their lifecycle. mem0, Zep, and Letta ship variants of these primitives; what's distinct in Aegis is the *audit-preserving* and *human-reviewable* shape of each one — typed edges with explicit resolution states, consolidation that soft-deprecates rather than deletes.
+
+**Hybrid retrieval.** Every query runs through dense (pgvector cosine) *and* sparse (PostgreSQL tsvector) channels, fused with Reciprocal Rank Fusion. Catches the exact-match cases (entity names, error codes, tool names, file paths) that pure embedding similarity blurs.
+
+```python
+results = client.hybrid_query(query="ZX7-PAGE-94 cursor pagination", agent_id="executor")
+```
+
+**Contradiction detection.** When two memories make incompatible claims, Aegis surfaces the conflict as a `contradicts` edge — a typed link with confidence and rationale. Resolve via API.
+
+```python
+client.scan_contradictions(namespace="default")
+unresolved = client.list_contradictions()
+client.resolve_edge(edge_id=..., resolution="kept_source")
+metrics = client.contradiction_metrics()
+# → {"unresolved_contradictions": 3, "total_contradictions_detected": 17}
+```
+
+**Semantic consolidation.** Real merge, not prefix matching. Embedding-similar memories above threshold get merged via heuristic or LLM, with full audit trail (losing memory stays queryable with `is_deprecated=True` and `metadata.consolidated_into`).
+
+```python
+plan = client.consolidate_memories(dry_run=True)   # review first
+client.consolidate_memories(dry_run=False)         # then apply
+```
 
 ## Built for a World Where Agents Get Compromised
 
@@ -222,6 +249,8 @@ Different tools solve different problems. This comparison stays focused on capab
 
 ### Quick Feature Comparison
 
+Memory-depth primitives (hybrid retrieval, contradiction handling, consolidation) are now table stakes — mem0, Zep, Letta, and Aegis all ship variants in 2026.[^memory-depth-sources] The differences are in *how*, not *whether*.
+
 | Capability | mem0 | Graphiti / Zep | Letta | Aegis Memory |
 |---|---|---|---|---|
 | **Primary focus** | Assistant personalization | Graph-based episodic memory | Stateful agents | Secure context engineering |
@@ -236,6 +265,10 @@ Different tools solve different problems. This comparison stays focused on capab
 | **ACE loop** | — | — | — | Yes |
 | **Typed memory model** | — | — | — | Yes |
 | **Temporal decay** | — | Partial | — | Yes |
+| **Hybrid retrieval (dense + sparse + RRF)** | Semantic + BM25 + entity | Semantic + keyword + graph | Yes (RRF) | Yes (pgvector + tsvector + RRF) |
+| **Contradiction detection** | Mem0g (graph variant, LLM) | LLM + temporal invalidation | — | Typed `contradicts` edge, cheap + optional LLM, **explicit resolution workflow** |
+| **Semantic consolidation** | LLM-merge + DELETE losers | Temporal supersession | — | LLM/heuristic merge + **audit-preserving** (`is_deprecated=True` + `consolidated_into`) |
+| **Unified context hub (prompts + memory + skills + subagents)** | — | — | — | Yes |
 
 ### When to Pick Aegis
 
@@ -245,6 +278,9 @@ Pick **Aegis Memory** when most of these are true:
 - You need **multiple agents** to share memory safely with explicit ACL/scopes.
 - You need **handoffs** where one agent passes a reliable state bundle to another.
 - You want **ACE patterns** (vote/reflection/playbook) to continuously improve memory quality.
+- You want **hybrid retrieval** that catches exact-token cases (entity names, error codes, file paths) without giving up semantic similarity.
+- You need **contradiction tracking that's reviewable**, not just auto-deleted — typed edges with explicit `kept_source` / `kept_target` / `both_valid` / `both_invalid` resolutions, plus a `/metrics` endpoint for measuring epistemic conflict over time.
+- You need **consolidation with an audit trail** — losing memories stay queryable (`is_deprecated=True`, `metadata.consolidated_into`) rather than being deleted.
 - You prefer a **self-host posture** with operational control over storage and deployment.
 - You need **temporal decay** so stale memories don't pollute retrieval over time.
 
@@ -336,3 +372,4 @@ Built by engineers who read the [OWASP reports](https://cheatsheetseries.owasp.o
 [^drift]: CVE-2025-32711 zero-click AI vulnerability analysis. [socprime.com/blog/cve-2025-32711-zero-click-ai-vulnerability/](https://socprime.com/blog/cve-2025-32711-zero-click-ai-vulnerability/)
 [^owasp-top10]: OWASP Top 10 for Agentic Applications (2026). [genai.owasp.org](https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/)
 [^comparison]: Security comparison based on public documentation and open-source repositories as of February 2026. Sources: [mem0 docs](https://docs.mem0.ai/) | [Zep docs](https://help.getzep.com/) | [Letta repo](https://github.com/letta-ai/letta) | [Aegis docs](https://docs.aegismemory.com/)
+[^memory-depth-sources]: Memory-depth feature claims verified May 2026 against vendor blogs and docs. Sources: [mem0 State of AI Agent Memory 2026](https://mem0.ai/blog/state-of-ai-agent-memory-2026) (hybrid: semantic + BM25 + entity), [mem0 architecture](https://mem0.ai/blog/what-is-ai-agent-memory) (consolidation, Mem0g contradiction resolver), [Graphiti / Zep paper](https://arxiv.org/html/2501.13956v1) and [Neo4j writeup](https://neo4j.com/blog/developer/graphiti-knowledge-graph-memory/) (LLM-based edge contradiction with temporal invalidation), [Letta archival search docs](https://docs.letta.com/guides/agents/archival-search/) (RRF hybrid). Aegis design choices documented in [server/contradiction_detector.py](server/contradiction_detector.py) and [server/consolidation.py](server/consolidation.py).

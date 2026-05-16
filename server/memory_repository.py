@@ -367,6 +367,62 @@ class MemoryRepository:
         }
 
     @staticmethod
+    async def hybrid_search(
+        db: AsyncSession,
+        *,
+        query: str,
+        query_embedding: list[float],
+        project_id: str,
+        namespace: str = "default",
+        requesting_agent_id: str | None = None,
+        top_k: int = 10,
+        candidate_pool: int = 40,
+        apply_decay: bool = False,
+    ) -> tuple[list[tuple[Memory, float]], dict]:
+        """Hybrid retrieval via HybridRetriever. Optional decay rerank.
+
+        Mirrors the ACL behavior of semantic_search() by filtering results
+        in Python against `can_access` after the two channels are fused.
+        For the typical top_k <= 100 that's a few microseconds, but if this
+        grows we can push the scope_filter into the dense/sparse queries.
+        """
+        from hybrid_retrieval import HybridRetriever
+
+        results = await HybridRetriever.search(
+            db, query=query, query_embedding=query_embedding,
+            project_id=project_id, namespace=namespace,
+            top_k=top_k, candidate_pool=candidate_pool,
+        )
+
+        # ACL filter (mirror semantic_search behavior).
+        if requesting_agent_id is not None:
+            results = [
+                (m, s) for (m, s) in results
+                if m.can_access(requesting_agent_id)
+            ]
+        else:
+            results = [
+                (m, s) for (m, s) in results
+                if m.scope == MemoryScope.GLOBAL.value
+            ]
+
+        if apply_decay and results:
+            now = datetime.now(timezone.utc)
+            reranked = []
+            for mem, score in results:
+                rel = compute_relevance_score(mem, now)
+                reranked.append((mem, score * rel))
+            reranked.sort(key=lambda x: x[1], reverse=True)
+            results = reranked
+
+        meta = {
+            "mode": "hybrid",
+            "candidate_pool": candidate_pool,
+            "decay_applied": apply_decay,
+        }
+        return results, meta
+
+    @staticmethod
     async def find_duplicates(
         db: AsyncSession,
         *,

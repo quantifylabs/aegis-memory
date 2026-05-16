@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aegis-memory"
-version = "2.3.0"
+version = "2.4.0"
 description = "Secure context engineering layer for AI agents. Content security, integrity verification, trust hierarchy. Self-hosted, Apache 2.0."
 readme = "README.md"
 license = "Apache-2.0"

@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-05-16
+
+### Added
+
+- **Memory Depth** — three retrieval-and-lifecycle primitives that close the most-cited gaps vs mem0 / Zep / Letta. Each phase is independently shippable; this release lands all three together.
+  - **Hybrid retrieval** (`POST /memories/hybrid_query`) — two-channel retrieval combining the existing pgvector HNSW cosine search with a new PostgreSQL `tsvector` + GIN sparse channel. Results fused with Reciprocal Rank Fusion (Cormack et al. 2009, k=60 default). Equal channel weighting by default; integer `dense_weight` / `sparse_weight` knobs available. Catches exact-token cases (entity names, error codes, file paths) that pure embedding similarity blurs.
+  - **Memory graph + contradiction detection** — new `memory_edges` table with six typed edge types: `supersedes`, `contradicts`, `generalizes`, `elaborates`, `derives_from`, `entity_rel`. New `ContradictionDetector` (`server/contradiction_detector.py`) uses a two-stage strategy: cheap (cosine similarity ≥ 0.80 AND negation/opposition regex match) by default, with an optional `ContradictionLLM` adapter for stage-2 confirmation. Explicit resolution workflow with five states: `unresolved`, `kept_source`, `kept_target`, `both_valid`, `both_invalid`. New endpoints `POST /memories/contradictions/scan`, `GET /memories/contradictions/`, `GET /memories/contradictions/metrics` (the Simulation Reliability Index signal), `POST /memories/edges/`, `POST /memories/edges/{id}/resolve`, `GET /memories/edges/for-memory/{id}`.
+  - **Semantic consolidation** (`POST /memories/ace/consolidate`) — replaces the legacy 50-character prefix-match heuristic. New `SemanticConsolidator` (`server/consolidation.py`) finds embedding-pair candidates above a `similarity_threshold` (default 0.92), then merges via heuristic (keep higher effectiveness score) or optional LLM adapter. Audit-preserving by design: losing memories are marked `is_deprecated=True` with `metadata.consolidated_into` pointing at the keeper, not deleted. Defaults to `dry_run=True` — caller explicitly opts into application.
+- New ORM class: `MemoryEdge` in `server/models.py` with composite indexes (`ix_edges_source`, `ix_edges_target`, `ix_edges_type_resolution`, unique `ix_edges_pair_unique`)
+- New module: `server/hybrid_retrieval.py` (`HybridRetriever`, `reciprocal_rank_fusion`)
+- New module: `server/memory_graph.py` (`MemoryGraphRepository`, `EdgeType`, `EdgeResolution` enums)
+- New module: `server/contradiction_detector.py` (`ContradictionDetector` with `ContradictionLLM` Protocol)
+- New module: `server/consolidation.py` (`SemanticConsolidator` with `ConsolidationLLM` Protocol)
+- New routers: `server/api/routers/memory_edges.py`, `server/api/routers/contradictions.py`
+- Repository method: `MemoryRepository.hybrid_search` with ACL filtering that mirrors `semantic_search` behavior and optional decay rerank
+- Generated column: `Memory.content_tsv` (`GENERATED ALWAYS AS to_tsvector('english', content) STORED`) with GIN index `ix_memories_content_tsv`; same on `interaction_events` with `ix_events_content_tsv`
+- Alembic migration `0009_memory_depth` — tsvector columns + GIN indexes + `memory_edges` table
+- 4 new `MemoryEventType` entries: `CONTRADICTION_DETECTED`, `EDGE_CREATED`, `EDGE_RESOLVED`, `MEMORIES_CONSOLIDATED` (all routed through `EventRepository.create_event` for audit logging)
+- SDK methods on `AegisClient`: `hybrid_query`, `scan_contradictions`, `list_contradictions`, `contradiction_metrics`, `create_edge`, `resolve_edge`, `get_edges_for_memory`, `consolidate_memories`
+- Integration tests in `tests/test_memory_depth.py` — 30 standalone unit checks (schema, RRF math, regex, cosine, router wiring, migration, SDK surface) plus 4 end-to-end tests (hybrid exact-token, contradiction scan, SRI metrics, consolidation dry-run)
+- New test fixture `async_client` in `tests/conftest.py` — spins up the FastAPI app via `httpx.ASGITransport`, against a real PostgreSQL test database (`aegis_test`). Resets schema per session, truncates tables per test. Patches the engine to use `NullPool` (avoids cross-event-loop crashes under pytest-asyncio) and `embedding_service.get_embedding_service` to a deterministic fake (uses `sentence-transformers/all-MiniLM-L6-v2` if available, char-ngram hashing trick otherwise). Skips cleanly if Postgres isn't reachable.
+
+### Changed
+
+- `pyproject.toml`: 2.3.0 → 2.4.0
+- `aegis_memory/__init__.py`: `__version__` 2.2.0 → 2.4.0
+- README:
+  - New "Memory Depth (v2.4.0)" section after the Context Hub block
+  - "Quick Feature Comparison" table extended with three new rows (hybrid retrieval, contradiction detection, semantic consolidation) — and honest framing that mem0/Zep/Letta ship variants of these too; Aegis differs on audit-preservation, explicit resolution workflow, and OSS-first posture
+  - "When to Pick Aegis" extended with three new bullets matching the new capabilities
+  - New `[^memory-depth-sources]` footnote citing mem0/Zep/Letta primary sources used to write the comparison
+- `server/api/app.py`: mounts 2 new routers under `/memories/edges` and `/memories/contradictions`
+- `server/api/routers/ace_curation.py`: imports `HTTPException`, adds `ConsolidateRequest` model and `/consolidate` endpoint (the legacy 50-char prefix matcher in `ACERepository.curate` is left in place as a cheap read-only health report)
+- `tests/test_ace_loop.py` + `tests/test_interaction_events.py`: updated stale `len(MemoryEventType) == 16` to 24 (16 baseline + 4 Context Hub + 4 Memory Depth) and stale `__version__ == "2.1.0"` to `"2.4.0"`. These assertions were already drifted before v2.4.0 — fixed during this release.
+
+### Security
+
+- All new edges and consolidation events flow through `EventRepository.create_event` for the immutable audit trail (`memory_events` table)
+- Consolidation is audit-preserving: losing memories remain queryable with `is_deprecated=True` and `metadata.consolidated_into` — no destructive DELETE of facts in flight
+- Contradiction resolution requires an explicit caller-supplied state (`kept_source`, `kept_target`, `both_valid`, `both_invalid`) — the system never silently invalidates conflicting memories
+- `hybrid_search` enforces the same scope-aware access control as `semantic_search`: global-only when no `requesting_agent_id` is provided, otherwise full agent-private / agent-shared / global ACL filter (mirrors the `Memory.can_access` logic)
+
 ## [2.3.0] - 2026-05-15
 
 ### Added

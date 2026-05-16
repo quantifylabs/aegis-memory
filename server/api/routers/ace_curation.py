@@ -12,7 +12,7 @@ from api.dependencies.auth import check_rate_limit
 from api.dependencies.database import get_db
 from embedding_service import get_embedding_service
 from event_repository import EventRepository
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from models import MemoryEventType
 from observability import OperationNames, record_operation, track_latency
 from pydantic import BaseModel, Field
@@ -207,3 +207,49 @@ async def curate(
     except Exception:
         record_operation(OperationNames.MEMORY_CURATE, "error")
         raise
+
+
+# ---------- Memory Depth: Semantic Consolidation (v2.4.0) ----------
+
+class ConsolidateRequest(BaseModel):
+    namespace: str = "default"
+    agent_id: str | None = None
+    dry_run: bool = True
+    similarity_threshold: float = Field(default=0.92, ge=0.7, le=0.99)
+    max_pairs: int = Field(default=25, ge=1, le=100)
+    use_llm: bool = False
+
+
+@router.post("/consolidate")
+async def consolidate_memories(
+    body: ConsolidateRequest,
+    project_id: str = Depends(check_rate_limit),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Semantic consolidation (Memory Depth v2.4.0).
+
+    Real merge, not prefix matching. Embedding-similar memories above
+    `similarity_threshold` get merged via heuristic (keep higher-effectiveness)
+    or LLM, with full audit trail (losing memory stays queryable with
+    is_deprecated=True and metadata.consolidated_into).
+
+    dry_run=True (default) returns the plan without applying.
+    """
+    from consolidation import SemanticConsolidator
+
+    llm = None
+    if body.use_llm:
+        raise HTTPException(501, detail="LLM merge adapter not yet configured")
+
+    consolidator = SemanticConsolidator(
+        similarity_threshold=body.similarity_threshold, llm=llm,
+    )
+    return await consolidator.consolidate_batch(
+        db,
+        project_id=project_id,
+        namespace=body.namespace,
+        agent_id=body.agent_id,
+        dry_run=body.dry_run,
+        max_pairs=body.max_pairs,
+    )

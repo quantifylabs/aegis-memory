@@ -27,11 +27,13 @@ from api.routers import (
     ace_runs,
     ace_votes,
     context_bundle,
+    contradictions,
     dashboard,
     decay,
     handoffs,
     interaction_events,
     memories,
+    memory_edges,
     prompts,
     security,
     skills,
@@ -158,6 +160,10 @@ def create_app() -> FastAPI:
     app.include_router(skills.router, prefix="/skills", tags=["context-hub", "skills"])
     app.include_router(subagents.router, prefix="/subagents", tags=["context-hub", "subagents"])
     app.include_router(context_bundle.router, prefix="/context", tags=["context-hub"])
+
+    # Memory Depth (v2.4.0)
+    app.include_router(memory_edges.router, prefix="/memories/edges", tags=["memory-depth", "graph"])
+    app.include_router(contradictions.router, prefix="/memories/contradictions", tags=["memory-depth", "contradictions"])
 
     # Dashboard
     app.include_router(dashboard.router)

@@ -1673,6 +1673,120 @@ class AegisClient:
         resp.raise_for_status()
         return resp.json()
 
+    # ---------- Memory Depth (v2.4.0) ----------
+
+    def hybrid_query(
+        self,
+        query: str,
+        *,
+        agent_id: Optional[str] = None,
+        namespace: str = "default",
+        top_k: int = 10,
+        candidate_pool: int = 40,
+        apply_decay: bool = False,
+    ) -> Dict[str, Any]:
+        """Hybrid retrieval: dense + sparse + RRF fusion."""
+        resp = self.client.post("/memories/hybrid_query", json={
+            "query": query, "agent_id": agent_id, "namespace": namespace,
+            "top_k": top_k, "candidate_pool": candidate_pool,
+            "apply_decay": apply_decay,
+        })
+        resp.raise_for_status()
+        return resp.json()
+
+    def scan_contradictions(
+        self,
+        *,
+        memory_id: Optional[str] = None,
+        namespace: str = "default",
+        similarity_threshold: float = 0.80,
+        top_neighbors: int = 5,
+        batch_limit: int = 100,
+    ) -> Dict[str, Any]:
+        resp = self.client.post("/memories/contradictions/scan", json={
+            "memory_id": memory_id, "namespace": namespace,
+            "similarity_threshold": similarity_threshold,
+            "top_neighbors": top_neighbors, "batch_limit": batch_limit,
+        })
+        resp.raise_for_status()
+        return resp.json()
+
+    def list_contradictions(self, *, limit: int = 100) -> List[Dict[str, Any]]:
+        resp = self.client.get("/memories/contradictions/", params={"limit": limit})
+        resp.raise_for_status()
+        return resp.json()
+
+    def contradiction_metrics(self) -> Dict[str, Any]:
+        resp = self.client.get("/memories/contradictions/metrics")
+        resp.raise_for_status()
+        return resp.json()
+
+    def create_edge(
+        self,
+        source_memory_id: str,
+        target_memory_id: str,
+        edge_type: str,
+        *,
+        confidence: float = 1.0,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Manually create a typed edge between two memories."""
+        resp = self.client.post("/memories/edges/", json={
+            "source_memory_id": source_memory_id,
+            "target_memory_id": target_memory_id,
+            "edge_type": edge_type,
+            "confidence": confidence,
+            "metadata": metadata,
+        })
+        resp.raise_for_status()
+        return resp.json()
+
+    def resolve_edge(
+        self,
+        edge_id: str,
+        resolution: str,
+        *,
+        resolved_by: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """resolution: kept_source | kept_target | both_valid | both_invalid"""
+        resp = self.client.post(f"/memories/edges/{edge_id}/resolve", json={
+            "resolution": resolution, "resolved_by": resolved_by,
+        })
+        resp.raise_for_status()
+        return resp.json()
+
+    def get_edges_for_memory(
+        self,
+        memory_id: str,
+        *,
+        edge_type: Optional[str] = None,
+        include_resolved: bool = False,
+    ) -> List[Dict[str, Any]]:
+        params: Dict[str, Any] = {"include_resolved": include_resolved}
+        if edge_type:
+            params["edge_type"] = edge_type
+        resp = self.client.get(f"/memories/edges/for-memory/{memory_id}", params=params)
+        resp.raise_for_status()
+        return resp.json()
+
+    def consolidate_memories(
+        self,
+        *,
+        namespace: str = "default",
+        agent_id: Optional[str] = None,
+        dry_run: bool = True,
+        similarity_threshold: float = 0.92,
+        max_pairs: int = 25,
+    ) -> Dict[str, Any]:
+        """Semantic consolidation. dry_run=True by default -- review plans before applying."""
+        resp = self.client.post("/memories/ace/consolidate", json={
+            "namespace": namespace, "agent_id": agent_id,
+            "dry_run": dry_run, "similarity_threshold": similarity_threshold,
+            "max_pairs": max_pairs,
+        })
+        resp.raise_for_status()
+        return resp.json()
+
     # ---------- Helpers ----------
 
     def _parse_memory(self, data: Dict) -> Memory:
