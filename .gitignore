@@ -150,10 +150,13 @@ temp/
 .ruff_cache/
 
 # Internal planning files (do not commit)
+BENCHMARK_PLAN.md
 ROADMAP.md
 TUTORIALS.md
 CONTEXT_HUB_BUILD.md
 aegis-deploy/
 aegis_www/
+aegis-www-main/
+SKILL (2).md
 tmpclaude-*/
 .claude/
