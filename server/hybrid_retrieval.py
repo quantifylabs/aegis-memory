@@ -77,14 +77,26 @@ class HybridRetriever:
         dense_result = await db.execute(dense_stmt)
         dense_ranking = [row.id for row in dense_result]
 
-        # ---------- Sparse channel (tsvector) ----------
+        # ---------- Sparse channel (tsvector with OR-semantics for natural-language queries) ----------
+        # plainto_tsquery defaults to AND between lexemes, which fails for queries
+        # like "how do I fix error PG-2087" because 'fix' describes user intent, not
+        # document content. We convert AND -> OR so the channel ranks by overlap
+        # via ts_rank_cd rather than filtering by completeness. The dense channel
+        # carries semantic match; sparse is for lexical/identifier anchoring.
         sparse_stmt = text("""
-            SELECT id
-            FROM memories, plainto_tsquery('english', :q) AS query
-            WHERE project_id = :pid
-              AND namespace = :ns
-              AND content_tsv @@ query
-            ORDER BY ts_rank_cd(content_tsv, query) DESC
+            WITH q AS (
+                SELECT NULLIF(
+                    regexp_replace(plainto_tsquery('english', :q)::text, ' & ', ' | ', 'g'),
+                    ''
+                )::tsquery AS tsq
+            )
+            SELECT m.id
+            FROM memories m, q
+            WHERE q.tsq IS NOT NULL
+              AND m.project_id = :pid
+              AND m.namespace = :ns
+              AND m.content_tsv @@ q.tsq
+            ORDER BY ts_rank_cd(m.content_tsv, q.tsq) DESC
             LIMIT :pool
         """).bindparams(q=query, pid=project_id, ns=namespace, pool=candidate_pool)
         sparse_result = await db.execute(sparse_stmt)
