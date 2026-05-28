@@ -332,3 +332,30 @@ async def async_client(_integration_env):
     finally:
         # Dispose the engine in *this* loop so its connections close cleanly.
         await _db_mod.primary_engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# 9) Skip semantic-embedding tests when only the ngram fallback is available.
+#    A few tests assert behavior that needs real semantic embeddings (negation-
+#    pair contradiction detection, semantic skill matching). When sentence-
+#    transformers isn't installed, the embedder above falls back to a char-ngram
+#    hashing trick that can't model meaning, so those tests can't pass. CI runs
+#    the lean dependency set (no sentence-transformers), so skip them there.
+#    Centralized here so the policy lives in one place.
+# ---------------------------------------------------------------------------
+_SEMANTIC_DEPENDENT_SUFFIXES = (
+    "test_memory_depth.py::test_contradiction_scan_finds_negation_pair",
+    "test_context_hub.py::test_skill_create_and_match",
+)
+
+
+def pytest_collection_modifyitems(config, items):
+    if _SBERT is not None:
+        return
+    skip_marker = pytest.mark.skip(
+        reason="needs semantic embeddings (sentence-transformers); "
+        "ngram fallback can't model meaning"
+    )
+    for item in items:
+        if item.nodeid.endswith(_SEMANTIC_DEPENDENT_SUFFIXES):
+            item.add_marker(skip_marker)
