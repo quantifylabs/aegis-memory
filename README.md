@@ -16,6 +16,7 @@
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
   <a href="https://docs.aegismemory.com"><img src="https://img.shields.io/badge/docs-aegismemory.com-6366F1" alt="Docs"></a>
   <a href="https://deepwiki.com/quantifylabs/aegis-memory"><img src="https://img.shields.io/badge/DeepWiki-quantifylabs%2Faegis--memory-blue.svg" alt="DeepWiki"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/quantifylabs/aegis-memory"><img src="https://api.scorecard.dev/projects/github.com/quantifylabs/aegis-memory/badge" alt="OpenSSF Scorecard"></a>
 </p>
 
 <p align="center">
@@ -24,6 +25,7 @@
   <a href="https://www.aegismemory.com/blog/">Blog</a> •
   <a href="https://docs.aegismemory.com/quickstart/installation">Quickstart</a> •
   <a href="https://docs.aegismemory.com/guides/security">Security Guide</a>
+  
 </p>
 
 ---
