@@ -38,6 +38,6 @@ httpx>=0.27.0
 # Pulled in transitively (idna<-httpx, pygments<-pytest, tqdm<-openai); the loose
 # upstream bounds otherwise let known-vulnerable old versions resolve. These floors
 # pin to the first patched release of each advisory.
-idna>=3.15        # GHSA-65pc-fj4g-8rjx
+idna>=3.16        # GHSA-65pc-fj4g-8rjx
 pygments>=2.20.0  # PYSEC-2023-117, GHSA-5239-wwwm-4pmq
 tqdm>=4.66.3      # PYSEC-2017-74, GHSA-g7vv-2v7x-gj9p
