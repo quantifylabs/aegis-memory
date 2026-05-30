@@ -12,11 +12,15 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/quantifylabs/aegis-memory/actions/workflows/ci.yml"><img src="https://github.com/quantifylabs/aegis-memory/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://pypi.org/project/aegis-memory/"><img src="https://img.shields.io/pypi/v/aegis-memory?label=PyPI&color=blue" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/aegis-memory/"><img src="https://img.shields.io/pypi/dm/aegis-memory?label=downloads&color=brightgreen" alt="PyPI downloads"></a>
+  <a href="https://pypi.org/project/aegis-memory/"><img src="https://img.shields.io/pypi/pyversions/aegis-memory.svg" alt="Python versions"></a>
   <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License"></a>
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python 3.10+"></a>
-  <a href="https://docs.aegismemory.com"><img src="https://img.shields.io/badge/docs-aegismemory.com-6366F1" alt="Docs"></a>
   <a href="https://deepwiki.com/quantifylabs/aegis-memory"><img src="https://img.shields.io/badge/DeepWiki-quantifylabs%2Faegis--memory-blue.svg" alt="DeepWiki"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/quantifylabs/aegis-memory"><img src="https://api.scorecard.dev/projects/github.com/quantifylabs/aegis-memory/badge" alt="OpenSSF Scorecard"></a>
+  <a href="https://www.bestpractices.dev/projects/13029"><img src="https://www.bestpractices.dev/projects/13029/badge" alt="OpenSSF Best Practices"></a>
+  <a href="https://github.com/quantifylabs/aegis-memory"><img src="https://img.shields.io/github/stars/quantifylabs/aegis-memory?style=social" alt="GitHub stars"></a>
 </p>
 
 <p align="center">
