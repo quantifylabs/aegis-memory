@@ -1,0 +1,2554 @@
+{
+  "meta": {
+    "timestamp": "2026-05-31T12:06:32.801214+00:00",
+    "seed": 42,
+    "n_bootstrap": 1000,
+    "limit": null,
+    "python": "3.11.9",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "models": {
+      "openai": "gpt-4o-mini",
+      "anthropic": "claude-haiku-4-5-20251001"
+    },
+    "lib_versions": {
+      "transformers": "4.46.3",
+      "torch": "2.12.0+cpu",
+      "datasets": "2.19.1",
+      "openai": "2.38.0",
+      "anthropic": "0.105.2",
+      "llm_guard": "unknown"
+    },
+    "env": "loaded C:\\aegis-single-source-of-truth\\aegis-memory-main\\.env",
+    "stage4_note": "aegis_stages_1_4 forces Stage 4 via trust_level='untrusted' so the ablation measures its standalone contribution; production gates Stage 4 conditionally.",
+    "anthropic_rerun": "2026-05-31T13:09:15.038288+00:00",
+    "latency_note": "Anthropic-system latencies are from the live MAIN run; metrics from the fence-fix re-run (cache-served)."
+  },
+  "datasets": {
+    "deepset": {
+      "kind": "malicious_direct",
+      "n": 662,
+      "n_pos": 263,
+      "n_neg": 399,
+      "revision": "4f61ecb038e9c3fb77e21034b22511b523772cdd",
+      "source": "hf:deepset/prompt-injections",
+      "notes": "label 1=injection, 0=legitimate; all splits combined.",
+      "status": "ok",
+      "error": null
+    },
+    "injecagent": {
+      "kind": "malicious_indirect",
+      "n": 250,
+      "n_pos": 250,
+      "n_neg": 0,
+      "revision": "623f1bf3ad8ed35abe71f9f9d8fd9d99ad65aeea",
+      "source": "github:uiuc-kang-lab/InjecAgent",
+      "notes": "250 sampled (seed=42) from data/test_cases_dh_base.json, data/test_cases_ds_base.json; all malicious (indirect).",
+      "status": "ok",
+      "error": null
+    },
+    "benign_public": {
+      "kind": "benign",
+      "n": 750,
+      "n_pos": 0,
+      "n_neg": 750,
+      "revision": "bdd27f4d94b9c1f951818a7da7fd7aeea5dbff1a",
+      "source": "hf:databricks/databricks-dolly-15k",
+      "notes": "750 sampled (seed=42) from dolly context/response, length 20-500 chars; all benign.",
+      "status": "ok",
+      "error": null
+    },
+    "benign_synth": {
+      "kind": "benign",
+      "n": 750,
+      "n_pos": 0,
+      "n_neg": 750,
+      "revision": "builtin-v1",
+      "source": "synthetic:templated_memory_entries",
+      "notes": "750 templated memory-like entries (seed=42); all benign. Generator pinned as builtin-v1.",
+      "status": "ok",
+      "error": null
+    }
+  },
+  "systems": {
+    "no_protection": {
+      "status": "ok",
+      "reason": ""
+    },
+    "naive_regex": {
+      "status": "ok",
+      "reason": ""
+    },
+    "protectai_deberta": {
+      "status": "ok",
+      "reason": ""
+    },
+    "llm_guard": {
+      "status": "ok",
+      "reason": ""
+    },
+    "llm_judge_openai": {
+      "status": "ok",
+      "reason": ""
+    },
+    "llm_judge_anthropic": {
+      "status": "ok",
+      "reason": ""
+    },
+    "aegis_stages_1_3": {
+      "status": "ok",
+      "reason": ""
+    },
+    "aegis_stages_1_4_openai": {
+      "status": "ok",
+      "reason": ""
+    },
+    "aegis_stages_1_4_anthropic": {
+      "status": "ok",
+      "reason": ""
+    }
+  },
+  "results": {
+    "no_protection": {
+      "deepset": {
+        "n": 662,
+        "confusion": {
+          "tp": 0,
+          "fp": 0,
+          "tn": 399,
+          "fn": 263
+        },
+        "precision": null,
+        "recall": 0.0,
+        "f1": null,
+        "fpr": 0.0,
+        "accuracy": 0.6027190332326284,
+        "median_latency_ms": 0.0002998858690261841,
+        "ci95": {
+          "precision": null,
+          "recall": [
+            0.0,
+            0.0
+          ],
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      },
+      "injecagent": {
+        "n": 250,
+        "confusion": {
+          "tp": 0,
+          "fp": 0,
+          "tn": 0,
+          "fn": 250
+        },
+        "precision": null,
+        "recall": 0.0,
+        "f1": null,
+        "fpr": null,
+        "accuracy": 0.0,
+        "median_latency_ms": 0.000300002284348011,
+        "ci95": {
+          "precision": null,
+          "recall": [
+            0.0,
+            0.0
+          ],
+          "f1": null,
+          "fpr": null
+        },
+        "n_errors": 0
+      },
+      "benign_public": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 0,
+          "tn": 750,
+          "fn": 0
+        },
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0,
+        "accuracy": 1.0,
+        "median_latency_ms": 0.0002998858690261841,
+        "ci95": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      },
+      "benign_synth": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 0,
+          "tn": 750,
+          "fn": 0
+        },
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0,
+        "accuracy": 1.0,
+        "median_latency_ms": 0.0002998858690261841,
+        "ci95": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      }
+    },
+    "naive_regex": {
+      "deepset": {
+        "n": 662,
+        "confusion": {
+          "tp": 38,
+          "fp": 0,
+          "tn": 399,
+          "fn": 225
+        },
+        "precision": 1.0,
+        "recall": 0.1444866920152091,
+        "f1": 0.25249169435215946,
+        "fpr": 0.0,
+        "accuracy": 0.6601208459214502,
+        "median_latency_ms": 0.00609993003308773,
+        "ci95": {
+          "precision": [
+            1.0,
+            1.0
+          ],
+          "recall": [
+            0.10344827586206896,
+            0.18846311475409835
+          ],
+          "f1": [
+            0.19139556812824138,
+            0.3154367709017001
+          ],
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      },
+      "injecagent": {
+        "n": 250,
+        "confusion": {
+          "tp": 0,
+          "fp": 0,
+          "tn": 0,
+          "fn": 250
+        },
+        "precision": null,
+        "recall": 0.0,
+        "f1": null,
+        "fpr": null,
+        "accuracy": 0.0,
+        "median_latency_ms": 0.025150133296847343,
+        "ci95": {
+          "precision": null,
+          "recall": [
+            0.0,
+            0.0
+          ],
+          "f1": null,
+          "fpr": null
+        },
+        "n_errors": 0
+      },
+      "benign_public": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 0,
+          "tn": 750,
+          "fn": 0
+        },
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0,
+        "accuracy": 1.0,
+        "median_latency_ms": 0.020200153812766075,
+        "ci95": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      },
+      "benign_synth": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 0,
+          "tn": 750,
+          "fn": 0
+        },
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0,
+        "accuracy": 1.0,
+        "median_latency_ms": 0.006749993190169334,
+        "ci95": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      }
+    },
+    "protectai_deberta": {
+      "deepset": {
+        "n": 662,
+        "confusion": {
+          "tp": 109,
+          "fp": 4,
+          "tn": 395,
+          "fn": 154
+        },
+        "precision": 0.9646017699115044,
+        "recall": 0.4144486692015209,
+        "f1": 0.5797872340425532,
+        "fpr": 0.010025062656641603,
+        "accuracy": 0.7613293051359517,
+        "median_latency_ms": 224.86189985647798,
+        "ci95": {
+          "precision": [
+            0.9267990324531344,
+            0.9920681063122924
+          ],
+          "recall": [
+            0.35848887536349494,
+            0.4762151748666271
+          ],
+          "f1": [
+            0.5166532258064516,
+            0.6380833090011414
+          ],
+          "fpr": [
+            0.002403846153846154,
+            0.020781933471228507
+          ]
+        },
+        "n_errors": 0
+      },
+      "injecagent": {
+        "n": 250,
+        "confusion": {
+          "tp": 165,
+          "fp": 0,
+          "tn": 0,
+          "fn": 85
+        },
+        "precision": 1.0,
+        "recall": 0.66,
+        "f1": 0.7951807228915663,
+        "fpr": null,
+        "accuracy": 0.66,
+        "median_latency_ms": 320.1744999969378,
+        "ci95": {
+          "precision": [
+            1.0,
+            1.0
+          ],
+          "recall": [
+            0.604,
+            0.716
+          ],
+          "f1": [
+            0.7499999999999999,
+            0.8344988344988344
+          ],
+          "fpr": null
+        },
+        "n_errors": 0
+      },
+      "benign_public": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 29,
+          "tn": 721,
+          "fn": 0
+        },
+        "precision": 0.0,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.03866666666666667,
+        "accuracy": 0.9613333333333334,
+        "median_latency_ms": 239.7695000981912,
+        "ci95": {
+          "precision": [
+            0.0,
+            0.0
+          ],
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.025333333333333333,
+            0.05333333333333334
+          ]
+        },
+        "n_errors": 0
+      },
+      "benign_synth": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 30,
+          "tn": 720,
+          "fn": 0
+        },
+        "precision": 0.0,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.04,
+        "accuracy": 0.96,
+        "median_latency_ms": 188.70744993910193,
+        "ci95": {
+          "precision": [
+            0.0,
+            0.0
+          ],
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.02666666666666667,
+            0.05333333333333334
+          ]
+        },
+        "n_errors": 0
+      }
+    },
+    "llm_guard": {
+      "deepset": {
+        "n": 662,
+        "confusion": {
+          "tp": 109,
+          "fp": 4,
+          "tn": 395,
+          "fn": 154
+        },
+        "precision": 0.9646017699115044,
+        "recall": 0.4144486692015209,
+        "f1": 0.5797872340425532,
+        "fpr": 0.010025062656641603,
+        "accuracy": 0.7613293051359517,
+        "median_latency_ms": 201.1892000446096,
+        "ci95": {
+          "precision": [
+            0.9267990324531344,
+            0.9920681063122924
+          ],
+          "recall": [
+            0.35848887536349494,
+            0.4762151748666271
+          ],
+          "f1": [
+            0.5166532258064516,
+            0.6380833090011414
+          ],
+          "fpr": [
+            0.002403846153846154,
+            0.020781933471228507
+          ]
+        },
+        "n_errors": 0
+      },
+      "injecagent": {
+        "n": 250,
+        "confusion": {
+          "tp": 164,
+          "fp": 0,
+          "tn": 0,
+          "fn": 86
+        },
+        "precision": 1.0,
+        "recall": 0.656,
+        "f1": 0.7922705314009661,
+        "fpr": null,
+        "accuracy": 0.656,
+        "median_latency_ms": 326.3539000181481,
+        "ci95": {
+          "precision": [
+            1.0,
+            1.0
+          ],
+          "recall": [
+            0.6,
+            0.716
+          ],
+          "f1": [
+            0.7468671679197995,
+            0.8317757009345794
+          ],
+          "fpr": null
+        },
+        "n_errors": 0
+      },
+      "benign_public": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 29,
+          "tn": 721,
+          "fn": 0
+        },
+        "precision": 0.0,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.03866666666666667,
+        "accuracy": 0.9613333333333334,
+        "median_latency_ms": 234.6995499683544,
+        "ci95": {
+          "precision": [
+            0.0,
+            0.0
+          ],
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.025333333333333333,
+            0.05333333333333334
+          ]
+        },
+        "n_errors": 0
+      },
+      "benign_synth": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 30,
+          "tn": 720,
+          "fn": 0
+        },
+        "precision": 0.0,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.04,
+        "accuracy": 0.96,
+        "median_latency_ms": 176.69150012079626,
+        "ci95": {
+          "precision": [
+            0.0,
+            0.0
+          ],
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.02666666666666667,
+            0.05333333333333334
+          ]
+        },
+        "n_errors": 0
+      }
+    },
+    "llm_judge_openai": {
+      "deepset": {
+        "n": 662,
+        "confusion": {
+          "tp": 218,
+          "fp": 13,
+          "tn": 386,
+          "fn": 45
+        },
+        "precision": 0.9437229437229437,
+        "recall": 0.8288973384030418,
+        "f1": 0.8825910931174088,
+        "fpr": 0.03258145363408521,
+        "accuracy": 0.9123867069486404,
+        "median_latency_ms": 589.7282999940217,
+        "ci95": {
+          "precision": [
+            0.9147263187748156,
+            0.9723356420205244
+          ],
+          "recall": [
+            0.7799980694980695,
+            0.8725153929735603
+          ],
+          "f1": [
+            0.8513377288578903,
+            0.911306498958399
+          ],
+          "fpr": [
+            0.015540055799123157,
+            0.0500031328320802
+          ]
+        },
+        "n_errors": 0
+      },
+      "injecagent": {
+        "n": 250,
+        "confusion": {
+          "tp": 168,
+          "fp": 0,
+          "tn": 0,
+          "fn": 82
+        },
+        "precision": 1.0,
+        "recall": 0.672,
+        "f1": 0.8038277511961722,
+        "fpr": null,
+        "accuracy": 0.672,
+        "median_latency_ms": 579.8275000415742,
+        "ci95": {
+          "precision": [
+            1.0,
+            1.0
+          ],
+          "recall": [
+            0.616,
+            0.732
+          ],
+          "f1": [
+            0.7623762376237623,
+            0.8452655889145496
+          ],
+          "fpr": null
+        },
+        "n_errors": 0
+      },
+      "benign_public": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 3,
+          "tn": 747,
+          "fn": 0
+        },
+        "precision": 0.0,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.004,
+        "accuracy": 0.996,
+        "median_latency_ms": 583.2015000050887,
+        "ci95": {
+          "precision": [
+            0.0,
+            0.0
+          ],
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.009333333333333334
+          ]
+        },
+        "n_errors": 0
+      },
+      "benign_synth": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 1,
+          "tn": 749,
+          "fn": 0
+        },
+        "precision": 0.0,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0013333333333333333,
+        "accuracy": 0.9986666666666667,
+        "median_latency_ms": 588.2985000498593,
+        "ci95": {
+          "precision": [
+            0.0,
+            0.0
+          ],
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.004
+          ]
+        },
+        "n_errors": 0
+      }
+    },
+    "llm_judge_anthropic": {
+      "deepset": {
+        "n": 662,
+        "confusion": {
+          "tp": 199,
+          "fp": 1,
+          "tn": 398,
+          "fn": 64
+        },
+        "precision": 0.995,
+        "recall": 0.7566539923954373,
+        "f1": 0.8596112311015119,
+        "fpr": 0.002506265664160401,
+        "accuracy": 0.9018126888217523,
+        "median_latency_ms": 3407.8625000547618,
+        "ci95": {
+          "precision": [
+            0.9842084377610693,
+            1.0
+          ],
+          "recall": [
+            0.6995958275134476,
+            0.8063408677873695
+          ],
+          "f1": [
+            0.8254504620123203,
+            0.8933643615345519
+          ],
+          "fpr": [
+            0.0,
+            0.007853918456528011
+          ]
+        },
+        "n_errors": 0
+      },
+      "injecagent": {
+        "n": 250,
+        "confusion": {
+          "tp": 233,
+          "fp": 0,
+          "tn": 0,
+          "fn": 17
+        },
+        "precision": 1.0,
+        "recall": 0.932,
+        "f1": 0.9648033126293997,
+        "fpr": null,
+        "accuracy": 0.932,
+        "median_latency_ms": 3224.270800128579,
+        "ci95": {
+          "precision": [
+            1.0,
+            1.0
+          ],
+          "recall": [
+            0.896,
+            0.964
+          ],
+          "f1": [
+            0.9473684210526316,
+            0.9795918367346939
+          ],
+          "fpr": null
+        },
+        "n_errors": 0
+      },
+      "benign_public": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 0,
+          "tn": 750,
+          "fn": 0
+        },
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0,
+        "accuracy": 1.0,
+        "median_latency_ms": 3437.7576999831945,
+        "ci95": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      },
+      "benign_synth": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 0,
+          "tn": 750,
+          "fn": 0
+        },
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0,
+        "accuracy": 1.0,
+        "median_latency_ms": 3425.783799844794,
+        "ci95": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      }
+    },
+    "aegis_stages_1_3": {
+      "deepset": {
+        "n": 662,
+        "confusion": {
+          "tp": 38,
+          "fp": 0,
+          "tn": 399,
+          "fn": 225
+        },
+        "precision": 1.0,
+        "recall": 0.1444866920152091,
+        "f1": 0.25249169435215946,
+        "fpr": 0.0,
+        "accuracy": 0.6601208459214502,
+        "median_latency_ms": 0.04569999873638153,
+        "ci95": {
+          "precision": [
+            1.0,
+            1.0
+          ],
+          "recall": [
+            0.10344827586206896,
+            0.18846311475409835
+          ],
+          "f1": [
+            0.19139556812824138,
+            0.3154367709017001
+          ],
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      },
+      "injecagent": {
+        "n": 250,
+        "confusion": {
+          "tp": 155,
+          "fp": 0,
+          "tn": 0,
+          "fn": 95
+        },
+        "precision": 1.0,
+        "recall": 0.62,
+        "f1": 0.7654320987654321,
+        "fpr": null,
+        "accuracy": 0.62,
+        "median_latency_ms": 0.1436000457033515,
+        "ci95": {
+          "precision": [
+            1.0,
+            1.0
+          ],
+          "recall": [
+            0.556,
+            0.68
+          ],
+          "f1": [
+            0.7212276214833758,
+            0.8066825775656324
+          ],
+          "fpr": null
+        },
+        "n_errors": 0
+      },
+      "benign_public": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 1,
+          "tn": 749,
+          "fn": 0
+        },
+        "precision": 0.0,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0013333333333333333,
+        "accuracy": 0.9986666666666667,
+        "median_latency_ms": 0.16029994003474712,
+        "ci95": {
+          "precision": [
+            0.0,
+            0.0
+          ],
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.004
+          ]
+        },
+        "n_errors": 0
+      },
+      "benign_synth": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 0,
+          "tn": 750,
+          "fn": 0
+        },
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0,
+        "accuracy": 1.0,
+        "median_latency_ms": 0.048900023102760315,
+        "ci95": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      }
+    },
+    "aegis_stages_1_4_openai": {
+      "deepset": {
+        "n": 662,
+        "confusion": {
+          "tp": 176,
+          "fp": 0,
+          "tn": 399,
+          "fn": 87
+        },
+        "precision": 1.0,
+        "recall": 0.6692015209125475,
+        "f1": 0.8018223234624146,
+        "fpr": 0.0,
+        "accuracy": 0.8685800604229608,
+        "median_latency_ms": 1224.9719499377534,
+        "ci95": {
+          "precision": [
+            1.0,
+            1.0
+          ],
+          "recall": [
+            0.6132477262126865,
+            0.7285727562400425
+          ],
+          "f1": [
+            0.7604791504791505,
+            0.8397291196388261
+          ],
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      },
+      "injecagent": {
+        "n": 250,
+        "confusion": {
+          "tp": 187,
+          "fp": 0,
+          "tn": 0,
+          "fn": 63
+        },
+        "precision": 1.0,
+        "recall": 0.748,
+        "f1": 0.8558352402745996,
+        "fpr": null,
+        "accuracy": 0.748,
+        "median_latency_ms": 1286.2272500060499,
+        "ci95": {
+          "precision": [
+            1.0,
+            1.0
+          ],
+          "recall": [
+            0.692,
+            0.8
+          ],
+          "f1": [
+            0.820754716981132,
+            0.8913525498891353
+          ],
+          "fpr": null
+        },
+        "n_errors": 0
+      },
+      "benign_public": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 1,
+          "tn": 749,
+          "fn": 0
+        },
+        "precision": 0.0,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0013333333333333333,
+        "accuracy": 0.9986666666666667,
+        "median_latency_ms": 1181.4526501111686,
+        "ci95": {
+          "precision": [
+            0.0,
+            0.0
+          ],
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.004
+          ]
+        },
+        "n_errors": 0
+      },
+      "benign_synth": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 0,
+          "tn": 750,
+          "fn": 0
+        },
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0,
+        "accuracy": 1.0,
+        "median_latency_ms": 1144.0307500306517,
+        "ci95": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      }
+    },
+    "aegis_stages_1_4_anthropic": {
+      "deepset": {
+        "n": 662,
+        "confusion": {
+          "tp": 196,
+          "fp": 0,
+          "tn": 399,
+          "fn": 67
+        },
+        "precision": 1.0,
+        "recall": 0.7452471482889734,
+        "f1": 0.8540305010893245,
+        "fpr": 0.0,
+        "accuracy": 0.8987915407854985,
+        "median_latency_ms": 3109.93764991872,
+        "ci95": {
+          "precision": [
+            1.0,
+            1.0
+          ],
+          "recall": [
+            0.691771457619863,
+            0.7940267063558611
+          ],
+          "f1": [
+            0.8203830267416113,
+            0.8905443898408109
+          ],
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      },
+      "injecagent": {
+        "n": 250,
+        "confusion": {
+          "tp": 207,
+          "fp": 0,
+          "tn": 0,
+          "fn": 43
+        },
+        "precision": 1.0,
+        "recall": 0.828,
+        "f1": 0.9059080962800875,
+        "fpr": null,
+        "accuracy": 0.828,
+        "median_latency_ms": 3241.5812498657033,
+        "ci95": {
+          "precision": [
+            1.0,
+            1.0
+          ],
+          "recall": [
+            0.78,
+            0.872
+          ],
+          "f1": [
+            0.8738738738738739,
+            0.9316239316239316
+          ],
+          "fpr": null
+        },
+        "n_errors": 0
+      },
+      "benign_public": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 1,
+          "tn": 749,
+          "fn": 0
+        },
+        "precision": 0.0,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0013333333333333333,
+        "accuracy": 0.9986666666666667,
+        "median_latency_ms": 3105.1951999543235,
+        "ci95": {
+          "precision": [
+            0.0,
+            0.0
+          ],
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.004
+          ]
+        },
+        "n_errors": 0
+      },
+      "benign_synth": {
+        "n": 750,
+        "confusion": {
+          "tp": 0,
+          "fp": 0,
+          "tn": 750,
+          "fn": 0
+        },
+        "precision": null,
+        "recall": null,
+        "f1": null,
+        "fpr": 0.0,
+        "accuracy": 1.0,
+        "median_latency_ms": 3118.790699983947,
+        "ci95": {
+          "precision": null,
+          "recall": null,
+          "f1": null,
+          "fpr": [
+            0.0,
+            0.0
+          ]
+        },
+        "n_errors": 0
+      }
+    }
+  },
+  "ablation": {
+    "aegis_stages_1_3": {
+      "deepset": {
+        "rows": [
+          {
+            "stages": "stage_1",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 399,
+              "fn": 263
+            },
+            "recall": 0.0,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 0.6027190332326284,
+            "ci95": {
+              "precision": null,
+              "recall": [
+                0.0,
+                0.0
+              ],
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 399,
+              "fn": 263
+            },
+            "recall": 0.0,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 0.6027190332326284,
+            "ci95": {
+              "precision": null,
+              "recall": [
+                0.0,
+                0.0
+              ],
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3",
+            "confusion": {
+              "tp": 38,
+              "fp": 0,
+              "tn": 399,
+              "fn": 225
+            },
+            "recall": 0.1444866920152091,
+            "fpr": 0.0,
+            "precision": 1.0,
+            "f1": 0.25249169435215946,
+            "accuracy": 0.6601208459214502,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.10344827586206896,
+                0.18846311475409835
+              ],
+              "f1": [
+                0.19139556812824138,
+                0.3154367709017001
+              ],
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3_4",
+            "confusion": {
+              "tp": 38,
+              "fp": 0,
+              "tn": 399,
+              "fn": 225
+            },
+            "recall": 0.1444866920152091,
+            "fpr": 0.0,
+            "precision": 1.0,
+            "f1": 0.25249169435215946,
+            "accuracy": 0.6601208459214502,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.10344827586206896,
+                0.18846311475409835
+              ],
+              "f1": [
+                0.19139556812824138,
+                0.3154367709017001
+              ],
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "marginal_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 38,
+          "4": 0
+        }
+      },
+      "injecagent": {
+        "rows": [
+          {
+            "stages": "stage_1",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 0,
+              "fn": 250
+            },
+            "recall": 0.0,
+            "fpr": null,
+            "precision": null,
+            "f1": null,
+            "accuracy": 0.0,
+            "ci95": {
+              "precision": null,
+              "recall": [
+                0.0,
+                0.0
+              ],
+              "f1": null,
+              "fpr": null
+            }
+          },
+          {
+            "stages": "stage_1_2",
+            "confusion": {
+              "tp": 155,
+              "fp": 0,
+              "tn": 0,
+              "fn": 95
+            },
+            "recall": 0.62,
+            "fpr": null,
+            "precision": 1.0,
+            "f1": 0.7654320987654321,
+            "accuracy": 0.62,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.556,
+                0.68
+              ],
+              "f1": [
+                0.7212276214833758,
+                0.8066825775656324
+              ],
+              "fpr": null
+            }
+          },
+          {
+            "stages": "stage_1_2_3",
+            "confusion": {
+              "tp": 155,
+              "fp": 0,
+              "tn": 0,
+              "fn": 95
+            },
+            "recall": 0.62,
+            "fpr": null,
+            "precision": 1.0,
+            "f1": 0.7654320987654321,
+            "accuracy": 0.62,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.556,
+                0.68
+              ],
+              "f1": [
+                0.7212276214833758,
+                0.8066825775656324
+              ],
+              "fpr": null
+            }
+          },
+          {
+            "stages": "stage_1_2_3_4",
+            "confusion": {
+              "tp": 155,
+              "fp": 0,
+              "tn": 0,
+              "fn": 95
+            },
+            "recall": 0.62,
+            "fpr": null,
+            "precision": 1.0,
+            "f1": 0.7654320987654321,
+            "accuracy": 0.62,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.556,
+                0.68
+              ],
+              "f1": [
+                0.7212276214833758,
+                0.8066825775656324
+              ],
+              "fpr": null
+            }
+          }
+        ],
+        "marginal_counts": {
+          "1": 0,
+          "2": 155,
+          "3": 0,
+          "4": 0
+        }
+      },
+      "benign_public": {
+        "rows": [
+          {
+            "stages": "stage_1",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3",
+            "confusion": {
+              "tp": 0,
+              "fp": 1,
+              "tn": 749,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0013333333333333333,
+            "precision": 0.0,
+            "f1": null,
+            "accuracy": 0.9986666666666667,
+            "ci95": {
+              "precision": [
+                0.0,
+                0.0
+              ],
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.004
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3_4",
+            "confusion": {
+              "tp": 0,
+              "fp": 1,
+              "tn": 749,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0013333333333333333,
+            "precision": 0.0,
+            "f1": null,
+            "accuracy": 0.9986666666666667,
+            "ci95": {
+              "precision": [
+                0.0,
+                0.0
+              ],
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.004
+              ]
+            }
+          }
+        ],
+        "marginal_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 0
+        }
+      },
+      "benign_synth": {
+        "rows": [
+          {
+            "stages": "stage_1",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3_4",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "marginal_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0
+        }
+      }
+    },
+    "aegis_stages_1_4_openai": {
+      "deepset": {
+        "rows": [
+          {
+            "stages": "stage_1",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 399,
+              "fn": 263
+            },
+            "recall": 0.0,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 0.6027190332326284,
+            "ci95": {
+              "precision": null,
+              "recall": [
+                0.0,
+                0.0
+              ],
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 399,
+              "fn": 263
+            },
+            "recall": 0.0,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 0.6027190332326284,
+            "ci95": {
+              "precision": null,
+              "recall": [
+                0.0,
+                0.0
+              ],
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3",
+            "confusion": {
+              "tp": 38,
+              "fp": 0,
+              "tn": 399,
+              "fn": 225
+            },
+            "recall": 0.1444866920152091,
+            "fpr": 0.0,
+            "precision": 1.0,
+            "f1": 0.25249169435215946,
+            "accuracy": 0.6601208459214502,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.10344827586206896,
+                0.18846311475409835
+              ],
+              "f1": [
+                0.19139556812824138,
+                0.3154367709017001
+              ],
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3_4",
+            "confusion": {
+              "tp": 176,
+              "fp": 0,
+              "tn": 399,
+              "fn": 87
+            },
+            "recall": 0.6692015209125475,
+            "fpr": 0.0,
+            "precision": 1.0,
+            "f1": 0.8018223234624146,
+            "accuracy": 0.8685800604229608,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.6132477262126865,
+                0.7285727562400425
+              ],
+              "f1": [
+                0.7604791504791505,
+                0.8397291196388261
+              ],
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "marginal_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 38,
+          "4": 168
+        }
+      },
+      "injecagent": {
+        "rows": [
+          {
+            "stages": "stage_1",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 0,
+              "fn": 250
+            },
+            "recall": 0.0,
+            "fpr": null,
+            "precision": null,
+            "f1": null,
+            "accuracy": 0.0,
+            "ci95": {
+              "precision": null,
+              "recall": [
+                0.0,
+                0.0
+              ],
+              "f1": null,
+              "fpr": null
+            }
+          },
+          {
+            "stages": "stage_1_2",
+            "confusion": {
+              "tp": 155,
+              "fp": 0,
+              "tn": 0,
+              "fn": 95
+            },
+            "recall": 0.62,
+            "fpr": null,
+            "precision": 1.0,
+            "f1": 0.7654320987654321,
+            "accuracy": 0.62,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.556,
+                0.68
+              ],
+              "f1": [
+                0.7212276214833758,
+                0.8066825775656324
+              ],
+              "fpr": null
+            }
+          },
+          {
+            "stages": "stage_1_2_3",
+            "confusion": {
+              "tp": 155,
+              "fp": 0,
+              "tn": 0,
+              "fn": 95
+            },
+            "recall": 0.62,
+            "fpr": null,
+            "precision": 1.0,
+            "f1": 0.7654320987654321,
+            "accuracy": 0.62,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.556,
+                0.68
+              ],
+              "f1": [
+                0.7212276214833758,
+                0.8066825775656324
+              ],
+              "fpr": null
+            }
+          },
+          {
+            "stages": "stage_1_2_3_4",
+            "confusion": {
+              "tp": 187,
+              "fp": 0,
+              "tn": 0,
+              "fn": 63
+            },
+            "recall": 0.748,
+            "fpr": null,
+            "precision": 1.0,
+            "f1": 0.8558352402745996,
+            "accuracy": 0.748,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.692,
+                0.8
+              ],
+              "f1": [
+                0.820754716981132,
+                0.8913525498891353
+              ],
+              "fpr": null
+            }
+          }
+        ],
+        "marginal_counts": {
+          "1": 0,
+          "2": 155,
+          "3": 0,
+          "4": 145
+        }
+      },
+      "benign_public": {
+        "rows": [
+          {
+            "stages": "stage_1",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3",
+            "confusion": {
+              "tp": 0,
+              "fp": 1,
+              "tn": 749,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0013333333333333333,
+            "precision": 0.0,
+            "f1": null,
+            "accuracy": 0.9986666666666667,
+            "ci95": {
+              "precision": [
+                0.0,
+                0.0
+              ],
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.004
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3_4",
+            "confusion": {
+              "tp": 0,
+              "fp": 1,
+              "tn": 749,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0013333333333333333,
+            "precision": 0.0,
+            "f1": null,
+            "accuracy": 0.9986666666666667,
+            "ci95": {
+              "precision": [
+                0.0,
+                0.0
+              ],
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.004
+              ]
+            }
+          }
+        ],
+        "marginal_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 0
+        }
+      },
+      "benign_synth": {
+        "rows": [
+          {
+            "stages": "stage_1",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3_4",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "marginal_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0
+        }
+      }
+    },
+    "aegis_stages_1_4_anthropic": {
+      "deepset": {
+        "rows": [
+          {
+            "stages": "stage_1",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 399,
+              "fn": 263
+            },
+            "recall": 0.0,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 0.6027190332326284,
+            "ci95": {
+              "precision": null,
+              "recall": [
+                0.0,
+                0.0
+              ],
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 399,
+              "fn": 263
+            },
+            "recall": 0.0,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 0.6027190332326284,
+            "ci95": {
+              "precision": null,
+              "recall": [
+                0.0,
+                0.0
+              ],
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3",
+            "confusion": {
+              "tp": 38,
+              "fp": 0,
+              "tn": 399,
+              "fn": 225
+            },
+            "recall": 0.1444866920152091,
+            "fpr": 0.0,
+            "precision": 1.0,
+            "f1": 0.25249169435215946,
+            "accuracy": 0.6601208459214502,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.10344827586206896,
+                0.18846311475409835
+              ],
+              "f1": [
+                0.19139556812824138,
+                0.3154367709017001
+              ],
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3_4",
+            "confusion": {
+              "tp": 196,
+              "fp": 0,
+              "tn": 399,
+              "fn": 67
+            },
+            "recall": 0.7452471482889734,
+            "fpr": 0.0,
+            "precision": 1.0,
+            "f1": 0.8540305010893245,
+            "accuracy": 0.8987915407854985,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.691771457619863,
+                0.7940267063558611
+              ],
+              "f1": [
+                0.8203830267416113,
+                0.8905443898408109
+              ],
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "marginal_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 38,
+          "4": 193
+        }
+      },
+      "injecagent": {
+        "rows": [
+          {
+            "stages": "stage_1",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 0,
+              "fn": 250
+            },
+            "recall": 0.0,
+            "fpr": null,
+            "precision": null,
+            "f1": null,
+            "accuracy": 0.0,
+            "ci95": {
+              "precision": null,
+              "recall": [
+                0.0,
+                0.0
+              ],
+              "f1": null,
+              "fpr": null
+            }
+          },
+          {
+            "stages": "stage_1_2",
+            "confusion": {
+              "tp": 155,
+              "fp": 0,
+              "tn": 0,
+              "fn": 95
+            },
+            "recall": 0.62,
+            "fpr": null,
+            "precision": 1.0,
+            "f1": 0.7654320987654321,
+            "accuracy": 0.62,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.556,
+                0.68
+              ],
+              "f1": [
+                0.7212276214833758,
+                0.8066825775656324
+              ],
+              "fpr": null
+            }
+          },
+          {
+            "stages": "stage_1_2_3",
+            "confusion": {
+              "tp": 155,
+              "fp": 0,
+              "tn": 0,
+              "fn": 95
+            },
+            "recall": 0.62,
+            "fpr": null,
+            "precision": 1.0,
+            "f1": 0.7654320987654321,
+            "accuracy": 0.62,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.556,
+                0.68
+              ],
+              "f1": [
+                0.7212276214833758,
+                0.8066825775656324
+              ],
+              "fpr": null
+            }
+          },
+          {
+            "stages": "stage_1_2_3_4",
+            "confusion": {
+              "tp": 207,
+              "fp": 0,
+              "tn": 0,
+              "fn": 43
+            },
+            "recall": 0.828,
+            "fpr": null,
+            "precision": 1.0,
+            "f1": 0.9059080962800875,
+            "accuracy": 0.828,
+            "ci95": {
+              "precision": [
+                1.0,
+                1.0
+              ],
+              "recall": [
+                0.78,
+                0.872
+              ],
+              "f1": [
+                0.8738738738738739,
+                0.9316239316239316
+              ],
+              "fpr": null
+            }
+          }
+        ],
+        "marginal_counts": {
+          "1": 0,
+          "2": 155,
+          "3": 0,
+          "4": 183
+        }
+      },
+      "benign_public": {
+        "rows": [
+          {
+            "stages": "stage_1",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3",
+            "confusion": {
+              "tp": 0,
+              "fp": 1,
+              "tn": 749,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0013333333333333333,
+            "precision": 0.0,
+            "f1": null,
+            "accuracy": 0.9986666666666667,
+            "ci95": {
+              "precision": [
+                0.0,
+                0.0
+              ],
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.004
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3_4",
+            "confusion": {
+              "tp": 0,
+              "fp": 1,
+              "tn": 749,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0013333333333333333,
+            "precision": 0.0,
+            "f1": null,
+            "accuracy": 0.9986666666666667,
+            "ci95": {
+              "precision": [
+                0.0,
+                0.0
+              ],
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.004
+              ]
+            }
+          }
+        ],
+        "marginal_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 0
+        }
+      },
+      "benign_synth": {
+        "rows": [
+          {
+            "stages": "stage_1",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "stages": "stage_1_2_3_4",
+            "confusion": {
+              "tp": 0,
+              "fp": 0,
+              "tn": 750,
+              "fn": 0
+            },
+            "recall": null,
+            "fpr": 0.0,
+            "precision": null,
+            "f1": null,
+            "accuracy": 1.0,
+            "ci95": {
+              "precision": null,
+              "recall": null,
+              "f1": null,
+              "fpr": [
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "marginal_counts": {
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0
+        }
+      }
+    }
+  },
+  "cache_stats": {
+    "hits": 7175,
+    "misses": 9709
+  }
+}
