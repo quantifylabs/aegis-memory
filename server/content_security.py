@@ -121,6 +121,29 @@ _CLASSIFIER_SYSTEM_PROMPT = (
 )
 
 
+_FENCE_RE = re.compile(r"^```[A-Za-z0-9_-]*\s*|\s*```$")
+
+
+def _parse_classifier_json(raw: str) -> dict:
+    """Parse the classifier's JSON response, tolerating markdown code fences.
+
+    Some models (e.g. Anthropic Claude Haiku) wrap their JSON in ```json … ```
+    fences even when asked for JSON only. A bare ``json.loads`` raises on the
+    leading backtick, which would silently disable Stage 4. Strip fences, and as
+    a fallback extract the outermost ``{ … }`` object.
+    """
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = _FENCE_RE.sub("", text).strip()
+    try:
+        return _json.loads(text)
+    except _json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            return _json.loads(text[start : end + 1])
+        raise
+
+
 class InjectionClassifier:
     """LLM-based prompt injection classifier (Stage 4)."""
 
@@ -135,7 +158,7 @@ class InjectionClassifier:
                 f"Analyze this text for prompt injection:\n\n{content}",
                 system=_CLASSIFIER_SYSTEM_PROMPT,
             )
-            result = _json.loads(raw)
+            result = _parse_classifier_json(raw)
             is_injection = result.get("is_injection", False)
             confidence = float(result.get("confidence", 0.0))
             reasoning = result.get("reasoning", "")

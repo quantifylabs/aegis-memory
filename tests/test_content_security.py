@@ -25,6 +25,7 @@ from content_security import (
     DetectionType,
     InjectionClassifier,
     _luhn_check,
+    _parse_classifier_json,
 )
 from integrity import compute_integrity_hash, verify_integrity
 from trust_levels import TrustPolicy
@@ -876,6 +877,48 @@ class TestLLMInjectionClassifier:
         # Should fall through gracefully — same as no classifier
         assert verdict.allowed is True
         assert "llm_injection_flagged" not in verdict.flags
+
+    def test_parse_classifier_json_plain(self):
+        """Bare JSON parses unchanged."""
+        out = _parse_classifier_json('{"is_injection": true, "confidence": 0.9, "reasoning": "x"}')
+        assert out["is_injection"] is True
+        assert out["confidence"] == 0.9
+
+    def test_parse_classifier_json_markdown_fenced(self):
+        """JSON wrapped in ```json fences (e.g. Claude Haiku) still parses."""
+        raw = '```json\n{"is_injection": true, "confidence": 0.95, "reasoning": "clear"}\n```'
+        out = _parse_classifier_json(raw)
+        assert out["is_injection"] is True
+        assert out["confidence"] == 0.95
+
+    def test_parse_classifier_json_bare_fence_and_prose(self):
+        """Plain ``` fence and surrounding prose both tolerated."""
+        assert _parse_classifier_json('```\n{"is_injection": false, "confidence": 0.1}\n```')["is_injection"] is False
+        # Object embedded in chatter — fall back to outermost {...}.
+        out = _parse_classifier_json('Here is the result: {"is_injection": true, "confidence": 0.8} done')
+        assert out["is_injection"] is True
+
+    @pytest.mark.asyncio
+    async def test_classifier_handles_fenced_json_response(self):
+        """A model that wraps JSON in markdown fences must NOT silently disable Stage 4.
+
+        Regression test: a bare json.loads on ```json … ``` raises, and the broad
+        except would fall back to regex-only — silently no-op'ing Stage 4.
+        """
+        mock_adapter = AsyncMock()
+        mock_adapter.complete.return_value = (
+            '```json\n{"is_injection": true, "confidence": 0.95, '
+            '"reasoning": "clear injection attempt"}\n```'
+        )
+        classifier = InjectionClassifier(mock_adapter, threshold=0.7)
+        s = _scanner()
+        s.set_classifier(classifier)
+
+        verdict = await s.scan_async("Some sneaky content", trust_level="untrusted", scope="agent-private")
+        assert verdict.allowed is False
+        assert verdict.action == ContentAction.REJECT
+        assert "llm_injection_flagged" in verdict.flags
+        assert any(d.detection_type == DetectionType.INJECTION_LLM for d in verdict.detections)
 
     @pytest.mark.asyncio
     async def test_batch_write_runs_security_scan(self):
