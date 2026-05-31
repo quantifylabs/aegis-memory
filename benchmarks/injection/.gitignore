@@ -1,0 +1,7 @@
+# LLM response cache — never committed (may be large; re-derivable from APIs).
+cache/
+
+# HuggingFace dataset cache, if a local one is created here.
+.hf_cache/
+
+# results/ IS committed (results.json + error_analysis.md are deliverables).

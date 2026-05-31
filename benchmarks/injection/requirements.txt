@@ -1,0 +1,35 @@
+# Extra dependencies for the injection benchmark ONLY.
+# Kept SEPARATE from the main package deps (pyproject.toml / server/requirements.txt).
+# Install into a venv:  pip install -r benchmarks/injection/requirements.txt
+#
+# Every system degrades gracefully: if an optional dep below fails to import,
+# that system is reported as "not run" rather than failing the whole benchmark.
+# So a partial install still produces a valid (smaller) results.json.
+
+# --- Core (always needed) ---
+numpy>=1.26,<2.0            # metrics + bootstrap resampling
+python-dotenv==1.0.1        # load OPENAI_/ANTHROPIC_ keys from aegis-memory-main/.env
+
+# --- Datasets ---
+datasets==2.19.1            # deepset/prompt-injections, databricks-dolly-15k
+huggingface-hub==0.23.4
+requests>=2.31.0            # InjecAgent raw fetch (best-effort)
+
+# --- ML baseline: protectai_deberta  AND  framework baseline: llm_guard ---
+# llm-guard pins a strict transformers/torch range; these ranges are chosen so a
+# single `pip install` co-resolves llm-guard, transformers, and torch in one venv
+# (deberta-v3 text-classification works across this transformers range too).
+# CPU torch wheel is large (~200MB); install takes a few minutes.
+# IMPORTANT: transformers 5.x breaks llm-guard 0.3.x (import error), and
+# llm-guard 0.3.15 requires torch>=2.4 — so cap transformers<5 and let llm-guard
+# pull a compatible torch. deberta-v3 text-classification works in this range.
+torch>=2.4
+transformers>=4.41,<5
+sentencepiece==0.2.0        # deberta-v3 tokenizer needs this
+llm-guard==0.3.15
+# If the resolver still cannot satisfy llm-guard on your platform, drop it and
+# rerun — the benchmark marks `llm_guard` as "not run" and proceeds.
+
+# --- API systems: llm_judge_* and Aegis Stage 4 ---
+openai>=1.60.0              # matches the repo's pinned floor
+anthropic>=0.69            # <0.40 breaks against modern httpx (no 'proxies' kwarg)
