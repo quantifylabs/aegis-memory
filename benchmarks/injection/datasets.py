@@ -94,7 +94,9 @@ def load_deepset(limit: int | None = None) -> Dataset:
         from datasets import load_dataset
 
         resolved = _resolve_hf_revision(DEEPSET_REPO, DEEPSET_REVISION)
-        ds = load_dataset(DEEPSET_REPO, revision=DEEPSET_REVISION)
+        # Fetch from the resolved immutable commit so the download matches the
+        # revision recorded in results.json (not the moving branch ref).
+        ds = load_dataset(DEEPSET_REPO, revision=resolved)
         rows: list[tuple[str, bool]] = []
         for split in ds:  # combine all splits (train + test)
             for row in ds[split]:
@@ -116,14 +118,15 @@ def load_deepset(limit: int | None = None) -> Dataset:
 # --------------------------------------------------------------------------
 # Malicious — indirect: InjecAgent (best-effort GitHub fetch)
 # --------------------------------------------------------------------------
-def _github_file_sha(repo: str, path: str, ref: str) -> str:
+def _github_ref_sha(repo: str, ref: str) -> str | None:
+    """Resolve a git ref (branch/tag/SHA) to an immutable commit SHA."""
     try:
-        url = f"https://api.github.com/repos/{repo}/commits?path={path}&sha={ref}&per_page=1"
-        with urllib.request.urlopen(url, timeout=20) as r:
-            data = json.loads(r.read().decode())
-        return data[0]["sha"] if data else ref
+        url = f"https://api.github.com/repos/{repo}/commits/{ref}"
+        req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.loads(r.read().decode()).get("sha")
     except Exception:
-        return ref
+        return None
 
 
 def load_injecagent(limit: int | None = None) -> Dataset:
@@ -131,10 +134,17 @@ def load_injecagent(limit: int | None = None) -> Dataset:
     source = f"github:{INJECAGENT_REPO}"
     n_target = limit if limit is not None else INJECAGENT_N
     try:
-        resolved = _github_file_sha(INJECAGENT_REPO, INJECAGENT_FILES[0], INJECAGENT_REF)
+        # Resolve the ref to ONE immutable commit SHA and fetch BOTH files from
+        # it, so every download is pinned and matches the recorded revision
+        # (the old code fetched from the moving ref but recorded only one SHA).
+        resolved = _github_ref_sha(INJECAGENT_REPO, INJECAGENT_REF)
+        if not resolved:
+            raise RuntimeError(
+                f"could not resolve {INJECAGENT_REPO}@{INJECAGENT_REF} to a commit SHA"
+            )
         cases: list[str] = []
         for path in INJECAGENT_FILES:
-            raw_url = f"https://raw.githubusercontent.com/{INJECAGENT_REPO}/{INJECAGENT_REF}/{path}"
+            raw_url = f"https://raw.githubusercontent.com/{INJECAGENT_REPO}/{resolved}/{path}"
             with urllib.request.urlopen(raw_url, timeout=30) as r:
                 payload = json.loads(r.read().decode())
             for case in payload:
@@ -173,7 +183,9 @@ def load_benign_public(limit: int | None = None) -> Dataset:
         from datasets import load_dataset
 
         resolved = _resolve_hf_revision(DOLLY_REPO, DOLLY_REVISION)
-        ds = load_dataset(DOLLY_REPO, revision=DOLLY_REVISION, split="train")
+        # Fetch from the resolved immutable commit so the download matches the
+        # revision recorded in results.json (not the moving branch ref).
+        ds = load_dataset(DOLLY_REPO, revision=resolved, split="train")
         pool: list[str] = []
         for row in ds:
             # Prefer 'context' (passage-like, memory-ish), else 'response'.
