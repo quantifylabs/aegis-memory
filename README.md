@@ -307,6 +307,19 @@ Benchmarked on 8 vCPU / 7.6 GB RAM (Intel 13th Gen), 1000 memories, Docker Compo
 
 > Query tail latency (p95/p99) is dominated by the external OpenAI embedding call, not Aegis or PostgreSQL. Write and vote operations that skip embedding are consistently under 100ms at p50.
 
+## Security benchmark
+
+Does the [4-stage content security pipeline](#built-for-a-world-where-agents-get-compromised) actually catch prompt injection? We measured it as a detector against five baselines (DeBERTa, LLM Guard, an LLM judge, and more) on labelled injection + benign corpora — with full confusion-matrix metrics, a per-stage ablation, and an honest error analysis. **The false-positive rate is reported next to recall everywhere** — a blocker that flags everything is useless.
+
+| Aegis configuration | Recall | FPR | Median latency |
+|-----------------------------------------|------:|-----:|---------------:|
+| Stages 1–3 (deterministic, no API call) | 0.14 | 0.00 | 46 µs |
+| Stages 1–4 (+ LLM classifier) | 0.67 | 0.00 | 1.2 s |
+
+> `deepset/prompt-injections`, direct injection (N=662). The free deterministic core adds **zero** false positives here and across 1,500 benign memory snippets (1 FP); the optional LLM stage trades ~1s of latency for a 4.6× recall gain. Stage 2 (PII) contributes ~0 to injection recall by design — it's a different threat category.
+
+→ **Full results, ablation, baselines, latency, and limitations: [`docs/security/benchmark.md`](docs/security/benchmark.md)** · reproduce with `python benchmarks/injection/run_benchmark.py`.
+
 ## Deployment
 
 ### Docker Compose
