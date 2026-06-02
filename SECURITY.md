@@ -28,3 +28,11 @@ Include: affected version, reproduction steps, and impact assessment.
 
 For deeper security architecture (4-stage content pipeline, HMAC-SHA256 integrity,
 OWASP 4-tier trust hierarchy), see [docs/guides/security.mdx](docs/guides/security.mdx).
+
+## Dependency Vulnerabilities
+
+The shipped-library dependency surface is audited against OSV in CI
+([`.github/workflows/pip-audit.yml`](.github/workflows/pip-audit.yml)) and currently reports
+**zero known vulnerabilities**. For the full triage — including the benchmark/dev-only residual
+that is documented and accepted (never shipped to PyPI users) — see
+[docs/security/vuln-triage.md](docs/security/vuln-triage.md).
