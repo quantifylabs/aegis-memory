@@ -32,4 +32,4 @@ jobs:
         # server/requirements.txt are covered too. No --ignore-vuln: this surface is clean today.
         run: |
           pip install -e ".[server]"
-          python -m pip_audit
+          pipx run pip-audit
