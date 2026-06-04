@@ -12,6 +12,8 @@ Datasets
 - ``injecagent``      InjecAgent (GitHub) — indirect injection, 250 sampled.
 - ``benign_public``   databricks-dolly-15k (HF) — 750 sampled, for FPR.
 - ``benign_synth``    templated memory-like entries — 750, for FPR.
+- ``notinject``       NotInject (HF) — 339 benign sentences seeded with injection
+                      trigger words; over-defense FPR stress test.
 """
 
 from __future__ import annotations
@@ -37,6 +39,16 @@ INJECAGENT_FILES = [
     "data/test_cases_dh_base.json",  # direct-harm attacks
     "data/test_cases_ds_base.json",  # data-stealing attacks
 ]
+
+# NotInject (InjecGuard paper, Li et al. 2024, arXiv:2410.22770): benign sentences
+# deliberately seeded with injection "trigger words" that naive detectors over-flag.
+# Hosted on HF; three difficulty tiers (1/2/3 trigger words), 113 samples each. All
+# samples are benign -> label False (this is an over-defense / FPR stress test).
+NOTINJECT_REPO = "leolee99/NotInject"
+NOTINJECT_REVISION = "main"  # resolved to a commit sha at load time and recorded
+# The dataset's single ("default") config exposes the difficulty tiers as SPLITS
+# (1/2/3 trigger words), 113 samples each; the loader combines them.
+NOTINJECT_TIERS = ["NotInject_one", "NotInject_two", "NotInject_three"]
 
 BENIGN_PUBLIC_N = 750
 BENIGN_SYNTH_N = 750
@@ -266,11 +278,53 @@ def load_benign_synth(limit: int | None = None) -> Dataset:
     )
 
 
+# --------------------------------------------------------------------------
+# Benign — over-defense: NotInject (trigger-word robustness)
+# --------------------------------------------------------------------------
+def load_notinject(limit: int | None = None) -> Dataset:
+    name, kind = "notinject", "benign"
+    source = f"hf:{NOTINJECT_REPO}"
+    try:
+        from datasets import load_dataset
+
+        # Resolve the moving ref to ONE immutable commit SHA and fetch every tier
+        # from it, so each download is pinned and matches the recorded revision
+        # (same resolve-then-pin discipline as deepset/dolly/InjecAgent).
+        resolved = _resolve_hf_revision(NOTINJECT_REPO, NOTINJECT_REVISION)
+        # Fetch from the resolved immutable commit so the download matches the
+        # recorded revision. The difficulty tiers are exposed as splits
+        # (NotInject_one/two/three); combine them and record per-tier counts.
+        ds = load_dataset(NOTINJECT_REPO, revision=resolved)
+        rows: list[tuple[str, bool]] = []
+        per_tier: dict[str, int] = {}
+        for split in ds:  # split name == difficulty tier
+            before = len(rows)
+            for row in ds[split]:
+                text = (row.get("prompt") or "").strip()
+                if text:
+                    rows.append((text, False))  # all NotInject samples are benign
+            per_tier[split] = len(rows) - before
+        if not rows:
+            raise ValueError("NotInject fetch returned no parseable samples")
+        if limit is not None and limit < len(rows):
+            rng = random.Random(SEED)
+            rows = rng.sample(rows, limit)
+        tier_str = ", ".join(f"{t}={n}" for t, n in per_tier.items())
+        return Dataset(
+            name=name, kind=kind, items=rows, revision=resolved, source=source,
+            notes=(f"{len(rows)} benign sentences seeded with injection trigger words "
+                   f"(over-defense FPR stress test); all benign. Per-tier: {tier_str}."),
+        )
+    except Exception as e:  # noqa: BLE001 — graceful skip is the contract
+        return _not_run(name, kind, source, e)
+
+
 LOADERS = {
     "deepset": load_deepset,
     "injecagent": load_injecagent,
     "benign_public": load_benign_public,
     "benign_synth": load_benign_synth,
+    "notinject": load_notinject,
 }
 
 

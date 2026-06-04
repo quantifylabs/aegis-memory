@@ -82,10 +82,15 @@ def test_injecagent_not_run_when_sha_unresolvable(monkeypatch):
 def _install_fake_datasets(monkeypatch, captured: dict):
     fake = types.ModuleType("datasets")
 
-    def load_dataset(repo, revision=None, split=None):
+    def load_dataset(repo, name=None, revision=None, split=None):
         captured["repo"] = repo
+        captured["name"] = name
         captured["revision"] = revision
         captured["split"] = split
+        if repo == ds.NOTINJECT_REPO:  # NotInject: difficulty tiers exposed as splits
+            return {t: [{"prompt": f"benign sentence with trigger words ({t})",
+                         "word_list": ["ignore"], "category": "Common Queries"}]
+                    for t in ds.NOTINJECT_TIERS}
         if split == "train":  # dolly shape
             return [{"context": "",
                      "response": "a clean factual sentence about cats and dogs."}]
@@ -120,3 +125,21 @@ def test_dolly_fetches_from_resolved_sha(monkeypatch):
     assert d.revision == "dollySHA777"
     assert captured["revision"] == "dollySHA777"  # NOT ds.DOLLY_REVISION
     assert captured["split"] == "train"
+
+
+def test_notinject_fetches_from_resolved_sha(monkeypatch):
+    monkeypatch.setattr(ds, "_resolve_hf_revision", lambda repo, rev: "notinjectSHA42")
+    captured: dict = {}
+    _install_fake_datasets(monkeypatch, captured)
+
+    d = ds.load_notinject()
+    assert d.status == "ok"
+    assert d.revision == "notinjectSHA42"
+    # All NotInject samples are benign (label False) — it is an over-defense corpus.
+    assert d.items and all(label is False for _, label in d.items)
+    # All tiers (splits) are combined.
+    assert len(d.items) == len(ds.NOTINJECT_TIERS)
+    # The fetch pins the resolved SHA (not the moving ref).
+    assert captured["repo"] == ds.NOTINJECT_REPO
+    assert captured["revision"] == "notinjectSHA42"
+    assert captured["revision"] != ds.NOTINJECT_REVISION

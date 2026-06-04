@@ -32,6 +32,13 @@ torch>=2.4
 transformers>=4.53.0,<5
 sentencepiece==0.2.1        # deberta-v3 tokenizer needs this; >=0.2.1 clears CVE-2026-1260
 llm-guard==0.3.15
+
+# --- ML baseline: llama_prompt_guard_2 (no new deps) ---
+# meta-llama/Llama-Prompt-Guard-2-86M is a transformers text-classification model that
+# reuses the transformers + torch + sentencepiece already pinned above — nothing to add.
+# It is a GATED Meta model: accept the license at
+# https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M and set HF_TOKEN in the env.
+# Without that, the benchmark marks `llama_prompt_guard_2` as "not run" and proceeds.
 # If the resolver still cannot satisfy llm-guard on your platform, drop it and
 # rerun — the benchmark marks `llm_guard` as "not run" and proceeds.
 
