@@ -15,12 +15,14 @@ Every system is wrapped as `predict(text) -> bool` and scored on **both** malici
 corpora, reported as a full confusion matrix → **precision, recall, F1, FPR, accuracy**, plus
 **median per-item latency** and **bootstrapped 95% CIs** (n=1000, seed=42).
 
-**Systems:** `no_protection`, `naive_regex`, `protectai_deberta`, `llm_guard`,
-`llm_judge_openai`, `llm_judge_anthropic`, `aegis_stages_1_3`, `aegis_stages_1_4_openai`,
-`aegis_stages_1_4_anthropic`.
+**Systems:** `no_protection`, `naive_regex`, `protectai_deberta`, `llama_prompt_guard_2`,
+`llm_guard`, `llm_judge_openai`, `llm_judge_anthropic`, `aegis_stages_1_3`,
+`aegis_stages_1_4_openai`, `aegis_stages_1_4_anthropic`.
 
 **Datasets:** `deepset/prompt-injections` (direct), `InjecAgent` (indirect, 250 sampled),
-`benign_public` (dolly, 750), `benign_synth` (750 templated memory entries).
+`benign_public` (dolly, 750), `benign_synth` (750 templated memory entries),
+`notinject` (NotInject, 339 benign sentences seeded with injection trigger words —
+over-defense FPR stress test).
 
 ## Setup
 
@@ -46,6 +48,13 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 If a key is absent, that system is reported `not_run` (the run continues). Responses are cached
 under `cache/` keyed by `(system_id, model_id, sha256(prompt))`, so **re-runs never re-bill**.
+
+### Gated model: `llama_prompt_guard_2`
+
+`llama_prompt_guard_2` uses Meta's gated [`meta-llama/Llama-Prompt-Guard-2-86M`](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M).
+To run it you must **accept the model license** on HuggingFace and set `HF_TOKEN` (or
+`HUGGING_FACE_HUB_TOKEN`) in the environment / `.env`. Without an accepted license or token, the
+system is reported `not_run` and the benchmark proceeds. It runs locally on CPU (no API cost).
 
 ## Run
 
@@ -82,7 +91,7 @@ python benchmarks/injection/run_benchmark.py --datasets deepset,benign_synth
 
 | File | Purpose |
 |---|---|
-| `datasets.py` | 4 dataset loaders, pinned revisions, graceful missing-source handling |
+| `datasets.py` | 5 dataset loaders, pinned revisions, graceful missing-source handling |
 | `systems.py` | `predict(text)->bool` adapters, response cache, per-stage attribution |
 | `metrics.py` | confusion matrix, P/R/F1/FPR/accuracy, bootstrap CIs, stage ablation |
 | `run_benchmark.py` | orchestrator: loads `.env`, runs systems × datasets, writes results |

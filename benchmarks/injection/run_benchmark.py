@@ -209,7 +209,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[skip] {system.id}: warmup failed: {e}")
             continue
 
-        sys_meta[system.id] = {"status": "ok", "reason": ""}
+        sys_meta[system.id] = {"status": "ok", "reason": "",
+                               "revision": getattr(system, "revision", None)}
         results[system.id] = {}
         print(f"[run ] {system.id}")
         for name, d in active_ds.items():

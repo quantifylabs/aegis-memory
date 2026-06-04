@@ -20,11 +20,11 @@ OUT = REPO_ROOT / "docs" / "security" / "benchmark.md"
 
 # Display order + friendly labels.
 SYSTEM_ORDER = [
-    "no_protection", "naive_regex", "protectai_deberta", "llm_guard",
+    "no_protection", "naive_regex", "protectai_deberta", "llama_prompt_guard_2", "llm_guard",
     "llm_judge_openai", "llm_judge_anthropic",
     "aegis_stages_1_3", "aegis_stages_1_4_openai", "aegis_stages_1_4_anthropic",
 ]
-DATASET_ORDER = ["deepset", "injecagent", "benign_public", "benign_synth"]
+DATASET_ORDER = ["deepset", "injecagent", "benign_public", "benign_synth", "notinject"]
 MALICIOUS = {"deepset", "injecagent"}
 
 
@@ -91,7 +91,18 @@ def main() -> int:
         "with bootstrapped 95% CIs (resampling cases, "
         f"n={meta['n_bootstrap']}, seed={meta['seed']}). Median per-item latency too.\n"
         "- A metric is shown as `—` when undefined (e.g. FPR on a malicious-only "
-        "dataset, precision on a benign-only dataset).\n")
+        "dataset, precision on a benign-only dataset).\n"
+        "- **Third-party baselines:** `protectai_deberta` "
+        "([protectai/deberta-v3-base-prompt-injection-v2]"
+        "(https://huggingface.co/protectai/deberta-v3-base-prompt-injection-v2)), "
+        "`llm_guard` ([llm-guard](https://github.com/protectai/llm-guard)), and "
+        "**`llama_prompt_guard_2`** — Meta's gated "
+        "[meta-llama/Llama-Prompt-Guard-2-86M]"
+        "(https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M), a binary "
+        "(benign/malicious) prompt-injection detector run on CPU. It is trained for "
+        "injection/jailbreak detection at the LLM input — a fair baseline on direct "
+        "injection but outside its scope on indirect injection. Running it requires "
+        "accepting the model license on HuggingFace and setting `HF_TOKEN`.\n")
     lv = meta.get("lib_versions", {})
     L.append(f"- **Environment:** Python {meta['python']}, {meta['platform']}. "
              f"Models: OpenAI `{meta['models']['openai']}`, Anthropic "
@@ -149,6 +160,44 @@ def main() -> int:
                 f"{with_ci(r['fpr'], ci.get('fpr'))} | {f3(r['accuracy'])} | "
                 f"{lat(r['median_latency_ms'])} |")
         L.append("")
+
+    # ---- Over-defense / trigger-word robustness (NotInject) ----
+    if "notinject" in dsmeta and dsmeta["notinject"].get("status") == "ok":
+        d = dsmeta["notinject"]
+        L.append("## Over-defense / trigger-word robustness (NotInject)\n")
+        L.append(
+            "[NotInject](https://huggingface.co/datasets/leolee99/NotInject) "
+            "(InjecGuard, Li et al. 2024, [arXiv:2410.22770](https://arxiv.org/abs/2410.22770); "
+            "[github.com/SaFoLab-WISC/InjecGuard](https://github.com/SaFoLab-WISC/InjecGuard)) is a "
+            f"corpus of **{d['n']} benign** sentences deliberately seeded with injection "
+            "*trigger words* (\"ignore\", \"system\", \"instructions\", …) across three "
+            "difficulty tiers (one/two/three trigger words). Every sample is benign, so the only "
+            "meaningful metric is **FPR — lower is better**. The InjecGuard paper showed several "
+            "published detectors reach near-100% FPR here: it is a direct test of *over-defense* "
+            "(flagging benign text just because it contains scary-looking words).\n")
+        L.append("| System | FPR [95% CI] | Benign flagged (FP / N) |")
+        L.append("|---|--:|--:|")
+        for s in systems:
+            r = results.get(s, {}).get("notinject")
+            if not r or r.get("status") == "not_run":
+                continue
+            ci = r.get("ci95", {})
+            c = r.get("confusion", {})
+            fp_n = f"{c.get('fp', 0)} / {r['n']}" if c else "—"
+            L.append(f"| `{s}` | {with_ci(r['fpr'], ci.get('fpr'))} | {fp_n} |")
+        L.append("")
+        L.append(
+            "**Reading this honestly.** A low NotInject FPR for Aegis's deterministic stages "
+            "alongside high FPR for ML/LLM detectors would be a strong, citable differentiator "
+            "(trigger-word robustness without a learned classifier's over-defense). **If Aegis "
+            "also over-flags NotInject, that is reported here plainly** — an honest over-defense "
+            "number is the entire point of this corpus. Compare each system's NotInject FPR to "
+            "its `benign_public` / `benign_synth` FPR above: a gap means trigger words specifically "
+            "are driving false positives. Note that **Llama Prompt Guard 2** is trained to detect "
+            "injection/jailbreak text at the LLM input, so it is a fair baseline on direct injection "
+            "(`deepset`) but is expected to be the most exposed to trigger-word over-defense here; "
+            "it may also underperform on indirect injection (`injecagent`), which is outside its "
+            "training scope.\n")
 
     # ---- Ablation ----
     L.append("## Aegis stage ablation\n")

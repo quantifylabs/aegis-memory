@@ -201,6 +201,73 @@ class ProtectAIDeberta(System):
         return str(out["label"]).upper() == "INJECTION"
 
 
+def _resolve_model_revision(repo_id: str, revision: str = "main") -> str:
+    """Resolve a HF *model* ref to an immutable commit sha (best-effort).
+
+    Mirrors ``datasets._resolve_hf_revision`` but for model repos, so the model
+    weights pulled at warmup match the revision recorded in results.json.
+    """
+    try:
+        from huggingface_hub import HfApi
+
+        return HfApi().model_info(repo_id, revision=revision).sha or revision
+    except Exception:  # noqa: BLE001 — fall back to the moving ref
+        return revision
+
+
+class LlamaPromptGuard2(System):
+    """Meta's compact prompt-injection / jailbreak detector (gated, ~86M, CPU).
+
+    Binary classifier (NOT v1's three-class LABEL_2=jailbreak scheme). The model
+    card prints ``MALICIOUS``/``BENIGN``, but the pinned revision's ``config.json``
+    actually carries the generic ``id2label = {0: "LABEL_0", 1: "LABEL_1"}``;
+    verified empirically that **class index 1 is the malicious/injection class**
+    (injection text scores ~0.999 on index 1, benign text on index 0). So we map
+    by *index* via the model's own ``id2label`` — robust whether a given revision
+    emits ``LABEL_1`` or ``MALICIOUS`` — rather than matching a hard-coded string.
+    """
+
+    id = "llama_prompt_guard_2"
+    MODEL = "meta-llama/Llama-Prompt-Guard-2-86M"
+
+    def __init__(self) -> None:
+        self._pipe = None
+        self._malicious_label: str | None = None
+        self.revision: str | None = None
+
+    def available(self) -> tuple[bool, str]:
+        try:
+            import torch  # noqa: F401
+            import transformers  # noqa: F401
+        except Exception as e:  # noqa: BLE001
+            return False, f"transformers/torch not importable: {e}"
+        # Gated Meta model: needs an accepted license + a token to download.
+        if not (os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN")):
+            return False, "HF_TOKEN not set (gated Meta model; accept license + set HF_TOKEN)"
+        return True, ""
+
+    def warmup(self) -> None:
+        from transformers import pipeline
+
+        # Pin the resolved commit so the weights match results.json (graceful:
+        # if license isn't accepted or we're offline, this raises and the runner
+        # marks the system "not_run").
+        self.revision = _resolve_model_revision(self.MODEL, "main")
+        self._pipe = pipeline(
+            "text-classification", model=self.MODEL, revision=self.revision,
+            truncation=True, max_length=512, device=-1,  # CPU
+        )
+        # The malicious/injection class is index 1; resolve its label string from
+        # the model's own config so the comparison is revision-agnostic.
+        self._malicious_label = str(self._pipe.model.config.id2label[1])
+
+    def predict(self, text: str) -> bool:
+        if self._pipe is None:
+            self.warmup()
+        out = self._pipe(text)[0]
+        return str(out["label"]) == self._malicious_label
+
+
 class LLMGuard(System):
     id = "llm_guard"
 
@@ -554,6 +621,7 @@ def build_systems(cache: ResponseCache) -> list[System]:
         NoProtection(),
         NaiveRegex(),
         ProtectAIDeberta(),
+        LlamaPromptGuard2(),
         LLMGuard(),
         LLMJudge("openai", cache),
         LLMJudge("anthropic", cache),

@@ -71,6 +71,7 @@ ipython_config.py
 .env.*
 !.env.example
 .venv
+.venv-bench/
 env/
 venv/
 ENV/
