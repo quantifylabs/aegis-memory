@@ -161,3 +161,6 @@ aegis-www-main/
 SKILL (2).md
 tmpclaude-*/
 .claude/
+
+# aegis inspect generated output
+aegis-out/
