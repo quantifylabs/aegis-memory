@@ -14,6 +14,7 @@ from aegis_memory.cli.commands import (
     export_import,
     features,
     init,
+    inspect,
     memory,
     new,
     playbook,
@@ -70,6 +71,10 @@ app.command(name="import", help="Import memories from file")(export_import.impor
 app.command(name="init", help="Setup wizard with framework detection")(init.init)
 app.command(name="new", help="Generate project from template")(new.new)
 app.command(name="explore", help="Interactive memory browser")(explore.explore)
+
+# Standalone, server-free static analysis commands.
+app.command(name="inspect", help="Inspect an agent project for unsafe memory flows")(inspect.inspect)
+app.command(name="replay", help="Replay a built-in attack against the project")(inspect.replay)
 
 
 @app.command()
