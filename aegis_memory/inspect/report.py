@@ -15,7 +15,7 @@ from pathlib import Path
 
 import yaml
 
-from . import analyzer, htmlmap, policies, replay
+from . import analyzer, cases, htmlmap, policies, replay
 from . import score as scoring
 from .findings import Finding, derive_unsafe_memory_flows
 
@@ -43,8 +43,19 @@ def run_inspection(
 ) -> InspectionResult:
     project_root = Path(project_root).resolve()
     findings = analyzer.analyze_project(project_root, framework=framework)
-    score = scoring.compute_score(findings)
+    return _finalize(project_root, findings, out_dir=out_dir, write=write)
 
+
+def _finalize(
+    project_root: Path,
+    findings: list[Finding],
+    *,
+    out_dir: str | Path | None = None,
+    write: bool = True,
+) -> InspectionResult:
+    """Score a finding set and (optionally) write all artifacts. Shared by the plain run,
+    emit-cases, and ingest-verdicts paths."""
+    score = scoring.compute_score(findings)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
     run_id = f"{ts}Z-{secrets.token_hex(3)}"
     out_root = Path(out_dir).resolve() if out_dir else project_root / OUT_DIR_NAME
@@ -54,6 +65,38 @@ def run_inspection(
     if write:
         _write_artifacts(result, project_root.name)
     return result
+
+
+def emit_cases(
+    project_root: str | Path,
+    *,
+    out_dir: str | Path | None = None,
+    framework: str | None = None,
+) -> tuple[InspectionResult, dict]:
+    """Run the deterministic inspection and write ``cases/cases.json`` for the session model."""
+    project_root = Path(project_root).resolve()
+    findings = analyzer.analyze_project(project_root, framework=framework)
+    result = _finalize(project_root, findings, out_dir=out_dir, write=True)
+    case_list = cases.build_cases(findings, project_root)
+    doc = cases.write_cases(result.out_root, case_list)
+    return result, doc
+
+
+def ingest_verdicts(
+    project_root: str | Path,
+    *,
+    out_dir: str | Path | None = None,
+    framework: str | None = None,
+) -> InspectionResult:
+    """Fold session-model verdicts back into the findings and refresh the report."""
+    project_root = Path(project_root).resolve()
+    out_root = Path(out_dir).resolve() if out_dir else project_root / OUT_DIR_NAME
+    cases_doc = cases.load_cases(out_root)
+    verdicts_doc = cases.load_verdicts(out_root)
+    # Deterministic re-analysis reproduces the exact findings the cases were built from.
+    findings = analyzer.analyze_project(project_root, framework=framework)
+    cases.apply_verdicts(findings, cases_doc, verdicts_doc)
+    return _finalize(project_root, findings, out_dir=out_dir, write=True)
 
 
 def _write_artifacts(result: InspectionResult, project_name: str) -> None:
@@ -154,4 +197,4 @@ def _finding_block(f: Finding) -> str:
     )
 
 
-__all__ = ["InspectionResult", "run_inspection"]
+__all__ = ["InspectionResult", "emit_cases", "ingest_verdicts", "run_inspection"]
