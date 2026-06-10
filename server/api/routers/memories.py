@@ -9,7 +9,7 @@ import time
 from datetime import datetime
 from typing import Any
 
-from api.dependencies.auth import check_rate_limit
+from api.dependencies.auth import AuthContext, check_rate_limit, get_auth_context
 from api.dependencies.database import get_db, get_read_db
 from embedding_service import content_hash, get_embedding_service
 from event_repository import EventRepository
@@ -26,6 +26,7 @@ from temporal_decay import compute_relevance_score
 from config import get_settings
 from content_security import ContentSecurityScanner, InjectionClassifier
 from integrity import compute_integrity_hash
+from trust_levels import VALID_TRUST_LEVELS, resolve_trust_level
 
 router = APIRouter()
 _settings = get_settings()
@@ -51,6 +52,7 @@ class MemoryCreate(BaseModel):
     metadata: dict[str, Any] | None = None
     ttl_seconds: int | None = Field(default=None, ge=1, le=31536000)
     scope: str | None = None
+    trust_level: str | None = None
     shared_with_agents: list[str] | None = None
     derived_from_agents: list[str] | None = None
     coordination_metadata: dict[str, Any] | None = None
@@ -62,6 +64,13 @@ class MemoryCreate(BaseModel):
             valid = [s.value for s in MemoryScope]
             if v not in valid:
                 raise ValueError(f"scope must be one of: {valid}")
+        return v
+
+    @field_validator("trust_level")
+    @classmethod
+    def validate_trust_level(cls, v):
+        if v is not None and v not in VALID_TRUST_LEVELS:
+            raise ValueError(f"trust_level must be one of: {sorted(VALID_TRUST_LEVELS)}")
         return v
 
 
@@ -189,7 +198,7 @@ async def _emit(db, *, project_id, namespace, event_type, memory_id=None, agent_
 # ---------- Endpoints ----------
 
 @router.post("/add", response_model=AddResult)
-async def add_memory(body: MemoryCreate, project_id: str = Depends(check_rate_limit), db: AsyncSession = Depends(get_db)):
+async def add_memory(body: MemoryCreate, project_id: str = Depends(check_rate_limit), auth: AuthContext = Depends(get_auth_context), db: AsyncSession = Depends(get_db)):
     """Add a single memory with automatic scope inference and deduplication."""
     try:
         with track_latency(OperationNames.MEMORY_ADD):
@@ -200,10 +209,16 @@ async def add_memory(body: MemoryCreate, project_id: str = Depends(check_rate_li
                 record_operation(OperationNames.MEMORY_ADD, "success")
                 return AddResult(id=existing.id, deduped_from=existing.id)
 
+            # Resolve the effective trust level (body -> principal -> conservative default).
+            resolved_trust = resolve_trust_level(
+                body.trust_level, auth.trust_level,
+                enable_trust_levels=_settings.enable_trust_levels,
+            )
+
             # Content security scan (Stages 1-4)
             verdict = await _scanner.scan_async(
                 body.content, body.metadata,
-                trust_level="internal",
+                trust_level=resolved_trust,
                 scope=body.scope or "agent-private",
             )
             if not verdict.allowed:
@@ -227,7 +242,7 @@ async def add_memory(body: MemoryCreate, project_id: str = Depends(check_rate_li
             if _settings.enable_integrity_check:
                 integrity_hash = compute_integrity_hash(content_to_store, body.agent_id, project_id, _settings.get_integrity_key())
 
-            mem = await MemoryRepository.add(db, project_id=project_id, content=content_to_store, embedding=embedding, user_id=body.user_id, agent_id=body.agent_id, namespace=body.namespace, metadata=body.metadata, ttl_seconds=body.ttl_seconds, scope=resolved_scope.value, shared_with_agents=body.shared_with_agents, derived_from_agents=body.derived_from_agents, coordination_metadata=body.coordination_metadata, integrity_hash=integrity_hash, content_flags=verdict.flags, trust_level="internal")
+            mem = await MemoryRepository.add(db, project_id=project_id, content=content_to_store, embedding=embedding, user_id=body.user_id, agent_id=body.agent_id, namespace=body.namespace, metadata=body.metadata, ttl_seconds=body.ttl_seconds, scope=resolved_scope.value, shared_with_agents=body.shared_with_agents, derived_from_agents=body.derived_from_agents, coordination_metadata=body.coordination_metadata, integrity_hash=integrity_hash, content_flags=verdict.flags, trust_level=resolved_trust)
             record_memory_stored_scope(resolved_scope.value)
             await _emit(db, project_id=project_id, memory_id=mem.id, namespace=mem.namespace, agent_id=mem.agent_id, event_type=MemoryEventType.CREATED.value, payload={"source": "add"})
             record_operation(OperationNames.MEMORY_ADD, "success")
@@ -240,7 +255,7 @@ async def add_memory(body: MemoryCreate, project_id: str = Depends(check_rate_li
 
 
 @router.post("/add_batch", response_model=AddBatchResult)
-async def add_memory_batch(body: MemoryCreateBatch, project_id: str = Depends(check_rate_limit), db: AsyncSession = Depends(get_db)):
+async def add_memory_batch(body: MemoryCreateBatch, project_id: str = Depends(check_rate_limit), auth: AuthContext = Depends(get_auth_context), db: AsyncSession = Depends(get_db)):
     """Add multiple memories efficiently with batched embedding."""
     start = time.monotonic()
     embed_service = get_embedding_service()
@@ -249,10 +264,16 @@ async def add_memory_batch(body: MemoryCreateBatch, project_id: str = Depends(ch
     results = []
     to_insert = []
     for i, item in enumerate(body.items):
+        # Resolve the effective trust level per item (body -> principal -> default).
+        resolved_trust = resolve_trust_level(
+            item.trust_level, auth.trust_level,
+            enable_trust_levels=_settings.enable_trust_levels,
+        )
+
         # Content security scan (Stages 1-4)
         verdict = await _scanner.scan_async(
             item.content, item.metadata,
-            trust_level="internal",
+            trust_level=resolved_trust,
             scope=item.scope or "agent-private",
         )
         if not verdict.allowed:
@@ -268,7 +289,7 @@ async def add_memory_batch(body: MemoryCreateBatch, project_id: str = Depends(ch
             results.append(AddResult(id=existing.id, deduped_from=existing.id))
             continue
         resolved_scope = ScopeInference.infer_scope(content=content_to_store, explicit_scope=item.scope, agent_id=item.agent_id, metadata=item.metadata or {})
-        to_insert.append({"project_id": project_id, "content": content_to_store, "embedding": embeddings[i], "user_id": item.user_id, "agent_id": item.agent_id, "namespace": item.namespace, "metadata": item.metadata, "ttl_seconds": item.ttl_seconds, "scope": resolved_scope.value, "shared_with_agents": item.shared_with_agents, "derived_from_agents": item.derived_from_agents, "coordination_metadata": item.coordination_metadata, "content_flags": verdict.flags})
+        to_insert.append({"project_id": project_id, "content": content_to_store, "embedding": embeddings[i], "user_id": item.user_id, "agent_id": item.agent_id, "namespace": item.namespace, "metadata": item.metadata, "ttl_seconds": item.ttl_seconds, "scope": resolved_scope.value, "shared_with_agents": item.shared_with_agents, "derived_from_agents": item.derived_from_agents, "coordination_metadata": item.coordination_metadata, "content_flags": verdict.flags, "trust_level": resolved_trust})
         results.append(None)
     if to_insert:
         memories = await MemoryRepository.add_batch(db, to_insert)
