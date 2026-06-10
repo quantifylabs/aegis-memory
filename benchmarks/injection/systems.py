@@ -171,11 +171,23 @@ class NaiveRegex(System):
 
 
 class ProtectAIDeberta(System):
+    """ProtectAI's DeBERTa-v3 prompt-injection classifier (CPU).
+
+    The pinned model's ``config.json`` carries ``id2label = {0: "SAFE", 1:
+    "INJECTION"}`` and **class index 1 is the injection class**. We resolve the
+    positive label from the model's own ``id2label`` at warmup rather than
+    matching a hard-coded ``"INJECTION"`` string: a revision that renamed the
+    label (e.g. to a generic ``LABEL_1``) would otherwise make the string match
+    silently never fire, producing a fake 0% FPR — the exact failure class as
+    the Prompt Guard 2 label-mapping bug. Mirrors :class:`LlamaPromptGuard2`.
+    """
+
     id = "protectai_deberta"
     MODEL = "protectai/deberta-v3-base-prompt-injection-v2"
 
     def __init__(self) -> None:
         self._pipe = None
+        self._injection_label: str | None = None
 
     def available(self) -> tuple[bool, str]:
         try:
@@ -193,12 +205,15 @@ class ProtectAIDeberta(System):
             "text-classification", model=self.MODEL,
             truncation=True, max_length=512, device=-1,  # CPU
         )
+        # Injection class is index 1; resolve its label string from the model's
+        # own config so the comparison is revision-agnostic (see class docstring).
+        self._injection_label = str(self._pipe.model.config.id2label[1])
 
     def predict(self, text: str) -> bool:
         if self._pipe is None:
             self.warmup()
         out = self._pipe(text)[0]
-        return str(out["label"]).upper() == "INJECTION"
+        return str(out["label"]) == self._injection_label
 
 
 def _resolve_model_revision(repo_id: str, revision: str = "main") -> str:
