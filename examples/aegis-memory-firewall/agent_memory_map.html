@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aegis Memory Map — aegis-memory-firewall</title>
+<style>
+  :root { --bg:#0d1117; --card:#161b22; --line:#30363d; --text:#e6edf3; --muted:#8b949e;
+           --red:#f85149; --yellow:#d29922; --green:#3fb950; --purple:#a371f7; --gray:#6e7681; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:
+          radial-gradient(1200px 400px at 50% -120px, rgba(248,81,73,.10), transparent 70%) var(--bg);
+          color:var(--text); font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  .wrap { max-width:980px; margin:0 auto; padding:20px 16px 48px; }
+  header h1 { font-size:1.25rem; margin:0 0 4px; letter-spacing:.2px; }
+  header p { color:var(--muted); margin:0 0 16px; font-size:.9rem; }
+  .scorebar { display:flex; gap:12px; align-items:center; flex-wrap:wrap;
+               background:var(--card); border:1px solid var(--line); border-radius:12px;
+               padding:14px 16px; margin-bottom:18px; }
+  .score { font-size:2rem; font-weight:700; }
+  .score .before { color:var(--red); }
+  .score .after { color:var(--green); }
+  .score .arrow { color:var(--muted); margin:0 8px; }
+  .tag { font-size:.72rem; color:var(--muted); border:1px solid var(--line);
+          border-radius:999px; padding:2px 8px; }
+  .counts span { font-size:.8rem; margin-right:10px; color:var(--muted); }
+  .caption { color:var(--muted); font-size:.8rem; margin:0 2px 10px; }
+  .lanes { display:flex; flex-direction:column; gap:8px;
+            background:var(--card); border:1px solid var(--line); border-radius:12px;
+            padding:14px; margin-bottom:6px; }
+  .lane { display:flex; align-items:stretch; gap:6px; flex-wrap:nowrap; overflow-x:auto; }
+  .node { min-width:122px; flex:1 1 0; border-radius:10px; padding:10px 12px;
+           border:1px solid var(--line); background:#0b0f14; }
+  .node .ntitle { font-weight:600; font-size:.85rem; word-break:break-word; }
+  .node .nsub { color:var(--muted); font-size:.72rem; margin-top:2px; word-break:break-word; }
+  .node.red { border-color:var(--red); box-shadow:inset 0 0 0 1px var(--red); }
+  .node.yellow { border-color:var(--yellow); }
+  .node.green { border-color:var(--green); box-shadow:inset 0 0 0 1px var(--green); }
+  .node.purple { border-color:var(--purple); }
+  .node.gray { border-color:var(--gray); }
+  .arrow { align-self:center; color:var(--muted); font-size:1.1rem; flex:0 0 auto; }
+  .outcome { display:flex; flex-direction:column; align-items:center; gap:4px; margin-top:10px;
+              padding-top:10px; border-top:1px dashed var(--line); }
+  .outcome .node { flex:0 0 auto; min-width:220px; text-align:center; }
+  .arrow.down { font-size:1.2rem; }
+  .legend { display:flex; flex-wrap:wrap; gap:14px; margin:14px 0 18px; font-size:.78rem; color:var(--muted); }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:5px; vertical-align:middle; }
+  .dot.red { background:var(--red); } .dot.yellow { background:var(--yellow); }
+  .dot.green { background:var(--green); } .dot.purple { background:var(--purple); }
+  .dot.gray { background:var(--gray); }
+  table { width:100%; border-collapse:collapse; font-size:.82rem;
+           background:var(--card); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  .badge { font-size:.7rem; padding:1px 7px; border-radius:999px; text-transform:uppercase; }
+  .badge.critical { background:rgba(248,81,73,.15); color:var(--red); }
+  .badge.high { background:rgba(248,81,73,.12); color:var(--red); }
+  .badge.medium { background:rgba(210,153,34,.15); color:var(--yellow); }
+  .badge.low { background:rgba(110,118,129,.2); color:var(--muted); }
+  .rubric { color:var(--muted); font-size:.72rem; margin-top:10px; }
+  @media (max-width:560px) {
+    .node { min-width:104px; } .score { font-size:1.5rem; }
+    .outcome .node { min-width:160px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Aegis Memory Map</h1>
+    <p>Unsafe memory flows in <strong>aegis-memory-firewall</strong></p>
+  </header>
+  <div class="scorebar">
+    <div class="score"><span class="before">100</span><span class="arrow">&#8594;</span><span class="after">2</span><span style="font-size:1rem;color:var(--muted)">/100</span></div>
+    <span class="tag">heuristic</span>
+    <div class="counts">
+      <span>Critical 5</span><span>High 0</span><span>Medium 5</span><span>Low 0</span>
+    </div>
+  </div>
+  <p class="caption">5 untrusted sources converging on shared agent memory</p>
+  <div class="lanes"><div class="lane"><div class="node gray"><div class="ntitle">document</div><div class="nsub">untrusted input</div></div><div class="arrow">&#8594;</div><div class="node red"><div class="ntitle">vectorstore.add_documents</div><div class="nsub">ingest_document.py:15</div></div><div class="arrow">&#8594;</div><div class="node red"><div class="ntitle">shared memory</div><div class="nsub">vectordb</div></div></div><div class="lane"><div class="node gray"><div class="ntitle">email</div><div class="nsub">untrusted input</div></div><div class="arrow">&#8594;</div><div class="node red"><div class="ntitle">checkpointer.put</div><div class="nsub">ingest_email.py:15</div></div><div class="arrow">&#8594;</div><div class="node red"><div class="ntitle">shared memory</div><div class="nsub">langgraph</div></div></div><div class="lane"><div class="node gray"><div class="ntitle">tool</div><div class="nsub">tool output</div></div><div class="arrow">&#8594;</div><div class="node red"><div class="ntitle">memory.save</div><div class="nsub">ingest_tool.py:15</div></div><div class="arrow">&#8594;</div><div class="node red"><div class="ntitle">shared memory</div><div class="nsub">custom</div></div></div><div class="lane"><div class="node gray"><div class="ntitle">user</div><div class="nsub">untrusted input</div></div><div class="arrow">&#8594;</div><div class="node red"><div class="ntitle">store.put</div><div class="nsub">ingest_user.py:17</div></div><div class="arrow">&#8594;</div><div class="node red"><div class="ntitle">shared memory</div><div class="nsub">langgraph</div></div></div><div class="lane"><div class="node gray"><div class="ntitle">web</div><div class="nsub">untrusted input</div></div><div class="arrow">&#8594;</div><div class="node red"><div class="ntitle">store.put</div><div class="nsub">ingest_web.py:18</div></div><div class="arrow">&#8594;</div><div class="node red"><div class="ntitle">shared memory</div><div class="nsub">langgraph</div></div></div><div class="outcome"><div class="arrow down">&#8595;</div><div class="node red"><div class="ntitle">privileged decision</div><div class="nsub">reads memory &amp; acts</div></div></div></div>
+  <div class="legend"><span class="legend-item"><span class="dot green"></span>safe / governed</span><span class="legend-item"><span class="dot yellow"></span>needs policy</span><span class="legend-item"><span class="dot red"></span>dangerous write</span><span class="legend-item"><span class="dot purple"></span>privileged / system</span><span class="legend-item"><span class="dot gray"></span>unknown</span></div>
+  <table>
+    <thead><tr><th>ID</th><th>Severity</th><th>Confidence</th><th>Location</th><th>Finding</th></tr></thead>
+    <tbody><tr class='sev-critical'><td>AEG-001</td><td><span class='badge critical'>critical</span></td><td>EXTRACTED</td><td>ingest_document.py:15</td><td>Untrusted input written to memory via vectorstore.add_documents</td></tr><tr class='sev-critical'><td>AEG-002</td><td><span class='badge critical'>critical</span></td><td>INFERRED</td><td>ingest_email.py:15</td><td>Untrusted input written to memory via checkpointer.put</td></tr><tr class='sev-critical'><td>AEG-003</td><td><span class='badge critical'>critical</span></td><td>EXTRACTED</td><td>ingest_tool.py:15</td><td>Tool output written to memory via memory.save</td></tr><tr class='sev-critical'><td>AEG-004</td><td><span class='badge critical'>critical</span></td><td>INFERRED</td><td>ingest_user.py:17</td><td>Untrusted input written to memory via store.put</td></tr><tr class='sev-critical'><td>AEG-005</td><td><span class='badge critical'>critical</span></td><td>EXTRACTED</td><td>ingest_web.py:18</td><td>Untrusted input written to memory via store.put</td></tr><tr class='sev-medium'><td>AEG-006</td><td><span class='badge medium'>medium</span></td><td>INFERRED</td><td>ingest_document.py:15</td><td>No injection screening detected at this site before vectorstore.add_documents</td></tr><tr class='sev-medium'><td>AEG-007</td><td><span class='badge medium'>medium</span></td><td>INFERRED</td><td>ingest_email.py:15</td><td>No injection screening detected at this site before checkpointer.put</td></tr><tr class='sev-medium'><td>AEG-008</td><td><span class='badge medium'>medium</span></td><td>INFERRED</td><td>ingest_tool.py:15</td><td>No injection screening detected at this site before memory.save</td></tr><tr class='sev-medium'><td>AEG-009</td><td><span class='badge medium'>medium</span></td><td>INFERRED</td><td>ingest_user.py:17</td><td>No injection screening detected at this site before store.put</td></tr><tr class='sev-medium'><td>AEG-010</td><td><span class='badge medium'>medium</span></td><td>INFERRED</td><td>ingest_web.py:18</td><td>No injection screening detected at this site before store.put</td></tr></tbody>
+  </table>
+  <p class="rubric">Score: Heuristic score = min(100, sum of per-finding weights), where critical=20, high=12, medium=5, low=2. Screened (guarded) flows are discounted to 25% of their weight. This is UX sugar for the fix/rescan loop, NOT the benchmark.</p>
+</div>
+<script>var AEGIS_SCORE = JSON.parse("{&quot;before&quot;: 100, &quot;after&quot;: 2}".replace(/&quot;/g,'"'));</script>
+</body>
+</html>

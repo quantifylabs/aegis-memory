@@ -1,9 +1,9 @@
-"""Unit + end-to-end tests for the ``aegis inspect`` engine and the support-agent demo.
+"""Unit + end-to-end tests for the ``aegis inspect`` engine and the memory-firewall demo.
 
-Covers: the sink catalog per pattern, the headline untrusted flow on the demo, the
-anti-demo-tuning generality fixture (acceptance #5), screened downgrade, canonical /
-derived artifact relationship, determinism, the score being built from findings, the real
-replay scan, and the demo's without/with outcomes differing.
+Covers: the sink catalog per pattern, the five-channel untrusted flows on the demo, the
+anti-demo-tuning generality fixtures (acceptance §3.5), screened downgrade, real-score
+rendering through the HTML, canonical / derived artifact relationship, determinism, the score
+being built from findings, the real replay scan, and the demo's without/with outcomes differing.
 """
 
 from __future__ import annotations
@@ -17,7 +17,8 @@ from aegis_memory.inspect import analyze_project, derive_unsafe_memory_flows, ru
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect"
-DEMO_DIR = REPO_ROOT / "examples" / "aegis-demo-support-agent"
+DEMO_DIR = REPO_ROOT / "examples" / "aegis-memory-firewall"
+AGENT_DIR = DEMO_DIR / "agent"
 
 
 # --- sink catalog (per-pattern unit tests) ----------------------------------------
@@ -47,21 +48,26 @@ def test_sink_catalog_ignores_unrelated_calls():
     assert sinks.classify_call(attr=None, func="print", receiver=None) is None
 
 
-# --- the demo's headline flow ------------------------------------------------------
+# --- the demo's five untrusted channels --------------------------------------------
 
 
-def test_demo_flow_detected_as_critical_untrusted():
-    findings = analyze_project(DEMO_DIR)
-    flows = [f for f in findings if f.category == "user_input_to_memory"]
-    assert flows, "expected an untrusted user-input-to-memory flow in the demo"
-    headline = flows[0]
-    assert headline.severity == "critical"
-    assert headline.trust == "untrusted"
-    assert headline.sink.call == "store.put"
-    assert headline.sink.framework == "langgraph"
-    assert headline.sink.file.endswith("support_agent_graph.py")
-    assert headline.sink.line > 0
-    assert headline.confidence in ("EXTRACTED", "INFERRED")
+def test_demo_flows_detected_as_critical_untrusted():
+    """All five channels (user, document, tool, web, email) are flagged as untrusted
+    memory writes, across the LangGraph / vector-DB / custom sink families."""
+    findings = analyze_project(AGENT_DIR)
+    flows = [f for f in findings if f.category.endswith("_to_memory")]
+    assert len(flows) == 5, f"expected five untrusted source->memory flows, got {len(flows)}"
+    assert all(f.severity == "critical" for f in flows)
+    assert all(f.trust == "untrusted" for f in flows)
+    assert all(f.confidence in ("EXTRACTED", "INFERRED") for f in flows)
+    assert all(f.sink.file.startswith("ingest_") and f.sink.line > 0 for f in flows)
+    # Generalizes across sink families, not one idiom.
+    assert {f.sink.framework for f in flows} == {"langgraph", "vectordb", "custom"}
+    calls = {f.sink.call for f in flows}
+    assert {"store.put", "checkpointer.put", "vectorstore.add_documents", "memory.save"} <= calls
+    # The tool channel is tagged tool_output; the rest untrusted_input.
+    assert any(f.source == "tool_output" for f in flows)
+    assert any(f.source == "untrusted_input" for f in flows)
 
 
 # --- anti-demo-tuning: a different fixture must still be caught (acceptance #5) -----
@@ -74,6 +80,19 @@ def test_generality_second_fixture_store_put_found():
     assert puts, "general catalog must find graph_b's .put sink (not demo-tuned)"
     untrusted = [f for f in b if f.trust == "untrusted"]
     assert untrusted, "graph_b's untrusted flow must be detected via the general catalog"
+
+
+def test_generality_multisource_fixture_all_channels_found():
+    """The multi-channel anti-tuning fixture (different names, a vector store for the web
+    sink) must still have every untrusted flow caught by the general catalog."""
+    findings = analyze_project(FIXTURES)
+    ms = [f for f in findings if f.sink.file.endswith("graph_multisource.py")]
+    flows = [f for f in ms if f.category.endswith("_to_memory")]
+    assert len(flows) == 4, f"expected four untrusted flows, got {len(flows)}"
+    assert all(f.trust == "untrusted" and f.severity == "critical" for f in flows)
+    assert all(not f.screened for f in flows)
+    # Spans LangGraph store/checkpointer, a vector store, and a custom sink — no demo tuning.
+    assert {f.sink.framework for f in flows} == {"langgraph", "vectordb", "custom"}
 
 
 def test_clean_fixture_has_no_untrusted_flow():
@@ -139,7 +158,7 @@ def test_score_built_from_findings():
 
 def test_inspection_writes_all_artifacts(tmp_path):
     out = tmp_path / "out"
-    run_inspection(DEMO_DIR, out_dir=out, write=True)
+    result = run_inspection(DEMO_DIR, out_dir=out, write=True)
     for name in (
         "INSPECTION_REPORT.md",
         "findings.json",
@@ -154,7 +173,23 @@ def test_inspection_writes_all_artifacts(tmp_path):
     data = json.loads((out / "findings.json").read_text(encoding="utf-8"))
     assert data["schema"] == "aegis.findings.v1"
     html = (out / "agent_memory_map.html").read_text(encoding="utf-8")
-    assert "viewport" in html and "86" in html  # responsive + score transition
+    # Responsive, and the header renders the real computed "after" score (not the 29 fallback).
+    assert "viewport" in html
+    assert f'"after">{result.score["score"]}<' in html
+
+
+def test_real_before_score_renders_through_html_not_fallback(tmp_path):
+    """A real run with a supplied before_score renders the computed values, never the
+    standalone 86/29 fallbacks (the §2 score-rendering fix)."""
+    out = tmp_path / "out"
+    result = run_inspection(DEMO_DIR, out_dir=out, write=True, before_score=42)
+    html = (out / "agent_memory_map.html").read_text(encoding="utf-8")
+    assert '"before">42<' in html  # the real supplied "before"
+    assert f'"after">{result.score["score"]}<' in html  # the real computed "after"
+    assert '"before">86<' not in html and '"after">29<' not in html  # fallbacks not used
+    # The report leads with the real transition too.
+    report = (out / "INSPECTION_REPORT.md").read_text(encoding="utf-8")
+    assert f"**42 → {result.score['score']} / 100**" in report
 
 
 # --- the real replay scan ----------------------------------------------------------
@@ -183,5 +218,8 @@ def test_demo_outcomes_differ(script, expected):
         assert mod.main() == expected
     finally:
         sys.path.remove(str(DEMO_DIR))
-        for m in (script, "support_agent_graph", "_demo_common"):
-            sys.modules.pop(m, None)
+        # Drop the demo's modules (run scripts, helpers, and the ``agent`` package) so the
+        # two parametrized runs import cleanly and don't leak into other tests.
+        for m in list(sys.modules):
+            if m == script or m == "_demo_common" or m == "agent" or m.startswith("agent."):
+                sys.modules.pop(m, None)

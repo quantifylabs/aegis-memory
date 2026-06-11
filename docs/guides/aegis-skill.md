@@ -50,13 +50,13 @@ Session verdicts are tagged `classifier: session_model` and **capped at the INFE
 They never override a deterministic `REJECT` and never borrow the benchmark's credibility —
 the benchmark validates the named Stages 1–4 pipeline, which a Claude Code session is not.
 
-## End-to-end walkthrough (on the Task-1 demo)
+## End-to-end walkthrough (on the memory-firewall demo)
 
 ```bash
-cd examples/aegis-demo-support-agent
+cd examples/aegis-memory-firewall
 aegis install claude --project
 aegis inspect . --emit-cases
-# => emits 1 case: the store.put write of untrusted ticket text (AEG-001)
+# => emits cases for the INFERRED untrusted writes (the five-channel ingest sinks)
 #    aegis-out/cases/cases.json  (run_id run-xxxxxxxxxxxx)
 ```
 
@@ -72,8 +72,8 @@ The assistant (driven by the installed `SKILL.md`) reads `cases.json`, base64-de
 
 ```bash
 aegis inspect . --ingest-verdicts
-# => AEG-001 now carries classifier: session_model, label: malicious (still INFERRED).
-#    Re-running --ingest-verdicts changes nothing (idempotent).
+# => the classified finding now carries classifier: session_model, label: malicious
+#    (still capped at INFERRED). Re-running --ingest-verdicts changes nothing (idempotent).
 ```
 
 ## The self-poisoning guard

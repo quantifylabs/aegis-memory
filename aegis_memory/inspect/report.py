@@ -21,7 +21,10 @@ from .findings import Finding, derive_unsafe_memory_flows
 
 OUT_DIR_NAME = "aegis-out"
 
-# A fixed "before" baseline used for the headline transition in the visual/report.
+# Standalone/no-baseline fallback only: the "before" value shown in the headline transition
+# when the caller supplies no real prior-run score. A real before/after (e.g. the demo's
+# unscreened-vs-screened comparison) passes a computed ``before_score`` into ``run_inspection``,
+# which overrides this. Never let this constant stand in for a real measured run.
 BEFORE_SCORE = 86
 
 
@@ -32,6 +35,9 @@ class InspectionResult:
     run_id: str
     out_root: Path
     run_dir: Path
+    # Real "before" score from a prior/unscreened run, when the caller has one. None ->
+    # the report/visual fall back to the labeled BEFORE_SCORE baseline above.
+    before_score: int | None = None
 
 
 def run_inspection(
@@ -40,10 +46,11 @@ def run_inspection(
     out_dir: str | Path | None = None,
     framework: str | None = None,
     write: bool = True,
+    before_score: int | None = None,
 ) -> InspectionResult:
     project_root = Path(project_root).resolve()
     findings = analyzer.analyze_project(project_root, framework=framework)
-    return _finalize(project_root, findings, out_dir=out_dir, write=write)
+    return _finalize(project_root, findings, out_dir=out_dir, write=write, before_score=before_score)
 
 
 def _finalize(
@@ -52,6 +59,7 @@ def _finalize(
     *,
     out_dir: str | Path | None = None,
     write: bool = True,
+    before_score: int | None = None,
 ) -> InspectionResult:
     """Score a finding set and (optionally) write all artifacts. Shared by the plain run,
     emit-cases, and ingest-verdicts paths."""
@@ -61,7 +69,7 @@ def _finalize(
     out_root = Path(out_dir).resolve() if out_dir else project_root / OUT_DIR_NAME
     run_dir = out_root / "runs" / ts
 
-    result = InspectionResult(findings, score, run_id, out_root, run_dir)
+    result = InspectionResult(findings, score, run_id, out_root, run_dir, before_score=before_score)
     if write:
         _write_artifacts(result, project_root.name)
     return result
@@ -124,23 +132,28 @@ def _build_artifacts(result: InspectionResult, project_name: str) -> dict[str, s
         "flows": derive_unsafe_memory_flows(findings),
     }
     replay_result = replay.run_memory_poisoning()
-    after = result.score.get("score", 29)
+    # "after" is always the real computed score from this run. "before" is the caller's real
+    # prior-run score when supplied, else the labeled standalone BEFORE_SCORE baseline.
+    after = result.score["score"]
+    before = result.before_score if result.before_score is not None else BEFORE_SCORE
     return {
         "findings.json": json.dumps(findings_json, indent=2) + "\n",
         "unsafe_memory_flows.json": json.dumps(flows_json, indent=2) + "\n",
         "suggested_policies.yml": yaml.safe_dump(
             policies.suggest_policies(findings), sort_keys=False
         ),
-        "INSPECTION_REPORT.md": _render_report(result, project_name, replay_result),
+        "INSPECTION_REPORT.md": _render_report(result, project_name, replay_result, before),
         "agent_memory_map.html": htmlmap.render_html(
-            findings, result.score, before_score=BEFORE_SCORE, after_score=after,
+            findings, result.score, before_score=before, after_score=after,
             project_name=project_name,
         ),
         "replay_attacks/memory_poisoning_demo.md": replay.render_markdown(replay_result),
     }
 
 
-def _render_report(result: InspectionResult, project_name: str, replay_result: dict) -> str:
+def _render_report(
+    result: InspectionResult, project_name: str, replay_result: dict, before_score: int
+) -> str:
     findings = result.findings
     score = result.score
     # Lead with concrete findings (file+line); score comes second.
@@ -165,7 +178,7 @@ def _render_report(result: InspectionResult, project_name: str, replay_result: d
     s = score["score"]
     c = score["counts"]
     lines.append("\n## Memory Risk Score (heuristic — UX sugar, not the benchmark)\n")
-    lines.append(f"**{BEFORE_SCORE} → {s} / 100**  ·  label: `heuristic`\n")
+    lines.append(f"**{before_score} → {s} / 100**  ·  label: `heuristic`\n")
     lines.append(
         f"Critical {c['critical']} · High {c['high']} · Medium {c['medium']} · Low {c['low']}\n"
     )

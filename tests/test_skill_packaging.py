@@ -19,7 +19,7 @@ from aegis_memory.inspect import cases as cases_mod
 from aegis_memory.inspect.findings import Finding, Sink
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEMO_DIR = REPO_ROOT / "examples" / "aegis-demo-support-agent"
+DEMO_DIR = REPO_ROOT / "examples" / "aegis-memory-firewall" / "agent"
 
 
 def _finding(fid="AEG-001", severity="medium", confidence="INFERRED", category="user_input_to_memory"):

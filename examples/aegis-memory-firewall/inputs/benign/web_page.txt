@@ -1,0 +1,5 @@
+Refund Operations — Knowledge Base (mirror)
+
+This page summarizes standard refund handling for the support team. Most refunds are routine
+and processed within two business days. High-value refunds above $500 require manual review
+and finance sign-off. For escalations, attach the order ID and notify the finance channel.
