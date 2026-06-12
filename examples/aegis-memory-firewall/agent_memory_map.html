@@ -7,8 +7,8 @@
 <style>
   :root {
     --ink:#0f1014; --panel:#16181f; --panel2:#1b1e27; --line:#2a2e3a;
-    --text:#ece9e3; --muted:#969aa6; --accent:#57c2cf;       /* instrument cyan = structure/gate */
-    --red:#e5534b; --yellow:#d39a36; --green:#46b46e; --purple:#9a73d6; --gray:#6b7280;
+    --text:#ece9e3; --muted:#969aa6; --accent:#57c2cf;
+    --danger:#e5534b; --safe:#46b46e; --soft:#8a90a0;
     --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
     --sans:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
   }
@@ -16,83 +16,52 @@
   body {
     margin:0; color:var(--text); font-family:var(--sans);
     background:
-      linear-gradient(transparent 0 31px, rgba(87,194,207,.035) 31px 32px) 0 0/100% 32px,
-      linear-gradient(90deg, transparent 0 31px, rgba(87,194,207,.035) 31px 32px) 0 0/32px 100%,
-      radial-gradient(900px 360px at 78% -140px, rgba(87,194,207,.10), transparent 70%),
+      radial-gradient(900px 360px at 78% -150px, rgba(87,194,207,.10), transparent 70%),
       var(--ink);
   }
-  .wrap { max-width:1000px; margin:0 auto; padding:26px 18px 56px; }
+  .wrap { max-width:1040px; margin:0 auto; padding:26px 18px 56px; }
   .eyebrow { font-family:var(--mono); font-size:.7rem; letter-spacing:.22em; text-transform:uppercase;
               color:var(--accent); margin:0 0 8px; }
   h1 { font-family:var(--mono); font-size:1.5rem; font-weight:600; letter-spacing:-.01em; margin:0 0 4px; }
-  .sub { color:var(--muted); margin:0 0 20px; font-size:.92rem; }
+  .sub { color:var(--muted); margin:0 0 18px; font-size:.92rem; }
   .sub strong { color:var(--text); }
 
   .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; }
   .scorebar { display:flex; align-items:center; gap:18px; flex-wrap:wrap; padding:16px 18px; margin-bottom:16px; }
-  .gauge { display:flex; align-items:baseline; gap:10px; font-family:var(--mono); }
-  .gauge .before { font-size:2.1rem; font-weight:700; color:var(--red); }
+  .gauge { display:flex; align-items:baseline; gap:9px; font-family:var(--mono); }
+  .gauge .before { font-size:2.1rem; font-weight:700; color:var(--danger); }
   .gauge .to { color:var(--muted); font-size:1.1rem; }
-  .gauge .after { font-size:2.1rem; font-weight:700; color:var(--green); }
+  .gauge .after { font-size:2.1rem; font-weight:700; color:var(--safe); }
   .gauge .scale { color:var(--muted); font-size:.95rem; }
   .meta { display:flex; flex-direction:column; gap:5px; }
-  .pill { font-family:var(--mono); font-size:.7rem; letter-spacing:.08em; text-transform:uppercase;
+  .pill { font-family:var(--mono); font-size:.7rem; letter-spacing:.06em; text-transform:uppercase;
            color:var(--muted); border:1px solid var(--line); border-radius:999px; padding:3px 10px; align-self:flex-start; }
   .pill.delta { color:var(--accent); border-color:rgba(87,194,207,.4); }
   .counts { font-family:var(--mono); font-size:.78rem; color:var(--muted); }
   .counts b { color:var(--text); font-weight:600; }
 
-  .caption { color:var(--muted); font-size:.85rem; margin:0 2px 12px; }
-  .caption b { color:var(--accent); font-weight:600; }
+  /* the hero: two convergence states */
+  .states { display:flex; gap:14px; align-items:stretch; }
+  .state { flex:1 1 0; min-width:0; border:1px solid var(--line); border-radius:14px;
+            background:var(--panel); padding:14px 14px 12px; display:flex; flex-direction:column; }
+  .danger-state { box-shadow:inset 0 2px 0 var(--danger); }
+  .safe-state { box-shadow:inset 0 2px 0 var(--safe); }
+  .state-h { font-family:var(--mono); font-size:.86rem; font-weight:600; margin:0 0 8px;
+              letter-spacing:.02em; }
+  .danger-state .state-h { color:var(--danger); }
+  .safe-state .state-h { color:var(--safe); }
+  .svg-wrap { flex:1; }
+  .svg-wrap svg { display:block; }
+  .state-cap { color:var(--muted); font-size:.8rem; line-height:1.45; margin:10px 2px 0; }
 
-  /* ---- the firewall diagram (the signature) ---- */
-  .diagram { padding:16px 16px 10px; margin-bottom:8px; }
-  .lane {
-    display:grid; align-items:stretch; gap:0;
-    grid-template-columns: 1.05fr 22px 1.25fr 52px 1fr;
-    margin-bottom:10px;
-  }
-  .src, .sink, .mem { border:1px solid var(--line); border-radius:10px; padding:9px 12px; background:var(--panel2);
-                       display:flex; flex-direction:column; justify-content:center; min-width:0; }
-  .src .idx { font-family:var(--mono); font-size:.66rem; color:var(--accent); letter-spacing:.1em; }
-  .src-t { font-weight:600; font-size:.86rem; text-transform:capitalize; }
-  .src-s { color:var(--muted); font-size:.72rem; }
-  .call { font-family:var(--mono); font-size:.82rem; font-weight:600; word-break:break-all; }
-  .loc { font-family:var(--mono); color:var(--muted); font-size:.7rem; word-break:break-all; }
-  .mem-t { font-weight:600; font-size:.84rem; }
-  .mem-s { font-family:var(--mono); color:var(--muted); font-size:.7rem; }
-  .wire { align-self:center; height:2px; background:linear-gradient(90deg,var(--line),var(--accent)); opacity:.7; }
-
-  /* the gate column: a glowing cyan rail every lane crosses */
-  .gate { position:relative; display:flex; align-items:center; justify-content:center; }
-  .gate::before { content:""; position:absolute; top:-5px; bottom:-5px; width:3px; left:50%; transform:translateX(-50%);
-                   background:var(--accent); border-radius:2px; box-shadow:0 0 10px rgba(87,194,207,.55); }
-  .gate .glyph { position:relative; z-index:1; width:26px; height:26px; border-radius:50%;
-                  display:flex; align-items:center; justify-content:center; font-size:.8rem; font-weight:700;
-                  border:1px solid var(--line); background:var(--ink); }
-  .gate.pass .glyph { color:var(--green); border-color:var(--green); box-shadow:0 0 8px rgba(70,180,110,.5); }
-  .gate.block .glyph { color:var(--red); border-color:var(--red); box-shadow:0 0 8px rgba(229,83,75,.5); }
-
-  /* risk tint on the sink + memory nodes (semantic) */
-  .sink.red, .mem.red { border-color:var(--red); box-shadow:inset 0 0 0 1px rgba(229,83,75,.5); }
-  .sink.yellow, .mem.yellow { border-color:var(--yellow); }
-  .sink.green, .mem.green { border-color:var(--green); box-shadow:inset 0 0 0 1px rgba(70,180,110,.45); }
-  .sink.gray, .mem.gray { border-color:var(--gray); }
-
-  .outcome { display:flex; flex-direction:column; align-items:center; gap:2px; margin-top:6px;
-              padding-top:8px; border-top:1px dashed var(--line); }
-  .down { color:var(--accent); font-size:1.1rem; }
-  .decide { border:1px solid var(--line); border-radius:10px; padding:9px 16px; text-align:center; min-width:230px; }
-  .decide.red { border-color:var(--red); box-shadow:inset 0 0 0 1px rgba(229,83,75,.5); }
-  .decide.green { border-color:var(--green); box-shadow:inset 0 0 0 1px rgba(70,180,110,.45); }
-  .dec-t { display:block; font-weight:600; font-size:.86rem; }
-  .dec-s { display:block; color:var(--muted); font-size:.72rem; }
-
-  .legend { display:flex; flex-wrap:wrap; gap:14px; margin:14px 2px 20px; font-size:.76rem; color:var(--muted); }
+  .legend { display:flex; flex-wrap:wrap; gap:14px; margin:14px 2px 8px; font-size:.76rem; color:var(--muted); }
   .dot { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle; }
-  .dot.red { background:var(--red); } .dot.yellow { background:var(--yellow); }
-  .dot.green { background:var(--green); } .dot.purple { background:var(--purple); } .dot.gray { background:var(--gray); }
+  .dot.danger { background:var(--danger); } .dot.safe { background:var(--safe); } .dot.muted { background:var(--soft); }
 
+  .below-fold { margin-top:30px; padding-top:18px; border-top:1px solid var(--line); }
+  .ref-h { font-family:var(--mono); font-size:.95rem; margin:0 0 3px; }
+  .ref-sub { color:var(--muted); font-size:.78rem; margin:0 0 12px; }
+  .ref-sub code { font-family:var(--mono); color:var(--text); }
   table { width:100%; border-collapse:collapse; font-size:.82rem; overflow:hidden; border-radius:14px;
            border:1px solid var(--line); background:var(--panel); }
   th, td { text-align:left; padding:9px 11px; border-bottom:1px solid var(--line); vertical-align:top; }
@@ -101,27 +70,15 @@
   td.mono { font-family:var(--mono); font-size:.76rem; }
   tr:last-child td { border-bottom:none; }
   .badge { font-family:var(--mono); font-size:.66rem; padding:2px 8px; border-radius:999px; text-transform:uppercase; letter-spacing:.04em; }
-  .badge.critical { background:rgba(229,83,75,.16); color:var(--red); }
-  .badge.high { background:rgba(229,83,75,.12); color:var(--red); }
-  .badge.medium { background:rgba(211,154,54,.16); color:var(--yellow); }
+  .badge.critical { background:rgba(229,83,75,.16); color:var(--danger); }
+  .badge.high { background:rgba(229,83,75,.12); color:var(--danger); }
+  .badge.medium { background:rgba(211,154,54,.16); color:#d39a36; }
   .badge.low { background:rgba(107,114,128,.22); color:var(--muted); }
   .rubric { color:var(--muted); font-size:.72rem; margin-top:12px; line-height:1.5; }
 
-  .lane { opacity:0; transform:translateY(4px); animation:rise .5s ease forwards; }
-  .lane:nth-child(2) { animation-delay:.05s; } .lane:nth-child(3) { animation-delay:.10s; }
-  .lane:nth-child(4) { animation-delay:.15s; } .lane:nth-child(5) { animation-delay:.20s; }
-  .lane:nth-child(6) { animation-delay:.25s; }
-  @keyframes rise { to { opacity:1; transform:none; } }
-  @media (prefers-reduced-motion: reduce) { .lane { animation:none; opacity:1; transform:none; } }
-
-  @media (max-width:620px) {
-    .lane { grid-template-columns:1fr; gap:6px; padding:10px; border:1px solid var(--line); border-radius:12px; background:var(--panel2); }
-    .src, .sink, .mem { background:var(--ink); }
-    .wire { display:none; }
-    .gate { height:30px; }
-    .gate::before { top:50%; bottom:auto; left:8px; right:8px; width:auto; height:3px; transform:translateY(-50%); }
-    .gauge .before, .gauge .after { font-size:1.6rem; }
-    .decide { min-width:0; width:100%; }
+  @media (max-width:720px) {
+    .states { flex-direction:column; }
+    .gauge .before, .gauge .after { font-size:1.7rem; }
   }
 </style>
 </head>
@@ -136,20 +93,16 @@
   <div class="panel scorebar">
     <div class="gauge"><span class="before">100</span><span class="to">&#8594;</span><span class="after">2</span><span class="scale">/100</span></div>
     <div class="meta">
-      <span class="pill">heuristic risk · poisonable</span>
+      <span class="pill">risk score · heuristic · lower is safer</span>
       <span class="pill delta">-98 after screening</span>
     </div>
     <div class="counts">Critical <b>5</b> &nbsp; High <b>0</b> &nbsp; Medium <b>5</b> &nbsp; Low <b>0</b></div>
   </div>
 
-  <p class="caption"><b>5 untrusted sources crossing the Aegis gate into shared agent memory</b></p>
-  <div class="panel diagram"><div class="lane"><div class="src"><span class="idx">01</span><span class="src-t">document</span><span class="src-s">untrusted input</span></div><div class="wire"></div><div class="sink red"><span class="call">vectorstore.add_documents</span><span class="loc">ingest_document.py:15</span></div><div class="gate block" title="no guard at this crossing — write reaches memory unchecked"><span class="glyph">&#33;</span></div><div class="mem red"><span class="mem-t">shared memory</span><span class="mem-s">vectordb</span></div></div><div class="lane"><div class="src"><span class="idx">02</span><span class="src-t">email</span><span class="src-s">untrusted input</span></div><div class="wire"></div><div class="sink red"><span class="call">checkpointer.put</span><span class="loc">ingest_email.py:15</span></div><div class="gate block" title="no guard at this crossing — write reaches memory unchecked"><span class="glyph">&#33;</span></div><div class="mem red"><span class="mem-t">shared memory</span><span class="mem-s">langgraph</span></div></div><div class="lane"><div class="src"><span class="idx">03</span><span class="src-t">tool</span><span class="src-s">tool output</span></div><div class="wire"></div><div class="sink red"><span class="call">memory.save</span><span class="loc">ingest_tool.py:15</span></div><div class="gate block" title="no guard at this crossing — write reaches memory unchecked"><span class="glyph">&#33;</span></div><div class="mem red"><span class="mem-t">shared memory</span><span class="mem-s">custom</span></div></div><div class="lane"><div class="src"><span class="idx">04</span><span class="src-t">user</span><span class="src-s">untrusted input</span></div><div class="wire"></div><div class="sink red"><span class="call">store.put</span><span class="loc">ingest_user.py:17</span></div><div class="gate block" title="no guard at this crossing — write reaches memory unchecked"><span class="glyph">&#33;</span></div><div class="mem red"><span class="mem-t">shared memory</span><span class="mem-s">langgraph</span></div></div><div class="lane"><div class="src"><span class="idx">05</span><span class="src-t">web</span><span class="src-s">untrusted input</span></div><div class="wire"></div><div class="sink red"><span class="call">store.put</span><span class="loc">ingest_web.py:18</span></div><div class="gate block" title="no guard at this crossing — write reaches memory unchecked"><span class="glyph">&#33;</span></div><div class="mem red"><span class="mem-t">shared memory</span><span class="mem-s">langgraph</span></div></div><div class="outcome"><div class="down">&#8595;</div><div class="decide red"><span class="dec-t">privileged decision</span><span class="dec-s">reads memory &amp; acts</span></div></div></div>
-  <div class="legend"><span class="legend-item"><span class="dot green"></span>screened / governed</span><span class="legend-item"><span class="dot yellow"></span>needs policy</span><span class="legend-item"><span class="dot red"></span>unscreened write</span><span class="legend-item"><span class="dot purple"></span>privileged / system</span><span class="legend-item"><span class="dot gray"></span>unknown</span></div>
+  <div class="states"><section class="state danger-state"><h2 class="state-h">Without Aegis</h2><div class="svg-wrap"><svg viewBox="0 0 372 217" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="convergence diagram, without Aegis"><defs><marker id="ah0" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8a90a0"/></marker><marker id="ahg0" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#46b46e"/></marker></defs><path d="M122,31.0 C189,31.0 189,107.0 252,107.0" fill="none" stroke="#e5534b" stroke-width="2.6" marker-end="url(#ah0)"/><rect x="6" y="18" width="116" height="26" rx="7" fill="#0f1014" stroke="#2a2e3a"/><rect x="6" y="18" width="3.5" height="26" rx="2" fill="#e5534b"/><text x="17" y="35.0" font-size="11" fill="#ece9e3">document</text><path d="M122,69.0 C189,69.0 189,107.0 252,107.0" fill="none" stroke="#e5534b" stroke-width="2.6" marker-end="url(#ah0)"/><rect x="6" y="56" width="116" height="26" rx="7" fill="#0f1014" stroke="#2a2e3a"/><rect x="6" y="56" width="3.5" height="26" rx="2" fill="#e5534b"/><text x="17" y="73.0" font-size="11" fill="#ece9e3">email</text><path d="M122,107.0 C189,107.0 189,107.0 252,107.0" fill="none" stroke="#e5534b" stroke-width="2.6" marker-end="url(#ah0)"/><rect x="6" y="94" width="116" height="26" rx="7" fill="#0f1014" stroke="#2a2e3a"/><rect x="6" y="94" width="3.5" height="26" rx="2" fill="#e5534b"/><text x="17" y="111.0" font-size="11" fill="#ece9e3">tool</text><path d="M122,145.0 C189,145.0 189,107.0 252,107.0" fill="none" stroke="#e5534b" stroke-width="2.6" marker-end="url(#ah0)"/><rect x="6" y="132" width="116" height="26" rx="7" fill="#0f1014" stroke="#2a2e3a"/><rect x="6" y="132" width="3.5" height="26" rx="2" fill="#e5534b"/><text x="17" y="149.0" font-size="11" fill="#ece9e3">user</text><path d="M122,183.0 C189,183.0 189,107.0 252,107.0" fill="none" stroke="#e5534b" stroke-width="2.6" marker-end="url(#ah0)"/><rect x="6" y="170" width="116" height="26" rx="7" fill="#0f1014" stroke="#2a2e3a"/><rect x="6" y="170" width="3.5" height="26" rx="2" fill="#e5534b"/><text x="17" y="187.0" font-size="11" fill="#ece9e3">web</text><rect x="256" y="81.0" width="104" height="52" rx="10" fill="#0f1014" stroke="#e5534b" stroke-width="1.6"/><text x="308" y="102.0" font-size="11.5" text-anchor="middle" fill="#ece9e3" font-weight="600">shared memory</text><text x="308" y="119.0" font-size="11" text-anchor="middle" fill="#e5534b" font-weight="700">poisoned</text><line x1="308" y1="133.0" x2="308" y2="161.0" stroke="#8a90a0" stroke-width="1.6" marker-end="url(#ah0)"/><rect x="256" y="163.0" width="104" height="40" rx="9" fill="#0f1014" stroke="#e5534b" stroke-width="1.6"/><text x="308" y="179.0" font-size="11" text-anchor="middle" fill="#ece9e3" font-weight="600">decision</text><text x="308" y="193.0" font-size="10.5" text-anchor="middle" fill="#e5534b" font-weight="700">compromised</text></svg></div><p class="state-cap">Untrusted writes reach shared memory &#8594; memory is poisoned and the decision is compromised.</p></section><section class="state safe-state"><h2 class="state-h">With aegis inspect</h2><div class="svg-wrap"><svg viewBox="0 0 372 217" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="convergence diagram, with Aegis"><defs><marker id="ah1" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#8a90a0"/></marker><marker id="ahg1" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#46b46e"/></marker></defs><line x1="122" y1="31.0" x2="208" y2="31.0" stroke="#e5534b" stroke-width="2.4"/><text x="214" y="34.5" font-size="11" fill="#e5534b" font-weight="700">&#10005;</text><rect x="6" y="18" width="116" height="26" rx="7" fill="#0f1014" stroke="#2a2e3a"/><rect x="6" y="18" width="3.5" height="26" rx="2" fill="#e5534b"/><text x="17" y="35.0" font-size="11" fill="#ece9e3">document</text><line x1="122" y1="69.0" x2="208" y2="69.0" stroke="#e5534b" stroke-width="2.4"/><text x="214" y="72.5" font-size="11" fill="#e5534b" font-weight="700">&#10005;</text><rect x="6" y="56" width="116" height="26" rx="7" fill="#0f1014" stroke="#2a2e3a"/><rect x="6" y="56" width="3.5" height="26" rx="2" fill="#e5534b"/><text x="17" y="73.0" font-size="11" fill="#ece9e3">email</text><line x1="122" y1="107.0" x2="208" y2="107.0" stroke="#e5534b" stroke-width="2.4"/><text x="214" y="110.5" font-size="11" fill="#e5534b" font-weight="700">&#10005;</text><rect x="6" y="94" width="116" height="26" rx="7" fill="#0f1014" stroke="#2a2e3a"/><rect x="6" y="94" width="3.5" height="26" rx="2" fill="#e5534b"/><text x="17" y="111.0" font-size="11" fill="#ece9e3">tool</text><line x1="122" y1="145.0" x2="208" y2="145.0" stroke="#e5534b" stroke-width="2.4"/><text x="214" y="148.5" font-size="11" fill="#e5534b" font-weight="700">&#10005;</text><rect x="6" y="132" width="116" height="26" rx="7" fill="#0f1014" stroke="#2a2e3a"/><rect x="6" y="132" width="3.5" height="26" rx="2" fill="#e5534b"/><text x="17" y="149.0" font-size="11" fill="#ece9e3">user</text><line x1="122" y1="183.0" x2="208" y2="183.0" stroke="#e5534b" stroke-width="2.4"/><text x="214" y="186.5" font-size="11" fill="#e5534b" font-weight="700">&#10005;</text><rect x="6" y="170" width="116" height="26" rx="7" fill="#0f1014" stroke="#2a2e3a"/><rect x="6" y="170" width="3.5" height="26" rx="2" fill="#e5534b"/><text x="17" y="187.0" font-size="11" fill="#ece9e3">web</text><rect x="207" y="12" width="6" height="190" rx="3" fill="#57c2cf"/><rect x="197" y="94.0" width="26" height="26" rx="6" fill="#0f1014" stroke="#57c2cf"/><text x="210" y="111.0" font-size="12" text-anchor="middle" fill="#57c2cf" font-weight="700">&#128737;</text><rect x="256" y="81.0" width="104" height="52" rx="10" fill="#0f1014" stroke="#46b46e" stroke-width="1.6"/><text x="308" y="102.0" font-size="11.5" text-anchor="middle" fill="#ece9e3" font-weight="600">shared memory</text><text x="308" y="119.0" font-size="11" text-anchor="middle" fill="#46b46e" font-weight="700">clean</text><line x1="308" y1="133.0" x2="308" y2="161.0" stroke="#8a90a0" stroke-width="1.6" marker-end="url(#ah1)"/><rect x="256" y="163.0" width="104" height="40" rx="9" fill="#0f1014" stroke="#46b46e" stroke-width="1.6"/><text x="308" y="179.0" font-size="11" text-anchor="middle" fill="#ece9e3" font-weight="600">decision</text><text x="308" y="193.0" font-size="10.5" text-anchor="middle" fill="#46b46e" font-weight="700">trusted</text></svg></div><p class="state-cap">Malicious writes are rejected at the memory boundary &#8594; memory stays clean and the decision is trusted.</p></section></div>
+  <div class="legend"><span class="legend-item"><span class="dot danger"></span>untrusted write (poison)</span><span class="legend-item"><span class="dot safe"></span>screened · rejected at the gate</span><span class="legend-item"><span class="dot muted"></span>not flagged</span></div>
 
-  <table>
-    <thead><tr><th>ID</th><th>Severity</th><th>Confidence</th><th>Location</th><th>Finding</th></tr></thead>
-    <tbody><tr class='sev-critical'><td class='mono'>AEG-001</td><td><span class='badge critical'>critical</span></td><td class='mono'>EXTRACTED</td><td class='mono'>ingest_document.py:15</td><td>Untrusted input written to memory via vectorstore.add_documents</td></tr><tr class='sev-critical'><td class='mono'>AEG-002</td><td><span class='badge critical'>critical</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_email.py:15</td><td>Untrusted input written to memory via checkpointer.put</td></tr><tr class='sev-critical'><td class='mono'>AEG-003</td><td><span class='badge critical'>critical</span></td><td class='mono'>EXTRACTED</td><td class='mono'>ingest_tool.py:15</td><td>Tool output written to memory via memory.save</td></tr><tr class='sev-critical'><td class='mono'>AEG-004</td><td><span class='badge critical'>critical</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_user.py:17</td><td>Untrusted input written to memory via store.put</td></tr><tr class='sev-critical'><td class='mono'>AEG-005</td><td><span class='badge critical'>critical</span></td><td class='mono'>EXTRACTED</td><td class='mono'>ingest_web.py:18</td><td>Untrusted input written to memory via store.put</td></tr><tr class='sev-medium'><td class='mono'>AEG-006</td><td><span class='badge medium'>medium</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_document.py:15</td><td>No injection screening detected at this site before vectorstore.add_documents</td></tr><tr class='sev-medium'><td class='mono'>AEG-007</td><td><span class='badge medium'>medium</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_email.py:15</td><td>No injection screening detected at this site before checkpointer.put</td></tr><tr class='sev-medium'><td class='mono'>AEG-008</td><td><span class='badge medium'>medium</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_tool.py:15</td><td>No injection screening detected at this site before memory.save</td></tr><tr class='sev-medium'><td class='mono'>AEG-009</td><td><span class='badge medium'>medium</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_user.py:17</td><td>No injection screening detected at this site before store.put</td></tr><tr class='sev-medium'><td class='mono'>AEG-010</td><td><span class='badge medium'>medium</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_web.py:18</td><td>No injection screening detected at this site before store.put</td></tr></tbody>
-  </table>
+  <section class="below-fold"><h2 class="ref-h">All findings</h2><p class="ref-sub">Reference detail — the same data as <code>findings.json</code> / <code>INSPECTION_REPORT.md</code>.</p><table><thead><tr><th>ID</th><th>Severity</th><th>Confidence</th><th>Location</th><th>Finding</th></tr></thead><tbody><tr class='sev-critical'><td class='mono'>AEG-001</td><td><span class='badge critical'>critical</span></td><td class='mono'>EXTRACTED</td><td class='mono'>ingest_document.py:15</td><td>Untrusted input written to memory via vectorstore.add_documents</td></tr><tr class='sev-critical'><td class='mono'>AEG-002</td><td><span class='badge critical'>critical</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_email.py:15</td><td>Untrusted input written to memory via checkpointer.put</td></tr><tr class='sev-critical'><td class='mono'>AEG-003</td><td><span class='badge critical'>critical</span></td><td class='mono'>EXTRACTED</td><td class='mono'>ingest_tool.py:15</td><td>Tool output written to memory via memory.save</td></tr><tr class='sev-critical'><td class='mono'>AEG-004</td><td><span class='badge critical'>critical</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_user.py:17</td><td>Untrusted input written to memory via store.put</td></tr><tr class='sev-critical'><td class='mono'>AEG-005</td><td><span class='badge critical'>critical</span></td><td class='mono'>EXTRACTED</td><td class='mono'>ingest_web.py:18</td><td>Untrusted input written to memory via store.put</td></tr><tr class='sev-medium'><td class='mono'>AEG-006</td><td><span class='badge medium'>medium</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_document.py:15</td><td>No injection screening detected at this site before vectorstore.add_documents</td></tr><tr class='sev-medium'><td class='mono'>AEG-007</td><td><span class='badge medium'>medium</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_email.py:15</td><td>No injection screening detected at this site before checkpointer.put</td></tr><tr class='sev-medium'><td class='mono'>AEG-008</td><td><span class='badge medium'>medium</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_tool.py:15</td><td>No injection screening detected at this site before memory.save</td></tr><tr class='sev-medium'><td class='mono'>AEG-009</td><td><span class='badge medium'>medium</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_user.py:17</td><td>No injection screening detected at this site before store.put</td></tr><tr class='sev-medium'><td class='mono'>AEG-010</td><td><span class='badge medium'>medium</span></td><td class='mono'>INFERRED</td><td class='mono'>ingest_web.py:18</td><td>No injection screening detected at this site before store.put</td></tr></tbody></table></section>
   <p class="rubric">Score: Heuristic score = min(100, sum of per-finding weights), where critical=20, high=12, medium=5, low=2. Screened (guarded) flows are discounted to 25% of their weight. This is UX sugar for the fix/rescan loop, NOT the benchmark.</p>
 </div>
 <script>var AEGIS_SCORE = JSON.parse("{&quot;before&quot;: 100, &quot;after&quot;: 2}".replace(/&quot;/g,'"'));</script>

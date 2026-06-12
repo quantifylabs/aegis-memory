@@ -133,9 +133,10 @@ def _build_artifacts(result: InspectionResult, project_name: str) -> dict[str, s
     }
     replay_result = replay.run_memory_poisoning()
     # "after" is always the real computed score from this run. "before" is the caller's real
-    # prior-run score when supplied, else the labeled standalone BEFORE_SCORE baseline.
+    # prior-run (unscreened) score when supplied; None for a plain single run -> the header/report
+    # show a single score with no before arrow (the labeled 86 baseline is a standalone-only fallback).
     after = result.score["score"]
-    before = result.before_score if result.before_score is not None else BEFORE_SCORE
+    before = result.before_score
     return {
         "findings.json": json.dumps(findings_json, indent=2) + "\n",
         "unsafe_memory_flows.json": json.dumps(flows_json, indent=2) + "\n",
@@ -152,7 +153,7 @@ def _build_artifacts(result: InspectionResult, project_name: str) -> dict[str, s
 
 
 def _render_report(
-    result: InspectionResult, project_name: str, replay_result: dict, before_score: int
+    result: InspectionResult, project_name: str, replay_result: dict, before_score: int | None
 ) -> str:
     findings = result.findings
     score = result.score
@@ -178,7 +179,8 @@ def _render_report(
     s = score["score"]
     c = score["counts"]
     lines.append("\n## Memory Risk Score (heuristic — UX sugar, not the benchmark)\n")
-    lines.append(f"**{before_score} → {s} / 100**  ·  label: `heuristic`\n")
+    transition = f"{before_score} → {s}" if before_score is not None else f"{s}"
+    lines.append(f"**{transition} / 100**  ·  label: `heuristic` · lower is safer\n")
     lines.append(
         f"Critical {c['critical']} · High {c['high']} · Medium {c['medium']} · Low {c['low']}\n"
     )

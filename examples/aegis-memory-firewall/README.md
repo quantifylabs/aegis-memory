@@ -67,11 +67,15 @@ AEG-005 [critical/EXTRACTED] Untrusted input written to memory via store.put
 ```
 
 `build_memory_map.py` renders the visual from **two real inspect runs** — the unscreened
-`agent/` package vs. the screened `agent_screened/` package — so the header shows a real
-governance transition, **100 → 2 / 100** (heuristic; not the benchmark). Both numbers are the
-real `compute_score()` output; the "after" stays non-zero because residual risk is more
-credible than a green 0. Open `agent_memory_map.html` — it's a self-contained, mobile-friendly
-single file.
+`agent/` package vs. the screened `agent_screened/` package. The map is a **convergence
+before/after view**: the untrusted sources fan into one shared-memory node, and two states sit
+side by side — *Without Aegis* (poison reaches memory → decision compromised) and *With aegis
+inspect* (the malicious writes are rejected at the memory boundary → memory clean → decision
+trusted). The header shows the real risk transition **100 → 2 / 100** (heuristic, lower is
+safer; not the benchmark) — both numbers are the real `compute_score()` output, and the "after"
+stays non-zero because residual risk is more credible than a green 0. The raw findings table
+sits below the fold. Open `agent_memory_map.html` — it's a self-contained, mobile-friendly
+single file (the two states stack vertically on a phone).
 
 ## How it maps to the code
 

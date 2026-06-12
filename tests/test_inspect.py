@@ -192,6 +192,22 @@ def test_real_before_score_renders_through_html_not_fallback(tmp_path):
     assert f"**42 → {result.score['score']} / 100**" in report
 
 
+def test_map_hero_is_convergence_before_after_not_findings_table(tmp_path):
+    """The hero is the convergence before/after map (two states, fan-in SVG); the raw findings
+    table lives below the fold, not in the hero (the §2 IA redesign)."""
+    out = tmp_path / "out"
+    run_inspection(DEMO_DIR, out_dir=out, write=True, before_score=80)
+    html = (out / "agent_memory_map.html").read_text(encoding="utf-8")
+    # Two convergence states, each with an inline fan-in SVG (self-contained, no CDN).
+    assert html.count('class="state ') == 2
+    assert html.count("<svg ") == 2
+    assert "http://" not in html and "https://" not in html
+    # The findings table is below the fold and comes AFTER the convergence map, not in the hero.
+    assert "All findings" in html
+    assert html.index('class="states"') < html.index('class="below-fold"')
+    assert html.index('class="states"') < html.index("<table")
+
+
 # --- the real replay scan ----------------------------------------------------------
 
 
