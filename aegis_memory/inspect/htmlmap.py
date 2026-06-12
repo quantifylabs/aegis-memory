@@ -135,10 +135,12 @@ def render_html(
         '<section class="below-fold"><h2 class="ref-h">All findings</h2>'
         '<p class="ref-sub">Reference detail — the same data as '
         '<code>findings.json</code> / <code>INSPECTION_REPORT.md</code>.</p>'
-        "<table><thead><tr><th>ID</th><th>Severity</th><th>Confidence</th>"
+        # scroll the wide table inside its own box so it never forces the page wider than the
+        # viewport (which would push the hero cards off-screen on a phone).
+        '<div class="table-scroll"><table><thead><tr><th>ID</th><th>Severity</th><th>Confidence</th>'
         "<th>Location</th><th>Finding</th></tr></thead><tbody>"
         + (rows or "<tr><td colspan='5'>No findings.</td></tr>")
-        + "</tbody></table></section>"
+        + "</tbody></table></div></section>"
     )
 
     return _TEMPLATE.format(
@@ -197,8 +199,10 @@ def _convergence_svg(sources: list[tuple[str, bool]], *, screened: bool) -> str:
     danger_col, safe_col, muted_col, ink, line = (
         "#e5534b", "#46b46e", "#8a90a0", "#0f1014", "#2a2e3a"
     )
+    # Numeric width/height (not "100%") give a definite intrinsic aspect ratio so the SVG scales
+    # correctly inside the flex column; CSS (.svg-wrap svg) then sets width:100%;height:auto.
     parts: list[str] = [
-        f'<svg viewBox="0 0 372 {total_h:.0f}" width="100%" '
+        f'<svg viewBox="0 0 372 {total_h:.0f}" width="372" height="{total_h:.0f}" '
         f'preserveAspectRatio="xMidYMid meet" role="img" '
         f'aria-label="convergence diagram, {"with" if screened else "without"} Aegis">',
         '<defs>'
@@ -338,8 +342,10 @@ _TEMPLATE = """<!doctype html>
               letter-spacing:.02em; }}
   .danger-state .state-h {{ color:var(--danger); }}
   .safe-state .state-h {{ color:var(--safe); }}
-  .svg-wrap {{ flex:1; }}
-  .svg-wrap svg {{ display:block; }}
+  /* min-width:0 lets this flex child shrink below the SVG's intrinsic 372px width; without it
+     the card can't narrow past the viewBox width and the right-edge nodes overflow off-screen. */
+  .svg-wrap {{ flex:1; min-width:0; }}
+  .svg-wrap svg {{ display:block; width:100%; height:auto; max-width:100%; }}
   .state-cap {{ color:var(--muted); font-size:.8rem; line-height:1.45; margin:10px 2px 0; }}
 
   .legend {{ display:flex; flex-wrap:wrap; gap:14px; margin:14px 2px 8px; font-size:.76rem; color:var(--muted); }}
@@ -350,8 +356,10 @@ _TEMPLATE = """<!doctype html>
   .ref-h {{ font-family:var(--mono); font-size:.95rem; margin:0 0 3px; }}
   .ref-sub {{ color:var(--muted); font-size:.78rem; margin:0 0 12px; }}
   .ref-sub code {{ font-family:var(--mono); color:var(--text); }}
+  .table-scroll {{ overflow-x:auto; border-radius:14px; -webkit-overflow-scrolling:touch; }}
   table {{ width:100%; border-collapse:collapse; font-size:.82rem; overflow:hidden; border-radius:14px;
            border:1px solid var(--line); background:var(--panel); }}
+  td.mono {{ word-break:break-word; }}
   th, td {{ text-align:left; padding:9px 11px; border-bottom:1px solid var(--line); vertical-align:top; }}
   th {{ font-family:var(--mono); color:var(--muted); font-weight:600; font-size:.72rem;
         letter-spacing:.06em; text-transform:uppercase; }}
