@@ -52,6 +52,7 @@ class Sink:
     line: int
     framework: str  # e.g. "langgraph", "vectordb", "custom"
     call: str  # e.g. "store.put"
+    key: str | None = None  # literal memory key when statically known (e.g. "latest_note")
 
 
 @dataclass

@@ -61,6 +61,32 @@ We audited the docs, repos, and changelogs of every major memory tool.[^comparis
 | Security audit trail | — | — | — | Immutable event log |
 | Sensitive data protection | — | — | — | Auto-detect + reject/redact/flag |
 
+## Guard every write (the firewall)
+
+`Agent A's output is Agent B's instruction. Memory is the vector.` So gate the **write** — and
+the topology stops mattering. Across every multi-agent shape (cooperative blackboard, hierarchical
+handoff, swarm, competitive), the invariant is the same: something becomes durable memory and a
+later/other step reads it back and acts. `aegis_memory.guard` is the one scope-aware gate every
+topology funnels through. It runs the same benchmark-validated `ContentSecurityScanner` the server
+does — offline, deterministic, no server required:
+
+```python
+from aegis_memory import guard
+
+# Wrap any store (LangGraph / vector DB / custom) — every write is screened before it persists.
+store = guard.protect(my_store, scope="agent-shared")
+store.put(ns, key, {"text": untrusted_web_content})   # a poisoned write never reaches memory
+
+# …or screen a single value inline before you persist it.
+verdict = guard.write(content, trust_level="untrusted", scope="agent-shared", on_reject="return")
+if verdict.allowed:
+    my_store.put(ns, key, {"text": verdict.content})
+```
+
+The gate **rejects** prompt-injection and secrets, **flags** PII, and refuses to let untrusted
+content land in `global` scope (where every agent would read it). `aegis inspect` finds the unsafe
+write sites; `guard` is the fix it points you at.
+
 ## The Context Hub (v2.3.0+)
 
 Aegis is the only OSS context hub. Four artifacts, one secure surface, one API call to load them all:

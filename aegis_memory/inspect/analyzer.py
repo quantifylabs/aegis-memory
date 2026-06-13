@@ -57,6 +57,7 @@ class _SinkSite:
     match: sinks.SinkMatch
     taint: taint.TaintResult
     namespace_shared: bool
+    key: str | None = None  # literal memory key when statically known
 
 
 def analyze_project(root: str | Path, framework: str | None = None) -> list[Finding]:
@@ -108,6 +109,7 @@ def _scan_module(tree: ast.Module, rel: str) -> list[_SinkSite]:
                 match=match,
                 taint=tr,
                 namespace_shared=_writes_shared_scope(call),
+                key=_write_key(call),
             )
         )
     return out
@@ -158,6 +160,23 @@ def _write_value(call: ast.Call) -> ast.expr | None:
         return call.args[-1]
     # Default: first positional carries the content for add/upsert/save/etc.
     return call.args[0]
+
+
+def _write_key(call: ast.Call) -> str | None:
+    """Best-effort: the literal memory key a write targets, when it's a string constant.
+
+    ``store.put(namespace, key, value)`` / ``checkpointer.put(cfg, key, value)`` carry the key
+    as the 2nd positional; some sinks name it ``key=``. Non-literal keys return ``None`` — the
+    trace then renders a generic memory node rather than asserting a key it can't prove."""
+    for kw in call.keywords:
+        if kw.arg == "key" and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+            return kw.value.value
+    fn = call.func
+    if isinstance(fn, ast.Attribute) and fn.attr in ("put", "aput") and len(call.args) >= 2:
+        second = call.args[1]
+        if isinstance(second, ast.Constant) and isinstance(second.value, str):
+            return second.value
+    return None
 
 
 def _writes_shared_scope(call: ast.Call) -> bool:
@@ -215,7 +234,7 @@ def _build_findings(
             # Explicit --framework filters to that adapter (+ generic fallbacks).
             if s.match.framework != framework:
                 continue
-        sink = Sink(file=s.file, line=s.line, framework=s.match.framework, call=s.match.call)
+        sink = Sink(file=s.file, line=s.line, framework=s.match.framework, call=s.match.call, key=s.key)
         tr = s.taint
 
         if tr.trust == "untrusted":
@@ -248,7 +267,8 @@ def _build_findings(
                     title=title,
                     fix=(
                         "from aegis_memory import guard\n"
-                        "guard.write(content, trust_level='untrusted', require_classifier=True)"
+                        "store = guard.protect(store, scope='agent-shared')  # screen every write, or:\n"
+                        "guard.write(content, trust_level='untrusted', scope='agent-shared')"
                     ),
                     screened=tr.screened,
                     notes=notes,

@@ -1,23 +1,23 @@
-"""``agent_memory_map.html`` — the shareable, screenshot-first visual.
+"""``agent_memory_map.html`` — a proof-first memory-trace report (not a sales poster).
 
-Self-contained single file (inline CSS + inline SVG, no external CDN). The information
-architecture is a **convergence before/after view**: many untrusted sources fan into one
-shared-memory node, and two side-by-side states tell the story a non-expert can read in a
-glance —
+Self-contained single file (inline CSS, no external CDN, no JS framework). The information
+architecture is **evidence, anchored to code**:
 
-* **Without Aegis** — the untrusted writes reach shared memory, which is *poisoned*, and the
-  privileged decision is *compromised*.
-* **With aegis inspect** — an inspect checkpoint sits on the write path and *rejects* the
-  malicious writes at the memory boundary, so memory stays *clean* and the decision is *trusted*.
+* a **faithful trace** of every untrusted source -> write sink -> shared-memory flow, each node
+  carrying its real ``file:line`` and sink call. The edge style is the *only* place color
+  carries meaning, and it carries exactly one provable distinction: **screened** (the write is
+  guarded, so it's blocked at the gate) vs **exposed** (no guard in scope, so it reaches memory).
+* a **live scan replay** panel showing the real ``ContentSecurityScanner.scan()`` verdict on a
+  memory-poisoning payload — the action, the concrete detector that fired, and the literal text
+  it matched. This is a real ``scan()`` call, never a hardcoded string.
+* the full **findings table** below, the same data as ``findings.json`` / ``INSPECTION_REPORT.md``.
 
-The convergence shape (many → one) is the argument; the firewall's position on the write path
-is drawn, not asserted. This is the general renderer for **any** project ``aegis inspect`` runs
-on — source/sink counts are variable and the demo is just the showcase input.
+There is no stylized convergence cartoon and no "without/with" storytelling: a reviewer reads the
+trace and the scan verdict and verifies each claim against a file and a line.
 
 Scores come from real runs: ``report.py`` passes the computed ``after`` and a real ``before``
-(an unscreened baseline) when one exists; with no baseline the header shows a single score and
-no arrow. The ``86``/``29`` defaults are **standalone-preview-only fallbacks** for calling
-``render_html`` by hand with no run.
+(an unscreened-exposure baseline, or a caller-supplied prior run). The ``86``/``29`` defaults are
+**standalone-preview-only fallbacks** for calling ``render_html`` by hand with no run.
 """
 
 from __future__ import annotations
@@ -27,31 +27,16 @@ import json
 
 from .findings import FLOW_CATEGORIES, Finding
 
-# Two color meanings only (SSOT §5 / §3 of the redesign brief): danger vs safe/governed.
-_LEGEND = [
-    ("danger", "untrusted write (poison)"),
-    ("safe", "screened · rejected at the gate"),
-    ("muted", "not flagged"),
-]
-
-_MAX_SOURCES = 6  # beyond this we group the tail into a "+N more" node
-
-
-def _is_danger(f: Finding) -> bool:
-    """A flow that would poison memory: untrusted, unscreened, and high-severity."""
-    return f.trust == "untrusted" and not f.screened and f.severity in ("critical", "high")
-
 
 def _channel_label(file_path: str) -> str:
     """Human channel name from the sink's file (general — module stem, no demo tuning)."""
     stem = file_path.rsplit("/", 1)[-1].removesuffix(".py")
-    return (stem.removeprefix("ingest_").replace("_", " ") or stem)[:18]
+    return (stem.removeprefix("ingest_").replace("_", " ") or stem)[:22]
 
 
-def _flow_sources(findings: list[Finding]) -> list[tuple[str, bool]]:
-    """Distinct untrusted source channels feeding memory, as (label, danger). Deduped by
-    sink location, capped with a '+N more' tail so the fan-in still reads for big projects."""
-    out: list[tuple[str, bool]] = []
+def _flow_findings(findings: list[Finding]) -> list[Finding]:
+    """The source->memory flow findings, deduped by sink location, in report order."""
+    out: list[Finding] = []
     seen: set[tuple[str, int]] = set()
     for f in findings:
         if f.category not in FLOW_CATEGORIES:
@@ -60,12 +45,7 @@ def _flow_sources(findings: list[Finding]) -> list[tuple[str, bool]]:
         if loc in seen:
             continue
         seen.add(loc)
-        out.append((_channel_label(f.sink.file), _is_danger(f)))
-    if len(out) > _MAX_SOURCES:
-        head = out[: _MAX_SOURCES - 1]
-        tail = out[_MAX_SOURCES - 1 :]
-        head.append((f"+{len(tail)} more", any(d for _, d in tail)))
-        out = head
+        out.append(f)
     return out
 
 
@@ -76,18 +56,16 @@ def render_html(
     before_score: int | None = 86,  # standalone-preview-only fallback; real runs pass a measured "before"
     after_score: int | None = None,
     project_name: str = "agent project",
+    replay_result: dict | None = None,
 ) -> str:
     # standalone-preview-only fallback (29) — real runs always pass the computed score.
     after = after_score if after_score is not None else score.get("score", 29)
-    sources = _flow_sources(findings)
-    n = len(sources)
-    has_flows = n > 0
-
+    flows = _flow_findings(findings)
     counts = score.get("counts", {})
     data_json = html.escape(json.dumps({"before": before_score, "after": after}))
 
-    # --- score header (direction unambiguous; "after" non-zero on purpose) ---
-    if before_score is not None and has_flows:
+    # --- score header (direction unambiguous; the spans are a stable contract) ---
+    if before_score is not None:
         delta = before_score - after
         score_block = (
             f'<span class="before">{before_score}</span>'
@@ -101,28 +79,10 @@ def render_html(
         score_block = f'<span class="after">{after}</span><span class="scale">/100</span>'
         score_note = ""
 
-    # --- the two state cards (or a single governed card when there are no untrusted flows) ---
-    if has_flows:
-        body = (
-            '<div class="states">'
-            + _state_card(sources, screened=False)
-            + _state_card(sources, screened=True)
-            + "</div>"
-        )
-    else:
-        body = (
-            '<div class="states"><section class="state safe-state">'
-            '<h2 class="state-h">No untrusted flows</h2>'
-            '<p class="state-cap">No untrusted source&#8594;memory flow was detected at these '
-            'sites. Memory is governed by default.</p></section></div>'
-        )
+    trace = _trace_section(flows)
+    scan = _scan_panel(replay_result) if replay_result else ""
 
-    legend = "".join(
-        f'<span class="legend-item"><span class="dot {c}"></span>{html.escape(label)}</span>'
-        for c, label in _LEGEND
-    )
-
-    # --- findings table, moved OUT of the hero (below the fold) ---
+    # --- findings table (reference detail; same data as findings.json) ---
     rows = "".join(
         f"<tr class='sev-{html.escape(f.severity)}'><td class='mono'>{html.escape(f.id)}</td>"
         f"<td><span class='badge {html.escape(f.severity)}'>{html.escape(f.severity)}</span></td>"
@@ -135,8 +95,6 @@ def render_html(
         '<section class="below-fold"><h2 class="ref-h">All findings</h2>'
         '<p class="ref-sub">Reference detail — the same data as '
         '<code>findings.json</code> / <code>INSPECTION_REPORT.md</code>.</p>'
-        # scroll the wide table inside its own box so it never forces the page wider than the
-        # viewport (which would push the hero cards off-screen on a phone).
         '<div class="table-scroll"><table><thead><tr><th>ID</th><th>Severity</th><th>Confidence</th>'
         "<th>Location</th><th>Finding</th></tr></thead><tbody>"
         + (rows or "<tr><td colspan='5'>No findings.</td></tr>")
@@ -151,8 +109,8 @@ def render_html(
         high=counts.get("high", 0),
         med=counts.get("medium", 0),
         low=counts.get("low", 0),
-        body=body,
-        legend=legend,
+        trace=trace,
+        scan=scan,
         table=table,
         data_json=data_json,
         rubric=html.escape(score.get("rubric", "")),
@@ -160,170 +118,144 @@ def render_html(
 
 
 # ---------------------------------------------------------------------------------
-# Inline SVG convergence diagram (no CDN; scales responsively via viewBox).
+# Faithful trace: one lane per source->sink->memory flow, anchored to file:line.
 # ---------------------------------------------------------------------------------
 
-def _state_card(sources: list[tuple[str, bool]], *, screened: bool) -> str:
-    title = "With aegis inspect" if screened else "Without Aegis"
-    cap = (
-        "Malicious writes are rejected at the memory boundary &#8594; memory stays clean and "
-        "the decision is trusted."
-        if screened
-        else "Untrusted writes reach shared memory &#8594; memory is poisoned and the decision "
-        "is compromised."
-    )
-    svg = _convergence_svg(sources, screened=screened)
-    cls = "state safe-state" if screened else "state danger-state"
+def _trace_section(flows: list[Finding]) -> str:
+    if not flows:
+        return (
+            '<section class="trace"><h2 class="sec-h">Untrusted memory flows</h2>'
+            '<p class="empty">No untrusted source&#8594;memory flow was detected at these '
+            'sites. (Absence finding — "not detected here", not a proof that none exists.)</p>'
+            "</section>"
+        )
+    n_exposed = sum(1 for f in flows if not f.screened)
+    lanes = "".join(_lane(f) for f in flows)
     return (
-        f'<section class="{cls}">'
-        f'<h2 class="state-h">{title}</h2>'
-        f'<div class="svg-wrap">{svg}</div>'
-        f'<p class="state-cap">{cap}</p>'
-        "</section>"
+        '<section class="trace"><h2 class="sec-h">Untrusted memory flows</h2>'
+        f'<p class="sec-sub">{len(flows)} write(s) into shared memory &#183; '
+        f'<b class="x-exposed">{n_exposed} reach memory unscreened</b> &#183; '
+        f'{len(flows) - n_exposed} blocked at a guard. Each lane is anchored to a file and line.</p>'
+        '<div class="lanes">' + lanes + "</div></section>"
     )
 
 
-def _convergence_svg(sources: list[tuple[str, bool]], *, screened: bool) -> str:
-    n = max(1, len(sources))
-    SW, SH, GAP, TOP = 116, 26, 12, 18
-    band_h = n * SH + (n - 1) * GAP
-    src_x = 6
-    mem_w, mem_h, mem_x = 104, 52, 256
-    gate_x = 210
-    cy = TOP + band_h / 2
-    mem_y = cy - mem_h / 2
-    dec_w, dec_h, dec_x = 104, 40, 256
-    dec_y = max(mem_y + mem_h + 30, TOP + band_h - dec_h)
-    total_h = max(TOP + band_h, dec_y + dec_h) + 14
-
-    danger_col, safe_col, muted_col, ink, line = (
-        "#e5534b", "#46b46e", "#8a90a0", "#0f1014", "#2a2e3a"
+def _lane(f: Finding) -> str:
+    screened = f.screened
+    state = "screened" if screened else "exposed"
+    status = "blocked at gate" if screened else "reaches memory"
+    source_kind = html.escape(f.source)
+    trust = html.escape(f.trust)
+    channel = html.escape(_channel_label(f.sink.file))
+    call = html.escape(f.sink.call)
+    loc = f"{html.escape(f.sink.file)}:{f.sink.line}"
+    fw = html.escape(f.sink.framework)
+    mem_meta = f"key={html.escape(f.sink.key)}" if f.sink.key else "shared scope"
+    # the screening boundary: a guard glyph (blocked) or a bare arrow (reaches memory)
+    boundary = "&#9211;" if screened else "&#9654;"  # ⛛ gate vs ▶
+    return (
+        f'<article class="lane {state}">'
+        f'<div class="lane-head">'
+        f'<span class="aeg">{html.escape(f.id)}</span>'
+        f'<span class="badge {html.escape(f.severity)}">{html.escape(f.severity)}</span>'
+        f'<span class="conf">{html.escape(f.confidence)}</span>'
+        f'<span class="status {state}">{status}</span>'
+        f"</div>"
+        f'<div class="flow">'
+        f'<div class="node src"><div class="nk">source</div>'
+        f'<div class="nv">{channel}</div>'
+        f'<div class="nm">{source_kind} &#183; <span class="trust {trust}">{trust}</span></div></div>'
+        f'<div class="arrow"><span class="op">writes</span>&#8594;</div>'
+        f'<div class="node sink"><div class="nk">write sink</div>'
+        f'<div class="nv mono">{call}</div>'
+        f'<div class="nm mono">{loc} · {fw}</div></div>'
+        f'<div class="arrow {state}"><span class="op">{boundary}</span></div>'
+        f'<div class="node mem"><div class="nk">memory</div>'
+        f'<div class="nv">shared memory</div>'
+        f'<div class="nm mono">{mem_meta}</div></div>'
+        f"</div></article>"
     )
-    # Numeric width/height (not "100%") give a definite intrinsic aspect ratio so the SVG scales
-    # correctly inside the flex column; CSS (.svg-wrap svg) then sets width:100%;height:auto.
-    parts: list[str] = [
-        f'<svg viewBox="0 0 372 {total_h:.0f}" width="372" height="{total_h:.0f}" '
-        f'preserveAspectRatio="xMidYMid meet" role="img" '
-        f'aria-label="convergence diagram, {"with" if screened else "without"} Aegis">',
-        '<defs>'
-        f'<marker id="ah{int(screened)}" markerWidth="7" markerHeight="7" refX="6" refY="3" '
-        f'orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="{muted_col}"/></marker>'
-        f'<marker id="ahg{int(screened)}" markerWidth="7" markerHeight="7" refX="6" refY="3" '
-        f'orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="{safe_col}"/></marker>'
-        "</defs>",
-    ]
 
-    mem_cx, mem_cy = mem_x, mem_y + mem_h / 2  # left-center of the memory node (fan-in target)
-    for i, (label, danger) in enumerate(sources or [("source", True)]):
-        sy = TOP + i * (SH + GAP)
-        scy = sy + SH / 2
-        sxr = src_x + SW
-        if screened and danger:
-            # rejected at the gate: stub line to the gate + a red ✕, never reaches memory
-            parts.append(
-                f'<line x1="{sxr}" y1="{scy:.1f}" x2="{gate_x - 2}" y2="{scy:.1f}" '
-                f'stroke="{danger_col}" stroke-width="2.4"/>'
-            )
-            parts.append(
-                f'<text x="{gate_x + 4:.0f}" y="{scy + 3.5:.1f}" font-size="11" '
-                f'fill="{danger_col}" font-weight="700">&#10005;</text>'
-            )
-        else:
-            col = danger_col if (danger and not screened) else (safe_col if screened else muted_col)
-            mk = "ahg" if screened else "ah"
-            sw = "2.6" if (danger and not screened) else "1.4"
-            parts.append(
-                f'<path d="M{sxr},{scy:.1f} C{(sxr + mem_cx) / 2:.0f},{scy:.1f} '
-                f'{(sxr + mem_cx) / 2:.0f},{mem_cy:.1f} {mem_cx - 4},{mem_cy:.1f}" '
-                f'fill="none" stroke="{col}" stroke-width="{sw}" marker-end="url(#{mk}{int(screened)})"/>'
-            )
-        danger_chip = danger_col if danger else muted_col
-        parts.append(
-            f'<rect x="{src_x}" y="{sy}" width="{SW}" height="{SH}" rx="7" '
-            f'fill="{ink}" stroke="{line}"/>'
-            f'<rect x="{src_x}" y="{sy}" width="3.5" height="{SH}" rx="2" fill="{danger_chip}"/>'
-            f'<text x="{src_x + 11}" y="{scy + 4:.1f}" font-size="11" fill="#ece9e3">'
-            f"{html.escape(label)}</text>"
+
+# ---------------------------------------------------------------------------------
+# Live scan replay: the real scan() verdict, rendered as evidence.
+# ---------------------------------------------------------------------------------
+
+def _scan_panel(r: dict) -> str:
+    wa = r.get("with_aegis", {})
+    action = html.escape(str(wa.get("action", "")))
+    blocked = not wa.get("allowed", True)
+    payload = html.escape(r.get("payload", ""))
+    if len(payload) > 160:
+        payload = payload[:157] + "&#8230;"
+    dets = wa.get("detections", []) or []
+    det_chips = (
+        "".join(
+            f'<span class="det">{html.escape(str(d.get("type", "")))}'
+            f' <span class="conf-n">{d.get("confidence", "")}</span></span>'
+            for d in dets
         )
-
-    # the gate (right side only): a glowing cyan rail on the write path with a shield
-    if screened:
-        parts.append(
-            f'<rect x="{gate_x - 3}" y="{TOP - 6:.0f}" width="6" height="{band_h + 12:.0f}" rx="3" '
-            f'fill="#57c2cf"/>'
-            f'<rect x="{gate_x - 13}" y="{cy - 13:.1f}" width="26" height="26" rx="6" '
-            f'fill="{ink}" stroke="#57c2cf"/>'
-            f'<text x="{gate_x:.0f}" y="{cy + 4:.1f}" font-size="12" text-anchor="middle" '
-            f'fill="#57c2cf" font-weight="700">&#128737;</text>'
-        )
-
-    # memory node (poisoned / clean) — the single convergence point
-    mem_stroke = safe_col if screened else danger_col
-    mem_word = "clean" if screened else "poisoned"
-    parts.append(
-        f'<rect x="{mem_x}" y="{mem_y:.1f}" width="{mem_w}" height="{mem_h}" rx="10" '
-        f'fill="{ink}" stroke="{mem_stroke}" stroke-width="1.6"/>'
-        f'<text x="{mem_x + mem_w / 2:.0f}" y="{mem_y + 21:.1f}" font-size="11.5" '
-        f'text-anchor="middle" fill="#ece9e3" font-weight="600">shared memory</text>'
-        f'<text x="{mem_x + mem_w / 2:.0f}" y="{mem_y + 38:.1f}" font-size="11" '
-        f'text-anchor="middle" fill="{mem_stroke}" font-weight="700">{mem_word}</text>'
+        or '<span class="det">none</span>'
+    )
+    matched = next((d.get("matched") for d in dets if d.get("matched")), "")
+    matched_row = (
+        f'<div class="row"><span class="k">matched</span>'
+        f'<code class="ev">{html.escape(str(matched))}</code></div>'
+        if matched
+        else ""
+    )
+    verdict = (
+        "write BLOCKED at the memory boundary" if blocked
+        else "write allowed (no reject signal)"
+    )
+    vcls = "reject" if blocked else "allow"
+    return (
+        '<section class="scan"><h2 class="sec-h">Live scan replay '
+        '<span class="real">real <code>scan()</code> call</span></h2>'
+        '<div class="scan-card">'
+        f'<div class="row"><span class="k">payload</span><code class="ev">{payload}</code></div>'
+        f'<div class="row"><span class="k">action</span>'
+        f'<span class="verdict-chip {vcls}">{action}</span></div>'
+        f'<div class="row"><span class="k">detection</span><span class="dets">{det_chips}</span></div>'
+        f"{matched_row}"
+        f'<div class="row"><span class="k">verdict</span><span class="vsum {vcls}">{verdict}</span></div>'
+        "</div></section>"
     )
 
-    # arrow memory -> decision, and the decision node (compromised / trusted)
-    dcx = dec_x + dec_w / 2
-    parts.append(
-        f'<line x1="{mem_x + mem_w / 2:.0f}" y1="{mem_y + mem_h:.1f}" x2="{dcx:.0f}" '
-        f'y2="{dec_y - 2:.1f}" stroke="{muted_col}" stroke-width="1.6" '
-        f'marker-end="url(#ah{int(screened)})"/>'
-    )
-    dec_stroke = safe_col if screened else danger_col
-    dec_word = "trusted" if screened else "compromised"
-    parts.append(
-        f'<rect x="{dec_x}" y="{dec_y:.1f}" width="{dec_w}" height="{dec_h}" rx="9" '
-        f'fill="{ink}" stroke="{dec_stroke}" stroke-width="1.6"/>'
-        f'<text x="{dcx:.0f}" y="{dec_y + 16:.1f}" font-size="11" text-anchor="middle" '
-        f'fill="#ece9e3" font-weight="600">decision</text>'
-        f'<text x="{dcx:.0f}" y="{dec_y + 30:.1f}" font-size="10.5" text-anchor="middle" '
-        f'fill="{dec_stroke}" font-weight="700">{dec_word}</text>'
-    )
-    parts.append("</svg>")
-    return "".join(parts)
 
+# ---------------------------------------------------------------------------------
+# Template (inline CSS; self-contained single file).
+# ---------------------------------------------------------------------------------
 
 _TEMPLATE = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Aegis Memory Firewall Map — {project}</title>
+<title>Aegis memory inspection — {project}</title>
 <style>
   :root {{
     --ink:#0f1014; --panel:#16181f; --panel2:#1b1e27; --line:#2a2e3a;
     --text:#ece9e3; --muted:#969aa6; --accent:#57c2cf;
-    --danger:#e5534b; --safe:#46b46e; --soft:#8a90a0;
+    --danger:#e5534b; --safe:#46b46e; --soft:#8a90a0; --warn:#d39a36;
     --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
     --sans:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
   }}
   * {{ box-sizing:border-box; }}
-  body {{
-    margin:0; color:var(--text); font-family:var(--sans);
-    background:
-      radial-gradient(900px 360px at 78% -150px, rgba(87,194,207,.10), transparent 70%),
-      var(--ink);
-  }}
+  body {{ margin:0; color:var(--text); font-family:var(--sans); background:var(--ink); }}
   .wrap {{ max-width:1040px; margin:0 auto; padding:26px 18px 56px; }}
   .eyebrow {{ font-family:var(--mono); font-size:.7rem; letter-spacing:.22em; text-transform:uppercase;
               color:var(--accent); margin:0 0 8px; }}
-  h1 {{ font-family:var(--mono); font-size:1.5rem; font-weight:600; letter-spacing:-.01em; margin:0 0 4px; }}
+  h1 {{ font-family:var(--mono); font-size:1.4rem; font-weight:600; letter-spacing:-.01em; margin:0 0 4px; }}
   .sub {{ color:var(--muted); margin:0 0 18px; font-size:.92rem; }}
   .sub strong {{ color:var(--text); }}
 
   .panel {{ background:var(--panel); border:1px solid var(--line); border-radius:14px; }}
-  .scorebar {{ display:flex; align-items:center; gap:18px; flex-wrap:wrap; padding:16px 18px; margin-bottom:16px; }}
+  .scorebar {{ display:flex; align-items:center; gap:18px; flex-wrap:wrap; padding:16px 18px; margin-bottom:22px; }}
   .gauge {{ display:flex; align-items:baseline; gap:9px; font-family:var(--mono); }}
-  .gauge .before {{ font-size:2.1rem; font-weight:700; color:var(--danger); }}
+  .gauge .before {{ font-size:2.0rem; font-weight:700; color:var(--danger); }}
   .gauge .to {{ color:var(--muted); font-size:1.1rem; }}
-  .gauge .after {{ font-size:2.1rem; font-weight:700; color:var(--safe); }}
+  .gauge .after {{ font-size:2.0rem; font-weight:700; color:var(--safe); }}
   .gauge .scale {{ color:var(--muted); font-size:.95rem; }}
   .meta {{ display:flex; flex-direction:column; gap:5px; }}
   .pill {{ font-family:var(--mono); font-size:.7rem; letter-spacing:.06em; text-transform:uppercase;
@@ -332,26 +264,72 @@ _TEMPLATE = """<!doctype html>
   .counts {{ font-family:var(--mono); font-size:.78rem; color:var(--muted); }}
   .counts b {{ color:var(--text); font-weight:600; }}
 
-  /* the hero: two convergence states */
-  .states {{ display:flex; gap:14px; align-items:stretch; }}
-  .state {{ flex:1 1 0; min-width:0; border:1px solid var(--line); border-radius:14px;
-            background:var(--panel); padding:14px 14px 12px; display:flex; flex-direction:column; }}
-  .danger-state {{ box-shadow:inset 0 2px 0 var(--danger); }}
-  .safe-state {{ box-shadow:inset 0 2px 0 var(--safe); }}
-  .state-h {{ font-family:var(--mono); font-size:.86rem; font-weight:600; margin:0 0 8px;
-              letter-spacing:.02em; }}
-  .danger-state .state-h {{ color:var(--danger); }}
-  .safe-state .state-h {{ color:var(--safe); }}
-  /* min-width:0 lets this flex child shrink below the SVG's intrinsic 372px width; without it
-     the card can't narrow past the viewBox width and the right-edge nodes overflow off-screen. */
-  .svg-wrap {{ flex:1; min-width:0; }}
-  .svg-wrap svg {{ display:block; width:100%; height:auto; max-width:100%; }}
-  .state-cap {{ color:var(--muted); font-size:.8rem; line-height:1.45; margin:10px 2px 0; }}
+  .sec-h {{ font-family:var(--mono); font-size:1.0rem; font-weight:600; margin:0 0 4px; }}
+  .sec-h .real {{ font-family:var(--mono); font-size:.66rem; font-weight:600; color:var(--accent);
+                  border:1px solid rgba(87,194,207,.4); border-radius:999px; padding:2px 8px; margin-left:8px;
+                  text-transform:uppercase; letter-spacing:.06em; vertical-align:middle; }}
+  .sec-h .real code {{ color:var(--accent); }}
+  .sec-sub {{ color:var(--muted); font-size:.82rem; margin:0 0 14px; }}
+  .sec-sub b.x-exposed {{ color:var(--danger); font-weight:600; }}
+  .empty {{ color:var(--muted); font-size:.85rem; }}
 
-  .legend {{ display:flex; flex-wrap:wrap; gap:14px; margin:14px 2px 8px; font-size:.76rem; color:var(--muted); }}
-  .dot {{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; vertical-align:middle; }}
-  .dot.danger {{ background:var(--danger); }} .dot.safe {{ background:var(--safe); }} .dot.muted {{ background:var(--soft); }}
+  /* trace lanes */
+  .trace {{ margin-bottom:26px; }}
+  .lanes {{ display:flex; flex-direction:column; gap:12px; }}
+  .lane {{ border:1px solid var(--line); border-left-width:3px; border-radius:12px;
+           background:var(--panel); padding:12px 14px; }}
+  .lane.exposed {{ border-left-color:var(--danger); }}
+  .lane.screened {{ border-left-color:var(--safe); }}
+  .lane-head {{ display:flex; align-items:center; gap:9px; flex-wrap:wrap; margin-bottom:11px; font-size:.74rem; }}
+  .lane-head .aeg {{ font-family:var(--mono); color:var(--muted); }}
+  .lane-head .conf {{ font-family:var(--mono); color:var(--muted); font-size:.68rem;
+                      border:1px solid var(--line); border-radius:6px; padding:1px 6px; }}
+  .status {{ font-family:var(--mono); font-size:.68rem; text-transform:uppercase; letter-spacing:.05em;
+             margin-left:auto; font-weight:700; }}
+  .status.exposed {{ color:var(--danger); }}
+  .status.screened {{ color:var(--safe); }}
 
+  .flow {{ display:grid; grid-template-columns:1fr auto 1.1fr auto 1fr; align-items:stretch; gap:8px; }}
+  .node {{ background:var(--panel2); border:1px solid var(--line); border-radius:10px; padding:9px 11px; min-width:0; }}
+  .node .nk {{ font-family:var(--mono); font-size:.6rem; text-transform:uppercase; letter-spacing:.1em;
+               color:var(--soft); margin-bottom:4px; }}
+  .node .nv {{ font-size:.86rem; font-weight:600; word-break:break-word; }}
+  .node .nv.mono, .node .nm.mono {{ font-family:var(--mono); }}
+  .node .nv.mono {{ font-size:.8rem; }}
+  .node .nm {{ font-size:.72rem; color:var(--muted); margin-top:3px; word-break:break-word; }}
+  .trust {{ font-weight:700; }}
+  .trust.untrusted {{ color:var(--danger); }}
+  .trust.internal {{ color:var(--safe); }}
+  .trust.unknown {{ color:var(--warn); }}
+  .arrow {{ display:flex; flex-direction:column; align-items:center; justify-content:center;
+            color:var(--soft); font-size:1.1rem; }}
+  .arrow .op {{ font-family:var(--mono); font-size:.6rem; text-transform:uppercase; letter-spacing:.06em;
+                color:var(--soft); margin-bottom:2px; }}
+  .arrow.exposed {{ color:var(--danger); }}
+  .arrow.screened {{ color:var(--safe); }}
+  .node.mem {{ border-style:dashed; }}
+
+  /* live scan panel */
+  .scan {{ margin-bottom:26px; }}
+  .scan-card {{ border:1px solid var(--line); border-radius:12px; background:var(--panel); padding:6px 14px; }}
+  .scan-card .row {{ display:flex; gap:12px; align-items:baseline; padding:9px 0; border-bottom:1px solid var(--line); }}
+  .scan-card .row:last-child {{ border-bottom:none; }}
+  .scan-card .k {{ font-family:var(--mono); font-size:.66rem; text-transform:uppercase; letter-spacing:.08em;
+                   color:var(--soft); min-width:78px; }}
+  .ev {{ font-family:var(--mono); font-size:.78rem; color:var(--text); word-break:break-word; }}
+  .verdict-chip {{ font-family:var(--mono); font-size:.72rem; font-weight:700; text-transform:uppercase;
+                   border-radius:6px; padding:2px 9px; }}
+  .verdict-chip.reject {{ background:rgba(229,83,75,.16); color:var(--danger); }}
+  .verdict-chip.allow {{ background:rgba(70,180,110,.16); color:var(--safe); }}
+  .dets {{ display:flex; flex-wrap:wrap; gap:6px; }}
+  .det {{ font-family:var(--mono); font-size:.72rem; color:var(--text);
+          border:1px solid var(--line); border-radius:6px; padding:1px 7px; }}
+  .det .conf-n {{ color:var(--muted); }}
+  .vsum {{ font-size:.82rem; font-weight:600; }}
+  .vsum.reject {{ color:var(--safe); }}
+  .vsum.allow {{ color:var(--warn); }}
+
+  /* findings table */
   .below-fold {{ margin-top:30px; padding-top:18px; border-top:1px solid var(--line); }}
   .ref-h {{ font-family:var(--mono); font-size:.95rem; margin:0 0 3px; }}
   .ref-sub {{ color:var(--muted); font-size:.78rem; margin:0 0 12px; }}
@@ -365,15 +343,20 @@ _TEMPLATE = """<!doctype html>
         letter-spacing:.06em; text-transform:uppercase; }}
   td.mono {{ font-family:var(--mono); font-size:.76rem; }}
   tr:last-child td {{ border-bottom:none; }}
-  .badge {{ font-family:var(--mono); font-size:.66rem; padding:2px 8px; border-radius:999px; text-transform:uppercase; letter-spacing:.04em; }}
+  .badge {{ font-family:var(--mono); font-size:.66rem; padding:2px 8px; border-radius:999px;
+            text-transform:uppercase; letter-spacing:.04em; }}
   .badge.critical {{ background:rgba(229,83,75,.16); color:var(--danger); }}
   .badge.high {{ background:rgba(229,83,75,.12); color:var(--danger); }}
-  .badge.medium {{ background:rgba(211,154,54,.16); color:#d39a36; }}
+  .badge.medium {{ background:rgba(211,154,54,.16); color:var(--warn); }}
   .badge.low {{ background:rgba(107,114,128,.22); color:var(--muted); }}
-  .rubric {{ color:var(--muted); font-size:.72rem; margin-top:12px; line-height:1.5; }}
+  .rubric {{ color:var(--muted); font-size:.72rem; margin-top:14px; line-height:1.5; }}
+  .rubric .prov {{ display:block; margin-top:6px; }}
 
   @media (max-width:720px) {{
-    .states {{ flex-direction:column; }}
+    .flow {{ grid-template-columns:1fr; }}
+    .arrow {{ flex-direction:row; gap:6px; padding:2px 0; }}
+    .arrow .op {{ margin-bottom:0; }}
+    .status {{ margin-left:0; }}
     .gauge .before, .gauge .after {{ font-size:1.7rem; }}
   }}
 </style>
@@ -382,8 +365,8 @@ _TEMPLATE = """<!doctype html>
 <div class="wrap">
   <header>
     <p class="eyebrow">Aegis · static memory inspection</p>
-    <h1>Memory Firewall Map</h1>
-    <p class="sub">Untrusted memory flows in <strong>{project}</strong></p>
+    <h1>Memory inspection — {project}</h1>
+    <p class="sub">Untrusted source&#8594;memory flows, anchored to <strong>file + line</strong></p>
   </header>
 
   <div class="panel scorebar">
@@ -395,11 +378,14 @@ _TEMPLATE = """<!doctype html>
     <div class="counts">Critical <b>{crit}</b> &nbsp; High <b>{high}</b> &nbsp; Medium <b>{med}</b> &nbsp; Low <b>{low}</b></div>
   </div>
 
-  {body}
-  <div class="legend">{legend}</div>
-
+  {trace}
+  {scan}
   {table}
-  <p class="rubric">Score: {rubric}</p>
+  <p class="rubric">Score: {rubric}
+    <span class="prov">Findings are anchored to a file + line + sink. Absence findings say
+    &ldquo;not detected at this site&rdquo;, never &ldquo;none exist&rdquo;. Confidence:
+    EXTRACTED (same-scope dataflow), INFERRED (cross-call heuristic), AMBIGUOUS (source unresolved).</span>
+  </p>
 </div>
 <script>var AEGIS_SCORE = JSON.parse("{data_json}".replace(/&quot;/g,'"'));</script>
 </body>

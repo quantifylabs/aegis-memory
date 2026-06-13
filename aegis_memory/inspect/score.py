@@ -22,13 +22,13 @@ RUBRIC = (
 )
 
 
-def compute_score(findings: list[Finding]) -> dict:
+def compute_score(findings: list[Finding], *, ignore_screened: bool = False) -> dict:
     counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
     total = 0.0
     for f in findings:
         counts[f.severity] = counts.get(f.severity, 0) + 1
         weight = float(_WEIGHTS.get(f.severity, 0))
-        if f.screened:
+        if f.screened and not ignore_screened:
             weight *= _SCREENED_DISCOUNT
         total += weight
     score = min(100, round(total))
@@ -39,3 +39,10 @@ def compute_score(findings: list[Finding]) -> dict:
         "rubric": RUBRIC,
         "counts": counts,
     }
+
+
+def raw_score(findings: list[Finding]) -> int:
+    """The before-screening exposure: the same heuristic with every flow counted at full
+    weight (screening discounts ignored). Used as the generic in-run ``before`` so any project
+    gets an honest before -> after transition without needing a second (unscreened) package."""
+    return compute_score(findings, ignore_screened=True)["score"]

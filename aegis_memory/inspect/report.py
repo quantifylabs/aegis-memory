@@ -133,10 +133,15 @@ def _build_artifacts(result: InspectionResult, project_name: str) -> dict[str, s
     }
     replay_result = replay.run_memory_poisoning()
     # "after" is always the real computed score from this run. "before" is the caller's real
-    # prior-run (unscreened) score when supplied; None for a plain single run -> the header/report
-    # show a single score with no before arrow (the labeled 86 baseline is a standalone-only fallback).
+    # prior-run score when supplied; otherwise the generic in-run *unscreened-exposure* baseline
+    # (the same heuristic with screening discounts ignored). When nothing is screened the two
+    # coincide -> we drop the arrow and show a single score (no "-0 after screening" noise).
     after = result.score["score"]
-    before = result.before_score
+    if result.before_score is not None:
+        before: int | None = result.before_score
+    else:
+        raw = scoring.raw_score(findings)
+        before = raw if raw != after else None
     return {
         "findings.json": json.dumps(findings_json, indent=2) + "\n",
         "unsafe_memory_flows.json": json.dumps(flows_json, indent=2) + "\n",
@@ -146,7 +151,7 @@ def _build_artifacts(result: InspectionResult, project_name: str) -> dict[str, s
         "INSPECTION_REPORT.md": _render_report(result, project_name, replay_result, before),
         "agent_memory_map.html": htmlmap.render_html(
             findings, result.score, before_score=before, after_score=after,
-            project_name=project_name,
+            project_name=project_name, replay_result=replay_result,
         ),
         "replay_attacks/memory_poisoning_demo.md": replay.render_markdown(replay_result),
     }

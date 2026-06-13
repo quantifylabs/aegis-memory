@@ -19,6 +19,12 @@ def inspect(
     framework: str | None = typer.Option(
         None, "--framework", help="Force a sink adapter (e.g. langgraph). Auto-detect by default."
     ),
+    baseline: str | None = typer.Option(
+        None,
+        "--baseline",
+        help="Inspect this path too and use its risk score as the 'before' in the before->after map "
+        "(e.g. the unscreened version of the same agent).",
+    ),
     ci: bool = typer.Option(False, "--ci", help="CI mode: machine output + non-zero exit on breach"),
     max_risk: int = typer.Option(60, "--max-risk", help="CI risk-score threshold for a non-zero exit"),
     emit_cases: bool = typer.Option(
@@ -44,6 +50,14 @@ def inspect(
     if not root.is_dir():
         console.print(f"[red]Not a directory:[/red] {root}")
         raise typer.Exit(code=2)
+
+    before_score: int | None = None
+    if baseline is not None:
+        baseline_root = Path(baseline).resolve()
+        if not baseline_root.is_dir():
+            console.print(f"[red]Not a directory:[/red] {baseline_root}")
+            raise typer.Exit(code=2)
+        before_score = run_inspection(baseline_root, framework=framework, write=False).score["score"]
 
     if emit_cases and ingest_verdicts:
         console.print("[red]Use --emit-cases and --ingest-verdicts in separate runs.[/red]")
@@ -79,7 +93,7 @@ def inspect(
         )
         return
 
-    result = run_inspection(root, framework=framework)
+    result = run_inspection(root, framework=framework, before_score=before_score)
     score = result.score["score"]
     counts = result.score["counts"]
     n = len(result.findings)

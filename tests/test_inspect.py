@@ -192,20 +192,29 @@ def test_real_before_score_renders_through_html_not_fallback(tmp_path):
     assert f"**42 → {result.score['score']} / 100**" in report
 
 
-def test_map_hero_is_convergence_before_after_not_findings_table(tmp_path):
-    """The hero is the convergence before/after map (two states, fan-in SVG); the raw findings
-    table lives below the fold, not in the hero (the §2 IA redesign)."""
+def test_map_is_proof_first_trace_then_scan_then_table(tmp_path):
+    """The map leads with the faithful trace (lanes anchored to file:line), then the live
+    scan-verdict panel, then the findings table — proof, not a convergence story. Self-contained
+    (no CDN)."""
     out = tmp_path / "out"
     run_inspection(DEMO_DIR, out_dir=out, write=True, before_score=80)
     html = (out / "agent_memory_map.html").read_text(encoding="utf-8")
-    # Two convergence states, each with an inline fan-in SVG (self-contained, no CDN).
-    assert html.count('class="state ') == 2
-    assert html.count("<svg ") == 2
     assert "http://" not in html and "https://" not in html
-    # The findings table is below the fold and comes AFTER the convergence map, not in the hero.
-    assert "All findings" in html
-    assert html.index('class="states"') < html.index('class="below-fold"')
-    assert html.index('class="states"') < html.index("<table")
+    assert "viewport" in html
+    # The old storytelling hero (two state cards / fan-in SVG / without-vs-with) is gone.
+    assert 'class="state ' not in html
+    assert "Without Aegis" not in html
+    assert "<svg " not in html
+    # Faithful trace leads, then the live-scan panel, then the findings table.
+    assert '<section class="trace"' in html
+    assert html.index('class="trace"') < html.index('class="scan"')
+    assert html.index('class="scan"') < html.index("All findings")
+    assert html.index('class="scan"') < html.index("<table")
+    # Lanes are anchored to a real file:line from a demo sink.
+    assert "ingest_web.py:" in html
+    # The live-scan panel renders the REAL scanner verdict, not a story.
+    assert 'class="verdict-chip reject"' in html
+    assert "injection_override" in html
 
 
 # --- the real replay scan ----------------------------------------------------------

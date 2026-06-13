@@ -42,12 +42,21 @@ positive — precision-first).
 ## Inspect it the way a stranger would
 
 ```powershell
-aegis inspect .                          # writes aegis-out/ (report, findings, map, policy)
-python build_memory_map.py               # renders agent_memory_map.html from TWO real runs
+aegis inspect agent                            # the THREAT view  -> agent/aegis-out/ (5 exposed writes, score 100)
+aegis inspect agent_screened --baseline agent  # the BEFORE->AFTER -> agent_screened/aegis-out/ (5 blocked, 100 -> 2)
 ```
 
-`aegis inspect .` finds **all five** untrusted writes via the **general** sink catalog (it keys
-off sink *shapes*, never this demo's filenames or strings):
+Each run writes a single canonical `aegis-out/` **inside the inspected path** — no second copy
+floating at the example root. `aegis inspect agent` shows the threat (five untrusted writes
+reaching memory, score 100). `aegis inspect agent_screened --baseline agent` inspects the
+screened package (every write blocked at a guard, score 2) and uses the unscreened `agent/`
+score as the "before", so the map header shows the real `100 → 2 / 100` governance transition —
+both numbers are the real `compute_score()` output, never hardcoded. (A plain run also shows a
+before→after on its own whenever a project mixes screened and unscreened writes: the "before" is
+the same heuristic with screening discounts ignored.)
+
+`aegis inspect agent` finds **all five** untrusted writes via the **general** sink catalog (it
+keys off sink *shapes*, never this demo's filenames or strings):
 
 ```
 AEG-001 [critical/EXTRACTED] Untrusted input written to memory via vectorstore.add_documents
@@ -66,16 +75,18 @@ AEG-005 [critical/EXTRACTED] Untrusted input written to memory via store.put
     guard.write(content, trust_level='untrusted', require_classifier=True)
 ```
 
-`build_memory_map.py` renders the visual from **two real inspect runs** — the unscreened
-`agent/` package vs. the screened `agent_screened/` package. The map is a **convergence
-before/after view**: the untrusted sources fan into one shared-memory node, and two states sit
-side by side — *Without Aegis* (poison reaches memory → decision compromised) and *With aegis
-inspect* (the malicious writes are rejected at the memory boundary → memory clean → decision
-trusted). The header shows the real risk transition **100 → 2 / 100** (heuristic, lower is
-safer; not the benchmark) — both numbers are the real `compute_score()` output, and the "after"
-stays non-zero because residual risk is more credible than a green 0. The raw findings table
-sits below the fold. Open `agent_memory_map.html` — it's a self-contained, mobile-friendly
-single file (the two states stack vertically on a phone).
+`aegis-out/agent_memory_map.html` is a **proof-first memory-trace report**, not a poster. It
+leads with a **faithful trace**: one lane per untrusted source→memory write, each lane anchored
+to a real `file:line` and sink call, with the edge styled by the *one* provable distinction —
+**exposed** (no guard in scope, the write reaches memory) vs **screened** (a guard wraps the
+write, so it's blocked at the gate). Below it, a **live scan replay** panel shows the real
+`ContentSecurityScanner.scan()` verdict on a memory-poisoning payload (`action: reject`, the
+`injection_override` detector that fired, and the literal text it matched) — a real `scan()`
+call, never a hardcoded string. The full findings table (same data as `findings.json`) sits
+below. The header shows the real risk transition **100 → 2 / 100** (heuristic, lower is safer;
+not the benchmark), and the "after" stays non-zero because residual risk is more credible than a
+green 0. Open `aegis-out/agent_memory_map.html` — it's a self-contained, mobile-friendly single
+file (the trace lanes stack vertically on a phone).
 
 ## How it maps to the code
 

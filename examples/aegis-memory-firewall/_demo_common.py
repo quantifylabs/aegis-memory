@@ -13,8 +13,9 @@ from typing import Any
 
 from langgraph.store.memory import InMemoryStore
 
-# Reuse the real scanner via the inspect bridge (Stages 1-3, deterministic, offline).
-from aegis_memory.inspect._scanner_bridge import ContentAction, get_scanner
+# The shipped runtime write-gate — the same API `aegis inspect` tells you to paste.
+from aegis_memory import guard
+from aegis_memory.inspect.sinks import KEYED_WRITE_METHODS
 
 from agent.memory import SHARED_NS, SUMMARY_KEY, new_store  # noqa: F401  (re-exported)
 
@@ -29,46 +30,27 @@ def load_json(rel: str) -> dict[str, Any]:
     return json.loads((HERE / rel).read_text(encoding="utf-8"))
 
 
-def detection_types(verdict: Any) -> list[str]:
-    """Concrete detection types the scanner fired on (precise, not just flags)."""
-    seen: list[str] = []
-    for det in verdict.detections:
-        name = det.detection_type.value
-        if name not in seen:
-            seen.append(name)
-    return seen
+class AegisGuardedStore(guard.GuardedStore):
+    """The runtime write gate the inspector's findings point at — now the **shipped** API.
 
-
-class AegisGuardedStore:
-    """Wraps a store; screens every ``put`` value through the real Aegis scanner.
-
-    A write whose content is REJECT-ed never reaches memory. This is the runtime "write gate"
-    the inspector's findings point at (SSOT §4.3).
+    This is a thin shim over ``aegis_memory.guard.protect``: it screens every catalogued write
+    through the real ``ContentSecurityScanner`` (a REJECT never reaches memory) and adds the
+    demo's friendly ``[AEGIS]`` line. Same screening as production, no bespoke code.
     """
 
     def __init__(self, inner: Any) -> None:
-        self._inner = inner
-        self._scanner = get_scanner()
-        self.blocked: list[dict[str, Any]] = []
+        super().__init__(inner, scope="agent-shared", on_reject="drop")
 
-    def put(self, namespace, key, value, *args, **kwargs):
-        text = value.get("text", "") if isinstance(value, dict) else str(value)
-        verdict = self._scanner.scan(text)
-        if not verdict.allowed or verdict.action == ContentAction.REJECT:
-            detected = detection_types(verdict)
-            self.blocked.append({"key": key, "detections": detected, "action": verdict.action.value})
+    def _screen(self, name, args, kwargs):
+        ok = super()._screen(name, args, kwargs)
+        if not ok:
+            rec = self.__dict__["blocked"][-1]
+            key = args[1] if (name in KEYED_WRITE_METHODS and len(args) >= 2) else name
             print(
                 f"  [AEGIS] write to '{key}' REJECTED by ContentSecurityScanner "
-                f"(action={verdict.action.value}, detected={detected or 'none'})"
+                f"(action={rec['action']}, detected={rec['detections'] or 'none'})"
             )
-            return None
-        return self._inner.put(namespace, key, value, *args, **kwargs)
-
-    def get(self, *args, **kwargs):
-        return self._inner.get(*args, **kwargs)
-
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
+        return ok
 
 
 def plant_via_channel(store: Any, channel: str, content: str) -> None:
