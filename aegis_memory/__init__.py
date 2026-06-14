@@ -61,7 +61,7 @@ Quick Start (Smart Agent - Full Auto):
 For more examples, see: https://github.com/quantifylabs/aegis-memory/tree/main/examples
 """
 
-__version__ = "2.5.0"
+__version__ = "2.5.1"
 
 # Runtime memory write-gate (the firewall `aegis inspect` points its findings at)
 from aegis_memory import guard
