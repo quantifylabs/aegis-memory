@@ -38,9 +38,9 @@ if settings.enable_llm_injection_classifier:
     from aegis_memory.extractors import AnthropicAdapter, OpenAIAdapter
     _sec_api_key = settings.injection_classifier_api_key or settings.openai_api_key
     if settings.injection_classifier_provider == "openai":
-        _sec_adapter = OpenAIAdapter(api_key=_sec_api_key, model=settings.injection_classifier_model)
+        _sec_adapter = OpenAIAdapter(api_key=_sec_api_key, model=settings.injection_classifier_model, temperature=0)
     else:
-        _sec_adapter = AnthropicAdapter(api_key=_sec_api_key, model=settings.injection_classifier_model)
+        _sec_adapter = AnthropicAdapter(api_key=_sec_api_key, model=settings.injection_classifier_model, temperature=0)
     scanner.set_classifier(InjectionClassifier(_sec_adapter, threshold=settings.injection_classifier_confidence_threshold))
 
 SECURITY_EVENT_TYPES = [

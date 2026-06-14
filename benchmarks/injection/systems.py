@@ -651,7 +651,7 @@ class AegisStages14(System):
         if self.provider == "openai":
             from openai import AsyncOpenAI
 
-            inner = OpenAIAdapter(api_key=os.getenv("OPENAI_API_KEY"), model=self.model)
+            inner = OpenAIAdapter(api_key=os.getenv("OPENAI_API_KEY"), model=self.model, temperature=0)
             # Inject a retry-configured client (the adapter's lazy client uses
             # only default retries; 429s otherwise drop items).
             inner._async_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"),
@@ -659,7 +659,7 @@ class AegisStages14(System):
         else:
             from anthropic import AsyncAnthropic
 
-            inner = AnthropicAdapter(api_key=os.getenv("ANTHROPIC_API_KEY"), model=self.model)
+            inner = AnthropicAdapter(api_key=os.getenv("ANTHROPIC_API_KEY"), model=self.model, temperature=0)
             inner._async_client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"),
                                                  max_retries=MAX_RETRIES)
         adapter = CachingAdapter(inner, self.id, self.model, self._cache)

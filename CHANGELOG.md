@@ -5,6 +5,16 @@ All notable changes to Aegis Memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.3] - 2026-06-14
+
+### Fixed
+
+- `AnthropicAdapter` now forwards `temperature` to the Anthropic API in both `complete()` and `complete_sync()`. It was previously stored on the adapter but silently dropped from the `messages.create(...)` call, so the Anthropic path always ran at the API default (~1.0) regardless of the configured value.
+
+### Changed
+
+- Stage-4 injection classifier adapters are now pinned to `temperature=0` for deterministic screening across the server (`/memories/add`, `/security/scan`) and the injection benchmark. Combined with the `AnthropicAdapter` fix above, Stage 4 now runs deterministically.
+
 ## [2.5.2] - 2026-06-14
 
 ### Security
