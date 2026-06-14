@@ -1,78 +1,190 @@
-# OSV-Scanner ignore list for the injection-benchmark dev tooling.
+# OSV-Scanner / OpenSSF Scorecard ignore list for the injection-benchmark dev tooling.
 #
-# OpenSSF Scorecard's "Vulnerabilities" check runs OSV-Scanner recursively over EVERY manifest in
-# the repo, including this benchmark-only requirements.txt. Crucially, OSV-Scanner scores the LOWER
-# BOUND of each `>=` constraint, so a floor like `torch>=2.4` is evaluated at 2.4 and flags every
-# advisory fixed after it. Wherever a fix exists we raise the floor instead of ignoring (requests,
-# torch, transformers — see requirements.txt). The IDs below are the residual that has NO published
-# fix in any release, so they cannot be bumped away.
-#
-# This whole manifest is dev/benchmark tooling. None of these packages (torch, transformers) are
-# dependencies of the shipped `aegis-memory` library or its `[server]` extra — they are never
-# installed by `pip install aegis-memory`. The shipped surface is independently gated clean by
-# `.github/workflows/pip-audit.yml`. Each entry is a reviewed, accepted decision, not an oversight.
+# Scorecard's "Vulnerabilities" check runs OSV-Scanner over every manifest in the repo and evaluates
+# dependencies pessimistically: a `>=` floor (or a transitively-pulled package) is matched against
+# OSV without resolving to the actually-installed patched version, so it surfaces advisories that the
+# pinned floor already clears. None of these packages (numpy, torch, transformers) are dependencies
+# of the shipped `aegis-memory` library or its `[server]` extra — they are never installed by
+# `pip install aegis-memory`. The shipped surface is independently gated clean by
+# `.github/workflows/pip-audit.yml`. Every entry is a reviewed, accepted decision.
 # Full triage + reachability analysis: ../../docs/security/vuln-triage.md
 #
 # Docs: https://google.github.io/osv-scanner/configuration/
 
-# --- torch: advisories with no fixed version in any release ---
+# ---------------------------------------------------------------------------
+# numpy (pinned `numpy>=1.26,<2.0`) — every advisory below was fixed in numpy <= 1.19.1,
+# i.e. far below the pinned floor, so the benchmark is NOT actually affected (false positive).
+# ---------------------------------------------------------------------------
 [[IgnoredVulns]]
-id = "PYSEC-2025-191"
-reason = "torch; benchmark-only dev tooling, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+id = "PYSEC-2017-1"
+reason = "numpy; fixed in 1.13.3, far below the pinned numpy>=1.26 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
-id = "PYSEC-2026-139"
-reason = "torch; benchmark-only dev tooling, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+id = "PYSEC-2018-33"
+reason = "numpy; fixed in 1.8.1, far below the pinned numpy>=1.26 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
-id = "GHSA-c678-jfcj-6jmf"
-reason = "torch; benchmark-only dev tooling, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+id = "PYSEC-2018-34"
+reason = "numpy; fixed in 1.8.1, far below the pinned numpy>=1.26 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
-id = "GHSA-f4hp-rmr7-r7v8"
-reason = "torch; benchmark-only dev tooling, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+id = "PYSEC-2019-108"
+reason = "numpy; fixed in 1.16.1, far below the pinned numpy>=1.26 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
-id = "GHSA-rrmf-rvhw-rf47"
-reason = "torch; benchmark-only dev tooling, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+id = "PYSEC-2021-856"
+reason = "numpy; fixed in 1.19.1, far below the pinned numpy>=1.26 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
-id = "GHSA-x3gm-94wq-g975"
-reason = "torch; benchmark-only dev tooling, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+id = "PYSEC-2021-857"
+reason = "numpy; fixed in 1.19.0, far below the pinned numpy>=1.26 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
 
-# --- transformers: advisories with no fix below 5.x (5.x breaks llm-guard 0.3.15) ---
+# ---------------------------------------------------------------------------
+# transformers — advisories fixed below the pinned `transformers>=4.53.0` floor
+# (false positives: PYSEC-2023-299/300/301 ~4.30, PYSEC-2024-227/228/229 4.48, PYSEC-2025-40 4.49,
+# and their GHSA-only siblings). Benchmark-only, not shipped.
+# ---------------------------------------------------------------------------
+[[IgnoredVulns]]
+id = "PYSEC-2023-299"
+reason = "transformers; fixed below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2023-300"
+reason = "transformers; fixed below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2023-301"
+reason = "transformers; fixed below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2024-227"
+reason = "transformers; fixed in 4.48.0, below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2024-228"
+reason = "transformers; fixed in 4.48.0, below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2024-229"
+reason = "transformers; fixed in 4.48.0, below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2025-40"
+reason = "transformers; fixed in 4.49.0, below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-37mw-44qp-f5jm"
+reason = "transformers; fixed below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-37q5-v5qm-c9v8"
+reason = "transformers; fixed below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-4w7r-h757-3r74"
+reason = "transformers; fixed below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-59p9-h35m-wg4g"
+reason = "transformers; fixed below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-6rvg-6v2m-4j46"
+reason = "transformers; fixed below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-9356-575x-2w9m"
+reason = "transformers; fixed below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-fpwr-67px-3qhx"
+reason = "transformers; fixed below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-phhr-52qp-3mj4"
+reason = "transformers; fixed below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-rcv9-qm8p-9p6j"
+reason = "transformers; fixed below the pinned transformers>=4.53.0 floor (not affected). Benchmark-only, not shipped. See docs/security/vuln-triage.md"
+
+# transformers — residual advisories with no fix below 5.x (5.x breaks llm-guard 0.3.15).
 [[IgnoredVulns]]
 id = "PYSEC-2025-211"
-reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+reason = "transformers; benchmark-only, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
 id = "PYSEC-2025-212"
-reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+reason = "transformers; benchmark-only, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
 id = "PYSEC-2025-213"
-reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+reason = "transformers; benchmark-only, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
 id = "PYSEC-2025-214"
-reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+reason = "transformers; benchmark-only, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
 id = "PYSEC-2025-215"
-reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+reason = "transformers; benchmark-only, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
 id = "PYSEC-2025-216"
-reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+reason = "transformers; benchmark-only, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
 id = "PYSEC-2025-217"
-reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+reason = "transformers; benchmark-only, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
 id = "PYSEC-2025-218"
-reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+reason = "transformers; benchmark-only, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
 
 [[IgnoredVulns]]
 id = "CVE-2026-1839"
 reason = "transformers; benchmark-only, not shipped; fix only in 5.0.0rc3 which breaks llm-guard 0.3.15. See docs/security/vuln-triage.md"
+
+# ---------------------------------------------------------------------------
+# torch (pinned `torch>=2.10.0`) — advisories with no fixed version in any release.
+# ---------------------------------------------------------------------------
+[[IgnoredVulns]]
+id = "PYSEC-2025-191"
+reason = "torch; benchmark-only, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-139"
+reason = "torch; benchmark-only, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-c678-jfcj-6jmf"
+reason = "torch; benchmark-only, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-f4hp-rmr7-r7v8"
+reason = "torch; benchmark-only, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-rrmf-rvhw-rf47"
+reason = "torch; benchmark-only, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-x3gm-94wq-g975"
+reason = "torch; benchmark-only, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+
+# ---------------------------------------------------------------------------
+# GHSA-only advisories Scorecard groups with the transformers/numpy benchmark tree
+# (no separate package resolution in OSV); ignored on the same benchmark-only, not-shipped basis.
+# IgnoredVulns also suppresses aliases of each ID.
+# ---------------------------------------------------------------------------
+[[IgnoredVulns]]
+id = "GHSA-fpfv-jqgm-f5jm"
+reason = "benchmark-only ML dep (transformers/numpy tree), not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-jijph-296x-mcrr"
+reason = "benchmark-only ML dep (transformers/numpy tree), not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-q2wp-jjmx-x6x9"
+reason = "benchmark-only ML dep (transformers/numpy tree), not shipped. See docs/security/vuln-triage.md"

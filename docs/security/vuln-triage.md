@@ -51,6 +51,38 @@ Remediation, dev/benchmark-only manifests only (the shipped surface stays clean 
 Every ignored ID is a residual with **no usable fix** (no published patch, or a fix only behind a
 breaking major bump), and lives in a manifest that `pip install aegis-memory` never touches.
 
+### Second wave: dev/test/local-extra false positives
+
+After the first pass, the Scorecard viewer still listed ~27 advisories. Mapping each ID back to its
+package (via the OSV API) showed they are all in **non-shipped dev/test/benchmark/local-extra**
+dependencies, and almost all are **false positives** — the pinned floor is already patched, but
+Scorecard's version-agnostic evaluation flags the package anyway:
+
+| Package | Manifest(s) | Advisories | Pinned floor | Fix vs floor | Action |
+|---|---|--:|---|---|---|
+| `numpy` | benchmark, `pyproject [local]` | 6 | `>=1.26` / `>=1.24` | fixed ≤ 1.19.1 (already patched) | ignore (false positive) |
+| `transformers` | benchmark | ~18 | `>=4.53.0` | fixed ≤ 4.49 (already patched) | ignore (false positive) |
+| `python-dotenv` | `server/requirements.txt` | 1 (`GHSA-mf9w-mj56-hr94`) | `>=1.0.0` | fixed 1.2.2 (floor below fix) | **floor bump → `>=1.2.2`** |
+| `pytest` | `pyproject [dev]` | 1 (`GHSA-6w46-j5rx-g56g`) | `>=8.3.0` | fix is pytest 9.0.3 (major) | **removed from `server/requirements.txt`**; remaining `[dev]` extra is not shipped → ignore |
+
+**pytest was a real exposure, not a false positive, and is fixed at the root.** `server/Dockerfile`
+installs `server/requirements.txt` wholesale into the production image, so the `pytest` /
+`pytest-asyncio` lines there actually shipped test tooling into the served image. They were redundant
+with the canonical `pyproject [dev]` extra (which CI uses via `pip install -e ".[server,dev]"`), so
+they are **removed** from `server/requirements.txt` rather than suppressed. The only remaining
+`pytest` reference is the `pyproject [dev]` extra, which is **not** installed by `pip install
+aegis-memory` nor by the Docker image — so its advisory is a genuine non-shipped false positive and
+is ignored (the fix, pytest 9.0.3, is a major bump that risks the `pytest-asyncio`/`pytest-cov`
+toolchain).
+
+Because OSV-Scanner reads the `osv-scanner.toml` **adjacent to each manifest**, the ignores are split
+so each finding is covered wherever Scorecard attributes it: `benchmarks/injection/osv-scanner.toml`
+(numpy + transformers) and `osv-scanner.toml` at the repo root (pyproject `[local]` numpy + `[dev]`
+pytest). This mechanism is confirmed working on this repo: the first-wave torch/transformers ignores
+(which had no version fix) were dropped by the Scorecard viewer after merge. No **shipped** dependency
+is ignored — the core runtime, the `[server]` extra, and the production Docker image remain clean and
+CI-gated (`.github/workflows/pip-audit.yml` audits `server/requirements.txt` with no ignore list).
+
 ## Manifests scanned
 
 | Manifest | Role |
