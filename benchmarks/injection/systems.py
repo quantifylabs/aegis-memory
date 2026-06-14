@@ -48,7 +48,9 @@ class Prediction:
 
 
 # ==========================================================================
-# Response cache  (keyed by system_id, model_id, sha256(prompt))
+# Response cache  (keyed by system_id, model_id, sha256(prompt); CachingAdapter
+# folds the Stage-4 sampling temperature into model_id so a temperature change
+# invalidates stale completions)
 # ==========================================================================
 class ResponseCache:
     """On-disk cache of raw LLM responses so re-runs never re-bill."""
@@ -575,7 +577,13 @@ class CachingAdapter:
     def __init__(self, inner, system_id: str, model_id: str, cache: ResponseCache):
         self._inner = inner
         self._system_id = system_id
-        self._model_id = model_id
+        # Fold the sampling temperature into the cache namespace. The on-disk
+        # cache is otherwise keyed only by (system_id, model_id, sha256(prompt)),
+        # so changing the adapter's temperature would silently reuse completions
+        # sampled at the old temperature. Namespacing by temperature means a
+        # temperature change lands in a fresh cache file instead of stale hits.
+        temp = getattr(inner, "temperature", None)
+        self._model_id = model_id if temp is None else f"{model_id}@t{temp}"
         self._cache = cache
 
     async def complete(self, prompt: str, system: str | None = None) -> str:
@@ -651,7 +659,7 @@ class AegisStages14(System):
         if self.provider == "openai":
             from openai import AsyncOpenAI
 
-            inner = OpenAIAdapter(api_key=os.getenv("OPENAI_API_KEY"), model=self.model)
+            inner = OpenAIAdapter(api_key=os.getenv("OPENAI_API_KEY"), model=self.model, temperature=0)
             # Inject a retry-configured client (the adapter's lazy client uses
             # only default retries; 429s otherwise drop items).
             inner._async_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"),
@@ -659,7 +667,7 @@ class AegisStages14(System):
         else:
             from anthropic import AsyncAnthropic
 
-            inner = AnthropicAdapter(api_key=os.getenv("ANTHROPIC_API_KEY"), model=self.model)
+            inner = AnthropicAdapter(api_key=os.getenv("ANTHROPIC_API_KEY"), model=self.model, temperature=0)
             inner._async_client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"),
                                                  max_retries=MAX_RETRIES)
         adapter = CachingAdapter(inner, self.id, self.model, self._cache)

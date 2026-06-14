@@ -787,12 +787,35 @@ class TestPydanticModels:
 # 8. TestRouterRegistration
 # ===========================================================================
 
+def _collect_app_paths(app) -> set[str]:
+    """All registered HTTP paths on ``app``, across FastAPI versions.
+
+    FastAPI < 0.137 flattens included routers into ``app.routes`` as APIRoute
+    objects, each carrying a ``.path``. FastAPI >= 0.137 (Starlette 1.x)
+    instead appends ``_IncludedRouter`` wrapper objects with no ``.path``;
+    their final, prefix-applied paths are exposed via
+    ``effective_route_contexts()``. This handles both shapes.
+    """
+    paths: set[str] = set()
+    for route in app.routes:
+        path = getattr(route, "path", None)
+        if path is not None:
+            paths.add(path)
+        contexts = getattr(route, "effective_route_contexts", None)
+        if callable(contexts):
+            for ctx in contexts():
+                ctx_path = getattr(ctx, "path", None)
+                if ctx_path:
+                    paths.add(ctx_path)
+    return paths
+
+
 class TestRouterRegistration:
     """Validate the router is registered correctly in the app."""
 
     def test_router_registered_at_prefix(self):
         from api.app import modular_app
-        routes = {route.path for route in modular_app.routes}
+        routes = _collect_app_paths(modular_app)
         assert any("/interaction-events" in path for path in routes)
 
     def test_router_has_correct_tags(self):
@@ -802,27 +825,27 @@ class TestRouterRegistration:
 
     def test_create_endpoint_exists(self):
         from api.app import modular_app
-        paths = {route.path for route in modular_app.routes}
+        paths = _collect_app_paths(modular_app)
         assert "/interaction-events/" in paths
 
     def test_session_timeline_endpoint_exists(self):
         from api.app import modular_app
-        paths = {route.path for route in modular_app.routes}
+        paths = _collect_app_paths(modular_app)
         assert any("session" in p for p in paths if "interaction-events" in p)
 
     def test_agent_history_endpoint_exists(self):
         from api.app import modular_app
-        paths = {route.path for route in modular_app.routes}
+        paths = _collect_app_paths(modular_app)
         assert any("agent" in p for p in paths if "interaction-events" in p)
 
     def test_search_endpoint_exists(self):
         from api.app import modular_app
-        paths = {route.path for route in modular_app.routes}
+        paths = _collect_app_paths(modular_app)
         assert any("search" in p for p in paths if "interaction-events" in p)
 
     def test_event_chain_endpoint_exists(self):
         from api.app import modular_app
-        paths = {route.path for route in modular_app.routes}
+        paths = _collect_app_paths(modular_app)
         assert any("{event_id}" in p for p in paths if "interaction-events" in p)
 
 

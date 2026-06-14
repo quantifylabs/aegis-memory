@@ -48,6 +48,9 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 If a key is absent, that system is reported `not_run` (the run continues). Responses are cached
 under `cache/` keyed by `(system_id, model_id, sha256(prompt))`, so **re-runs never re-bill**.
+For the Stage-4 LLM classifier the sampling temperature is folded into `model_id`, so changing
+it (e.g. pinning to `temperature=0`) lands in a fresh cache file rather than reusing completions
+sampled at the old temperature.
 
 ### Gated model: `llama_prompt_guard_2`
 

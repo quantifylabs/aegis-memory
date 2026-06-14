@@ -348,15 +348,17 @@ class AnthropicAdapter(LLMAdapter):
         response = await self.async_client.messages.create(
             model=self.model,
             max_tokens=1024,
+            temperature=self.temperature,
             system=system or "",
             messages=[{"role": "user", "content": prompt + "\n\nRespond with JSON only."}],
         )
         return response.content[0].text
-    
+
     def complete_sync(self, prompt: str, system: str = None) -> str:
         response = self.client.messages.create(
             model=self.model,
             max_tokens=1024,
+            temperature=self.temperature,
             system=system or "",
             messages=[{"role": "user", "content": prompt + "\n\nRespond with JSON only."}],
         )
