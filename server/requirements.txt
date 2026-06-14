@@ -27,7 +27,7 @@ opentelemetry-sdk>=1.42.1
 # structlog>=24.0.0
 
 # Development
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2  # >=1.2.2 clears GHSA-mf9w-mj56-hr94 (CVE-2026-28684)
 
 # Testing
 pytest>=8.0.0

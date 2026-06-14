@@ -51,6 +51,28 @@ Remediation, dev/benchmark-only manifests only (the shipped surface stays clean 
 Every ignored ID is a residual with **no usable fix** (no published patch, or a fix only behind a
 breaking major bump), and lives in a manifest that `pip install aegis-memory` never touches.
 
+### Second wave: dev/test/local-extra false positives
+
+After the first pass, the Scorecard viewer still listed ~27 advisories. Mapping each ID back to its
+package (via the OSV API) showed they are all in **non-shipped dev/test/benchmark/local-extra**
+dependencies, and almost all are **false positives** — the pinned floor is already patched, but
+Scorecard's version-agnostic evaluation flags the package anyway:
+
+| Package | Manifest(s) | Advisories | Pinned floor | Fix vs floor | Action |
+|---|---|--:|---|---|---|
+| `numpy` | benchmark, `pyproject [local]` | 6 | `>=1.26` / `>=1.24` | fixed ≤ 1.19.1 (already patched) | ignore (false positive) |
+| `transformers` | benchmark | ~18 | `>=4.53.0` | fixed ≤ 4.49 (already patched) | ignore (false positive) |
+| `python-dotenv` | `server/requirements.txt` | 1 (`GHSA-mf9w-mj56-hr94`) | `>=1.0.0` | fixed 1.2.2 (floor below fix) | **floor bump → `>=1.2.2`** |
+| `pytest` | `server/requirements.txt`, `pyproject [dev]` | 1 (`GHSA-6w46-j5rx-g56g`) | `>=8.0.0` / `>=8.3.0` | fix is pytest 9.0.3 (major) | ignore (test-only; 9.x risks the test toolchain) |
+
+Because OSV-Scanner reads the `osv-scanner.toml` **adjacent to each manifest**, the ignores are split
+across three files so each finding is covered wherever Scorecard attributes it:
+`benchmarks/injection/osv-scanner.toml` (numpy + transformers), `osv-scanner.toml` at the repo root
+(pyproject `[local]` numpy + `[dev]` pytest), and `server/osv-scanner.toml` (pytest). This mechanism
+is confirmed working on this repo: the first-wave torch/transformers ignores (which had no version
+fix) were dropped by the Scorecard viewer after merge. No shipped (`pip install aegis-memory`)
+dependency is ignored — the core runtime and `[server]` extra remain clean and CI-gated.
+
 ## Manifests scanned
 
 | Manifest | Role |

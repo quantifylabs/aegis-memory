@@ -1,0 +1,13 @@
+# OSV-Scanner / OpenSSF Scorecard ignore list for server/requirements.txt dev/test deps.
+#
+# Scorecard's "Vulnerabilities" check scans this manifest and evaluates the `>=` floors
+# pessimistically. The only residual here is pytest, a test-only dependency that is never part of
+# the running server image's app surface. (python-dotenv was a real finding and is fixed by bumping
+# its floor in server/requirements.txt, so it needs no ignore.)
+# Full triage: ../docs/security/vuln-triage.md
+#
+# Docs: https://google.github.io/osv-scanner/configuration/
+
+[[IgnoredVulns]]
+id = "GHSA-6w46-j5rx-g56g"
+reason = "pytest; test-only dependency, not part of the shipped/served app; fix is pytest 9.0.3 (major bump) which risks the pytest-asyncio/pytest-cov test toolchain. See docs/security/vuln-triage.md"

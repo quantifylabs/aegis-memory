@@ -1,0 +1,54 @@
+# OSV-Scanner / OpenSSF Scorecard ignore list for pyproject.toml's optional dev/local extras.
+#
+# Scorecard's "Vulnerabilities" check scans pyproject.toml including optional-dependencies and
+# evaluates them pessimistically (a `>=` floor is matched against OSV without resolving to the
+# installed patched version). The entries below are in the `[local]` (numpy) and `[dev]` (pytest)
+# extras — NOT in the shipped core deps or the `[server]` runtime extra, so they are never installed
+# by a normal `pip install aegis-memory`. The shipped surface is gated clean by
+# `.github/workflows/pip-audit.yml`. Reviewed, accepted decisions.
+# Full triage: docs/security/vuln-triage.md
+#
+# Docs: https://google.github.io/osv-scanner/configuration/
+
+# numpy (`[local]` extra, `numpy>=1.24.0`) — all fixed in numpy <= 1.19.1, far below the floor.
+[[IgnoredVulns]]
+id = "PYSEC-2017-1"
+reason = "numpy ([local] extra); fixed in 1.13.3, below the pinned numpy>=1.24.0 floor (not affected); not in shipped deps. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2018-33"
+reason = "numpy ([local] extra); fixed in 1.8.1, below the pinned numpy>=1.24.0 floor (not affected); not in shipped deps. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2018-34"
+reason = "numpy ([local] extra); fixed in 1.8.1, below the pinned numpy>=1.24.0 floor (not affected); not in shipped deps. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2019-108"
+reason = "numpy ([local] extra); fixed in 1.16.1, below the pinned numpy>=1.24.0 floor (not affected); not in shipped deps. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2021-856"
+reason = "numpy ([local] extra); fixed in 1.19.1, below the pinned numpy>=1.24.0 floor (not affected); not in shipped deps. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2021-857"
+reason = "numpy ([local] extra); fixed in 1.19.0, below the pinned numpy>=1.24.0 floor (not affected); not in shipped deps. See docs/security/vuln-triage.md"
+
+# pytest (`[dev]` extra, `pytest>=8.3.0`) — dev/test-only; see note in server/osv-scanner.toml.
+[[IgnoredVulns]]
+id = "GHSA-6w46-j5rx-g56g"
+reason = "pytest ([dev] extra); dev/test-only, not shipped; fix is pytest 9.0.3 (major bump) which risks the pytest-asyncio/pytest-cov test toolchain. See docs/security/vuln-triage.md"
+
+# GHSA-only advisories Scorecard may attribute to the [local] ML extra (sentence-transformers tree).
+[[IgnoredVulns]]
+id = "GHSA-fpfv-jqgm-f5jm"
+reason = "dev/local-only ML dep, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-jijph-296x-mcrr"
+reason = "dev/local-only ML dep, not shipped. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-q2wp-jjmx-x6x9"
+reason = "dev/local-only ML dep, not shipped. See docs/security/vuln-triage.md"
