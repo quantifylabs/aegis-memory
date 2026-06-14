@@ -5,6 +5,16 @@ All notable changes to Aegis Memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.2] - 2026-06-14
+
+### Security
+
+- Cleared all OpenSSF Scorecard / OSV-Scanner "Vulnerabilities" findings, which are evaluated against the lower bound of every `>=` pin across the repo's non-shipped dev/benchmark/demo manifests (the shipped library was already clean). Bumped `requests>=2.33.0` and `torch>=2.10.0` in `benchmarks/injection/requirements.txt` to clear fixable advisories, and added `osv-scanner.toml` ignore lists for the residual no-fix `torch`/`transformers` advisories and the demo-only `langgraph` advisory (`PYSEC-2026-83`). No shipped (`pip install aegis-memory`) dependency changed; verified `osv-scanner scan source -r .` reports 0 vulnerabilities repo-wide.
+
+### Added
+
+- Release signing: `.github/workflows/release.yml` builds the sdist + wheel on every `v*.*.*` tag, signs them keylessly with Sigstore, and publishes a GitHub Release with the artifacts and their `.sigstore.json` bundles attached — satisfying OpenSSF Scorecard's "Signed-Releases" check.
+
 ## [2.5.1] - 2026-06-14
 
 ### Changed
