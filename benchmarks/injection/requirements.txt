@@ -13,7 +13,9 @@ python-dotenv==1.2.2        # load OPENAI_/ANTHROPIC_ keys; >=1.2.2 clears CVE-2
 # --- Datasets ---
 datasets==2.19.1            # deepset/prompt-injections, databricks-dolly-15k
 huggingface-hub==0.30.2     # >=0.30 required by transformers>=4.53; datasets 2.19.1 allows it
-requests>=2.31.0            # InjecAgent raw fetch (best-effort)
+requests>=2.33.0            # InjecAgent raw fetch (best-effort); >=2.33.0 clears
+                            # GHSA-9hjg-9r4m-mvj7 / GHSA-9wx4-h78v-vm56 / GHSA-gc5v-m9x4-r6x2
+                            # (OSV scores the >= floor, so the floor itself must be patched)
 
 # --- ML baseline: protectai_deberta  AND  framework baseline: llm_guard ---
 # llm-guard pins a strict transformers/torch range; these ranges are chosen so a
@@ -28,7 +30,12 @@ requests>=2.31.0            # InjecAgent raw fetch (best-effort)
 # below 5.x (CVE-2024-12720, CVE-2025-1194/3263/3264/3777/3933/5197/6051/6638/6921,
 # PYSEC-2024-227/228/229, PYSEC-2025-40). The remaining advisories have no <5 fix
 # and are documented as accepted benchmark-only risk in docs/security/vuln-triage.md.
-torch>=2.4
+# torch floor raised to >=2.10.0: OSV/Scorecard scores the >= floor, and 2.10.0 is the
+# highest fixed version across torch's fixable advisories (clears 13). llm-guard 0.3.15
+# only requires torch>=2.4.0 (no upper cap), so this is compatible. The 6 remaining torch
+# advisories have no fixed version in any release and are accepted benchmark-only risk
+# (see docs/security/vuln-triage.md + osv-scanner.toml).
+torch>=2.10.0
 transformers>=4.53.0,<5
 sentencepiece==0.2.1        # deberta-v3 tokenizer needs this; >=0.2.1 clears CVE-2026-1260
 llm-guard==0.3.15

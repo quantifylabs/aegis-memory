@@ -1,0 +1,51 @@
+name: Release
+
+# Builds the shipped distributions, signs them keylessly with Sigstore, and creates a GitHub
+# Release with the artifacts AND their .sigstore.json bundles attached. This is what OpenSSF
+# Scorecard's "Signed-Releases" check looks for. Triggered on v*.*.* tag pushes (the same tag
+# convention docker-publish.yml uses); workflow_dispatch is a manual fallback.
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the Release and upload assets
+      id-token: write   # Sigstore keyless (OIDC) signing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405  # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+      - name: Sign distributions with Sigstore
+        # Emits a dist/*.sigstore.json bundle next to each input artifact.
+        uses: sigstore/gh-action-sigstore-python@5b79a39c381910c090341a2c9b0bf022c8b387e1  # v3.4.0
+        with:
+          inputs: ./dist/*.tar.gz ./dist/*.whl
+
+      - name: Create GitHub Release with signed assets
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.whl
+            dist/*.sigstore.json
+          generate_release_notes: true

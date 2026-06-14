@@ -1,0 +1,78 @@
+# OSV-Scanner ignore list for the injection-benchmark dev tooling.
+#
+# OpenSSF Scorecard's "Vulnerabilities" check runs OSV-Scanner recursively over EVERY manifest in
+# the repo, including this benchmark-only requirements.txt. Crucially, OSV-Scanner scores the LOWER
+# BOUND of each `>=` constraint, so a floor like `torch>=2.4` is evaluated at 2.4 and flags every
+# advisory fixed after it. Wherever a fix exists we raise the floor instead of ignoring (requests,
+# torch, transformers — see requirements.txt). The IDs below are the residual that has NO published
+# fix in any release, so they cannot be bumped away.
+#
+# This whole manifest is dev/benchmark tooling. None of these packages (torch, transformers) are
+# dependencies of the shipped `aegis-memory` library or its `[server]` extra — they are never
+# installed by `pip install aegis-memory`. The shipped surface is independently gated clean by
+# `.github/workflows/pip-audit.yml`. Each entry is a reviewed, accepted decision, not an oversight.
+# Full triage + reachability analysis: ../../docs/security/vuln-triage.md
+#
+# Docs: https://google.github.io/osv-scanner/configuration/
+
+# --- torch: advisories with no fixed version in any release ---
+[[IgnoredVulns]]
+id = "PYSEC-2025-191"
+reason = "torch; benchmark-only dev tooling, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-139"
+reason = "torch; benchmark-only dev tooling, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-c678-jfcj-6jmf"
+reason = "torch; benchmark-only dev tooling, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-f4hp-rmr7-r7v8"
+reason = "torch; benchmark-only dev tooling, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-rrmf-rvhw-rf47"
+reason = "torch; benchmark-only dev tooling, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "GHSA-x3gm-94wq-g975"
+reason = "torch; benchmark-only dev tooling, not shipped; no fixed version published. See docs/security/vuln-triage.md"
+
+# --- transformers: advisories with no fix below 5.x (5.x breaks llm-guard 0.3.15) ---
+[[IgnoredVulns]]
+id = "PYSEC-2025-211"
+reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2025-212"
+reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2025-213"
+reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2025-214"
+reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2025-215"
+reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2025-216"
+reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2025-217"
+reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "PYSEC-2025-218"
+reason = "transformers; benchmark-only dev tooling, not shipped; no <5 fix published. See docs/security/vuln-triage.md"
+
+[[IgnoredVulns]]
+id = "CVE-2026-1839"
+reason = "transformers; benchmark-only, not shipped; fix only in 5.0.0rc3 which breaks llm-guard 0.3.15. See docs/security/vuln-triage.md"

@@ -29,6 +29,28 @@ shipped-dependency vulnerability fails the build.
 > `PYSEC-2025-211..218` cluster, which is **one package**, not eight. The number that actually
 > matters is **distinct shipped-dependency packages needing a fix: zero.**
 
+## OSV-Scanner / OpenSSF Scorecard: lower-bound evaluation
+
+Scorecard's **Vulnerabilities** check runs **OSV-Scanner** over *every* manifest in the repo, and it
+differs from `pip-audit` in one decisive way: **OSV-Scanner scores the lower bound of each `>=`
+constraint.** So `torch>=2.4` is evaluated at exactly `2.4` (flagging every advisory fixed after it),
+even though a real `pip install` resolves to the latest patched torch. `pip-audit` resolves the
+installed tree instead, which is why it reported only the `transformers` residual while Scorecard
+showed many more. Confirmed locally with `osv-scanner scan source -r .` (v2.3.8).
+
+Remediation, dev/benchmark-only manifests only (the shipped surface stays clean and untouched):
+
+| Package | Manifest | Was | Now | How |
+|---|---|---|---|---|
+| `requests` | `benchmarks/injection/requirements.txt` | `>=2.31.0` (3 advisories) | `>=2.33.0` | floor bump — clears all 3 |
+| `torch` | `benchmarks/injection/requirements.txt` | `>=2.4` (19 advisories) | `>=2.10.0` | floor bump clears 13 fixable; 6 no-fix advisories ignored in `osv-scanner.toml` |
+| `transformers` | `benchmarks/injection/requirements.txt` | `>=4.53.0,<5` (9 residual) | unchanged | no `<5` fix; ignored in `osv-scanner.toml` |
+| `langgraph` | `examples/*/requirements.txt` | `>=0.2.0` (`PYSEC-2026-83`) | unchanged | only fix is a 1.0.x major jump that breaks the 0.2-era demo; ignored per-example in `osv-scanner.toml` |
+
+`torch>=2.10.0` is compatible: `llm-guard 0.3.15` only requires `torch>=2.4.0` with no upper cap.
+Every ignored ID is a residual with **no usable fix** (no published patch, or a fix only behind a
+breaking major bump), and lives in a manifest that `pip install aegis-memory` never touches.
+
 ## Manifests scanned
 
 | Manifest | Role |
@@ -76,17 +98,25 @@ users: **none.**
 
 ### Deliberate ignore list
 
-If/when `pip-audit` is run over the benchmark manifest in tooling, the residual is suppressed
-*explicitly* (a reviewed decision, not an oversight):
+This residual is suppressed *explicitly* (a reviewed decision, not an oversight) in two places, both
+listing the same nine IDs:
 
-```
-python -m pip_audit -r benchmarks/injection/requirements.txt `
-  --ignore-vuln PYSEC-2025-211 --ignore-vuln PYSEC-2025-212 `
-  --ignore-vuln PYSEC-2025-213 --ignore-vuln PYSEC-2025-214 `
-  --ignore-vuln PYSEC-2025-215 --ignore-vuln PYSEC-2025-216 `
-  --ignore-vuln PYSEC-2025-217 --ignore-vuln PYSEC-2025-218 `
-  --ignore-vuln CVE-2026-1839
-```
+1. **OSV-Scanner / OpenSSF Scorecard** — [`benchmarks/injection/osv-scanner.toml`](../../benchmarks/injection/osv-scanner.toml).
+   Scorecard's "Vulnerabilities" check scans **every** manifest in the repo (not just the shipped
+   surface), so without this config the benchmark-only `transformers` residual scores the check at 0.
+   OSV-Scanner auto-discovers the `osv-scanner.toml` sitting next to the benchmark `requirements.txt`
+   and treats the listed IDs as accepted. This is the single source of truth for the machine-enforced
+   ignore list.
+2. **`pip-audit`** — if/when it is run over the benchmark manifest in tooling:
+
+   ```
+   python -m pip_audit -r benchmarks/injection/requirements.txt `
+     --ignore-vuln PYSEC-2025-211 --ignore-vuln PYSEC-2025-212 `
+     --ignore-vuln PYSEC-2025-213 --ignore-vuln PYSEC-2025-214 `
+     --ignore-vuln PYSEC-2025-215 --ignore-vuln PYSEC-2025-216 `
+     --ignore-vuln PYSEC-2025-217 --ignore-vuln PYSEC-2025-218 `
+     --ignore-vuln CVE-2026-1839
+   ```
 
 The shipped-deps CI job (`.github/workflows/pip-audit.yml`) needs **no** ignore list — that surface
 is clean — and intentionally does **not** audit the benchmark manifest, so the accepted residual
