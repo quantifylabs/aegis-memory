@@ -5,10 +5,12 @@ All notable changes to Aegis Memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.5.0] - 2026-06-14
 
 ### Added
 
+- **`aegis inspect`** — a static analysis engine that scans an agent project for unsafe memory-write flows (untrusted content reaching durable, agent-shared/global memory) and points each finding at the `guard` fix. Ships with `aegis replay` (replay a built-in memory-poisoning attack) and a generated before/after `agent_memory_map.html` convergence view. Includes a LangGraph memory-poisoning demo under `examples/`.
+- **Skill packaging + MCP server** — `aegis install` / `aegis uninstall` package Aegis as a coding-assistant skill, and a new `aegis-mcp` entry point (`aegis_memory.mcp_server`) exposes Aegis over the Model Context Protocol. Adds `mcp>=1.6.0` to core dependencies.
 - **`aegis_memory.guard`** — a first-class, framework-agnostic runtime memory **write-gate**, exported from `aegis_memory/__init__.py` (`from aegis_memory import guard`). This makes the remediation `aegis inspect` recommends *real*: previously the suggested fix `from aegis_memory import guard; guard.write(...)` referenced a `guard` that did not exist (an `ImportError` waiting to happen).
   - `guard.write(content, *, trust_level, scope, require_classifier=False, metadata=None, on_reject="raise") -> WriteVerdict` — screens one value and returns a `WriteVerdict` (`allowed`, `action`, possibly-redacted `content`, `detections`, `flags`, `reason`). Fail-closed by default (`on_reject="raise"` → `WriteBlocked`); `on_reject="return"` returns the verdict.
   - `guard.protect(store, *, value_key="text", trust_level, scope, on_reject="drop") -> GuardedStore` — wraps **any** store and screens every catalogued write idiom (`put`/`aput`/`add`/`upsert`/`add_texts`/`add_documents`/`save`/… across LangGraph, vector DBs, and custom stores), sync or async. Generalizes the demo's single-method `AegisGuardedStore`. Drops + records rejected writes on `.blocked` (or raises).
@@ -20,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `aegis_memory/inspect/analyzer.py`: the recommended-fix string findings carry now references the real shipped API — both `guard.protect(store, scope='agent-shared')` (wrap the sink) and `guard.write(content, trust_level='untrusted', scope='agent-shared')` (screen one value).
 - `aegis_memory/inspect/sinks.py`: extracted the per-framework write-method names into shared `WRITE_METHODS` / `KEYED_WRITE_METHODS` constants reused by `guard.protect`, so static detection and runtime enforcement key off the same idioms and never drift.
 - `examples/aegis-memory-firewall/_demo_common.py`: `AegisGuardedStore` is now a thin shim over `guard.GuardedStore` (the shipped API) instead of bespoke example code; the demo invariants are unchanged (`run_with_aegis.py` → `DENIED`, `run_without_aegis.py` → `APPROVED`).
+- `pyproject.toml` + `aegis_memory/__init__.py`: 2.4.0 → 2.5.0.
+- README: surface `aegis inspect` + `aegis_memory.guard` in the hero block, and embed the multi-agent write-boundary diagram (`.github/mas_write_boundary_chokepoint.svg`) under "Guard every write (the firewall)".
+
+### Fixed
+
+- **`trust_level` resolved on the write path** — memory writes now resolve the real `trust_level` instead of a default, so content-trust policy is applied correctly at persistence time.
+- **Production server image startup** — `server/content_security.py` is self-contained again (the four-stage pipeline lives in both `server/content_security.py` and the wheel's `aegis_memory/security/content_security.py`). The server image, built from `context: ./server`, no longer raises `ModuleNotFoundError: No module named 'aegis_memory'` at API startup. A new drift-guard test (`tests/test_content_security_no_drift.py`) keeps the two copies byte-identical.
 
 ### Security
 
