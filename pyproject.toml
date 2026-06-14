@@ -53,6 +53,11 @@ dependencies = [
     "textual>=0.50.0",
     "pydantic>=2.10.0",
     "mcp>=1.6.0",
+    # Transitive security floors (OpenSSF Scorecard / OSV) — pulled in transitively
+    # (idna<-httpx, pygments<-rich); loose upstream bounds otherwise let known-vulnerable
+    # versions resolve. Pinned to the first patched release of each advisory.
+    "idna>=3.16",       # GHSA-65pc-fj4g-8rjx
+    "pygments>=2.20.0", # PYSEC-2023-117, GHSA-5239-wwwm-4pmq
 ]
 
 [project.scripts]
@@ -67,8 +72,14 @@ server = [
     "asyncpg>=0.30.0",
     "pgvector>=0.3.6",
     "pydantic>=2.10.0",
+    "pydantic-settings>=2.14.1",
     "openai>=1.60.0",
     "alembic>=1.13.0",
+    # Observability (OTEL bridge)
+    "opentelemetry-api>=1.42.1",
+    "opentelemetry-sdk>=1.42.1",
+    # Transitive security floor (tqdm<-openai) — see core deps note.
+    "tqdm>=4.67.3",     # PYSEC-2017-74, GHSA-g7vv-2v7x-gj9p
 ]
 dev = [
     "pytest>=8.3.0",

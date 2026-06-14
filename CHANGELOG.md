@@ -5,6 +5,16 @@ All notable changes to Aegis Memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `pyproject.toml`: aligned the wheel's dependency pins with the production server floors (`server/requirements.txt`). The `[server]` extra now carries `pydantic-settings>=2.14.1`, `opentelemetry-api>=1.42.1`, and `opentelemetry-sdk>=1.42.1` (previously only declared for the Docker image), so `pip install aegis-memory[server]` gets the same runtime deps the container does.
+
+### Security
+
+- Carried the OpenSSF Scorecard / OSV transitive security floors into the wheel so `pip install` enforces them too: `idna>=3.16` (via httpx) and `pygments>=2.20.0` (via rich) in core deps, `tqdm>=4.67.3` (via openai) in the `[server]` extra. Previously these floors existed only in `server/requirements.txt`, leaving SDK installs free to resolve known-vulnerable transitive versions.
+
 ## [2.5.0] - 2026-06-14
 
 ### Added
