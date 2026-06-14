@@ -107,6 +107,51 @@ def test_cache_key_is_content_addressed(tmp_path):
     assert cache.get("aegis_stages_1_4_openai", "gpt-4o", "seen prompt") is None
 
 
+class _FakeInner:
+    """Minimal async LLM adapter stand-in carrying a temperature."""
+
+    def __init__(self, temperature, response: str):
+        self.temperature = temperature
+        self._response = response
+        self.calls = 0
+
+    async def complete(self, prompt: str, system: str | None = None) -> str:
+        self.calls += 1
+        return self._response
+
+
+def test_caching_adapter_namespaces_cache_by_temperature(tmp_path):
+    """A temperature change must NOT reuse completions sampled at the old one.
+
+    The cache is keyed by (system_id, model_id, sha256(prompt)); CachingAdapter
+    folds the inner adapter's temperature into model_id so changing it lands in a
+    fresh cache file rather than serving stale, differently-sampled responses.
+    """
+    import asyncio
+
+    cache = systems.ResponseCache(tmp_path)
+
+    # Populate the cache at the old temperature (0.1).
+    old = systems.CachingAdapter(
+        _FakeInner(temperature=0.1, response="OLD"),
+        "aegis_stages_1_4_openai", "gpt-4o-mini", cache,
+    )
+    assert asyncio.run(old.complete("p")) == "OLD"
+    assert old._inner.calls == 1
+    # Same adapter, same prompt -> cache hit, no re-sample.
+    assert asyncio.run(old.complete("p")) == "OLD"
+    assert old._inner.calls == 1
+
+    # A temperature=0 adapter for the SAME system/model/prompt must MISS the
+    # temperature=0.1 entry and re-sample instead of reusing the stale "OLD".
+    new = systems.CachingAdapter(
+        _FakeInner(temperature=0, response="NEW"),
+        "aegis_stages_1_4_openai", "gpt-4o-mini", cache,
+    )
+    assert asyncio.run(new.complete("p")) == "NEW"
+    assert new._inner.calls == 1
+
+
 def test_prompt_hash_is_sha256_and_collision_resistant():
     import hashlib
 

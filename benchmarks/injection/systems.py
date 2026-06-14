@@ -48,7 +48,9 @@ class Prediction:
 
 
 # ==========================================================================
-# Response cache  (keyed by system_id, model_id, sha256(prompt))
+# Response cache  (keyed by system_id, model_id, sha256(prompt); CachingAdapter
+# folds the Stage-4 sampling temperature into model_id so a temperature change
+# invalidates stale completions)
 # ==========================================================================
 class ResponseCache:
     """On-disk cache of raw LLM responses so re-runs never re-bill."""
@@ -575,7 +577,13 @@ class CachingAdapter:
     def __init__(self, inner, system_id: str, model_id: str, cache: ResponseCache):
         self._inner = inner
         self._system_id = system_id
-        self._model_id = model_id
+        # Fold the sampling temperature into the cache namespace. The on-disk
+        # cache is otherwise keyed only by (system_id, model_id, sha256(prompt)),
+        # so changing the adapter's temperature would silently reuse completions
+        # sampled at the old temperature. Namespacing by temperature means a
+        # temperature change lands in a fresh cache file instead of stale hits.
+        temp = getattr(inner, "temperature", None)
+        self._model_id = model_id if temp is None else f"{model_id}@t{temp}"
         self._cache = cache
 
     async def complete(self, prompt: str, system: str | None = None) -> str:
