@@ -15,17 +15,30 @@ from event_repository import EventRepository
 from fastapi import APIRouter, Depends, Query
 from memory_repository import MemoryRepository
 from models import Memory, MemoryEventType, MemoryScope, MemoryType
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from scope_inference import ScopeInference
 from sqlalchemy.ext.asyncio import AsyncSession
 from temporal_decay import compute_relevance_score
 
-from api.dependencies.auth import check_rate_limit
+from api.dependencies.auth import AuthContext, check_rate_limit, get_auth_context
 from api.dependencies.database import get_db, get_read_db
 from config import get_settings
 from content_security import ContentSecurityScanner
 from integrity import compute_integrity_hash
 from fastapi import HTTPException
+from trust_levels import VALID_TRUST_LEVELS, resolve_trust_level
+
+
+class _TrustLevelMixin(BaseModel):
+    """Shared optional trust_level field for the typed-memory create bodies."""
+    trust_level: str | None = None
+
+    @field_validator("trust_level")
+    @classmethod
+    def _validate_trust_level(cls, v):
+        if v is not None and v not in VALID_TRUST_LEVELS:
+            raise ValueError(f"trust_level must be one of: {sorted(VALID_TRUST_LEVELS)}")
+        return v
 
 router = APIRouter()
 _settings = get_settings()
@@ -34,7 +47,7 @@ _scanner = ContentSecurityScanner(_settings)
 
 # ---------- Pydantic Models ----------
 
-class EpisodicCreate(BaseModel):
+class EpisodicCreate(_TrustLevelMixin):
     content: str = Field(..., min_length=1, max_length=100_000)
     agent_id: str = Field(..., min_length=1, max_length=64)
     session_id: str = Field(..., min_length=1, max_length=64)
@@ -45,7 +58,7 @@ class EpisodicCreate(BaseModel):
     ttl_seconds: int | None = Field(default=None, ge=1, le=31536000)
 
 
-class SemanticCreate(BaseModel):
+class SemanticCreate(_TrustLevelMixin):
     content: str = Field(..., min_length=1, max_length=100_000)
     entity_id: str | None = Field(default=None, max_length=128)
     agent_id: str | None = Field(default=None, max_length=64)
@@ -55,7 +68,7 @@ class SemanticCreate(BaseModel):
     ttl_seconds: int | None = Field(default=None, ge=1, le=31536000)
 
 
-class ProceduralCreate(BaseModel):
+class ProceduralCreate(_TrustLevelMixin):
     content: str = Field(..., min_length=1, max_length=100_000)
     agent_id: str = Field(..., min_length=1, max_length=64)
     trigger_conditions: list[str] | None = None
@@ -66,7 +79,7 @@ class ProceduralCreate(BaseModel):
     ttl_seconds: int | None = Field(default=None, ge=1, le=31536000)
 
 
-class ControlCreate(BaseModel):
+class ControlCreate(_TrustLevelMixin):
     content: str = Field(..., min_length=1, max_length=100_000)
     agent_id: str = Field(..., min_length=1, max_length=64)
     error_pattern: str | None = Field(default=None, max_length=128)
@@ -179,6 +192,7 @@ async def _create_typed_memory(
     sequence_number: int | None = None,
     source_trajectory_id: str | None = None,
     error_pattern: str | None = None,
+    trust_level: str = "internal",
 ) -> TypedAddResult:
     """Shared helper for all typed memory creation endpoints."""
     embed_service = get_embedding_service()
@@ -195,8 +209,11 @@ async def _create_typed_memory(
             scope=existing.scope, deduped_from=existing.id,
         )
 
-    # Content security scan
-    verdict = _scanner.scan(content, metadata)
+    # Content security scan (Stages 1-4). Pass the resolved trust + default scope so
+    # un-vouched content can reach Stage 4 when a classifier is configured.
+    verdict = await _scanner.scan_async(
+        content, metadata, trust_level=trust_level, scope=default_scope.value,
+    )
     if not verdict.allowed:
         await EventRepository.create_event(
             db, memory_id=None, project_id=project_id,
@@ -238,7 +255,7 @@ async def _create_typed_memory(
         error_pattern=error_pattern,
         integrity_hash=integrity_hash,
         content_flags=verdict.flags,
-        trust_level="internal",
+        trust_level=trust_level,
     )
 
     await EventRepository.create_event(
@@ -259,6 +276,7 @@ async def _create_typed_memory(
 async def create_episodic(
     body: EpisodicCreate,
     project_id: str = Depends(check_rate_limit),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Store an episodic memory (time-ordered interaction trace)."""
@@ -274,6 +292,10 @@ async def create_episodic(
         ttl_seconds=body.ttl_seconds,
         session_id=body.session_id,
         sequence_number=body.sequence_number,
+        trust_level=resolve_trust_level(
+            body.trust_level, auth.trust_level,
+            enable_trust_levels=_settings.enable_trust_levels,
+        ),
     )
 
 
@@ -281,6 +303,7 @@ async def create_episodic(
 async def create_semantic(
     body: SemanticCreate,
     project_id: str = Depends(check_rate_limit),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Store a semantic memory (fact, preference, knowledge)."""
@@ -295,6 +318,10 @@ async def create_semantic(
         metadata=body.metadata,
         ttl_seconds=body.ttl_seconds,
         entity_id=body.entity_id,
+        trust_level=resolve_trust_level(
+            body.trust_level, auth.trust_level,
+            enable_trust_levels=_settings.enable_trust_levels,
+        ),
     )
 
 
@@ -302,6 +329,7 @@ async def create_semantic(
 async def create_procedural(
     body: ProceduralCreate,
     project_id: str = Depends(check_rate_limit),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Store a procedural memory (workflow, strategy, reusable pattern)."""
@@ -321,6 +349,10 @@ async def create_procedural(
         namespace=body.namespace,
         metadata=metadata,
         ttl_seconds=body.ttl_seconds,
+        trust_level=resolve_trust_level(
+            body.trust_level, auth.trust_level,
+            enable_trust_levels=_settings.enable_trust_levels,
+        ),
     )
 
 
@@ -328,6 +360,7 @@ async def create_procedural(
 async def create_control(
     body: ControlCreate,
     project_id: str = Depends(check_rate_limit),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Store a control memory (meta-rule, error pattern, constraint)."""
@@ -347,6 +380,10 @@ async def create_control(
         ttl_seconds=body.ttl_seconds,
         source_trajectory_id=body.source_trajectory_id,
         error_pattern=body.error_pattern,
+        trust_level=resolve_trust_level(
+            body.trust_level, auth.trust_level,
+            enable_trust_levels=_settings.enable_trust_levels,
+        ),
     )
 
 

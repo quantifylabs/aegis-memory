@@ -12,6 +12,10 @@
 </p>
 
 <p align="center">
+  <strong>Find the unsafe memory writes in your agent (<code>aegis inspect</code>), then gate every write (<code>aegis_memory.guard</code>).</strong>
+</p>
+
+<p align="center">
   <a href="https://github.com/quantifylabs/aegis-memory/actions/workflows/ci.yml"><img src="https://github.com/quantifylabs/aegis-memory/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://pypi.org/project/aegis-memory/"><img src="https://img.shields.io/pypi/v/aegis-memory?label=PyPI&color=blue" alt="PyPI version"></a>
   <a href="https://pypi.org/project/aegis-memory/"><img src="https://img.shields.io/pypi/dm/aegis-memory?label=downloads&color=brightgreen" alt="PyPI downloads"></a>
