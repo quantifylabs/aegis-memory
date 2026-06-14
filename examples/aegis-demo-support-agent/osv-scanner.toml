@@ -1,0 +1,16 @@
+# OSV-Scanner ignore list for this demo-only example.
+#
+# OpenSSF Scorecard runs OSV-Scanner over every manifest in the repo and scores the LOWER BOUND of
+# each `>=` constraint, so `langgraph>=0.2.0` is evaluated at 0.2.0 and flags PYSEC-2026-83
+# (GHSA-g48c-2wqr-h844). The only published fix is langgraph 1.0.10rc1+ — a major-version jump from
+# the 0.2.x line this demo is written against, which would break the example's LangGraph API usage.
+#
+# These dependencies are demo-local only: LangGraph is NOT a dependency of the shipped `aegis-memory`
+# library (see this file's requirements.txt) and is never installed by `pip install aegis-memory`.
+# Accepted, reviewed decision. See ../../docs/security/vuln-triage.md.
+#
+# Docs: https://google.github.io/osv-scanner/configuration/
+
+[[IgnoredVulns]]
+id = "PYSEC-2026-83"
+reason = "langgraph; demo-only example dep, not shipped; only fix is a major-version jump (1.0.x) that breaks the 0.2-era demo. See docs/security/vuln-triage.md"
