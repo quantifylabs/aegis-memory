@@ -67,6 +67,14 @@ We audited the docs, repos, and changelogs of every major memory tool.[^comparis
 
 ## Guard every write (the firewall)
 
+<p align="center">
+  <img src=".github/mas_write_boundary_chokepoint.svg" alt="Every source and every agent writes through one Aegis guard before reaching shared memory; clean writes persist, poisoned writes are rejected and never stored." width="700"/>
+</p>
+
+<p align="center">
+  <em>One write boundary. Every source and agent funnels through a single Aegis guard — clean writes persist, poisoned writes are rejected and never stored.</em>
+</p>
+
 `Agent A's output is Agent B's instruction. Memory is the vector.` So gate the **write** — and
 the topology stops mattering. Across every multi-agent shape (cooperative blackboard, hierarchical
 handoff, swarm, competitive), the invariant is the same: something becomes durable memory and a
