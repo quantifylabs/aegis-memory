@@ -35,8 +35,31 @@ def run_memory_poisoning() -> dict:
             "allowed": verdict.allowed,
             "flags": list(verdict.flags),
             "reason": reason,
+            # Per-detection evidence (the concrete proof the HTML panel renders): the exact
+            # detector that fired, its confidence, and the literal text it matched.
+            "detections": _detections(verdict, MEMORY_POISONING_PAYLOAD),
         },
     }
+
+
+def _detections(verdict: Any, payload: str) -> list[dict]:
+    """The scanner's concrete hits as plain dicts: type, confidence, and the literal matched
+    text (sliced from the payload by the detector's char offsets; falls back to the pattern
+    label when a detector reports no span)."""
+    out: list[dict] = []
+    for det in verdict.detections:
+        if det.start is not None and det.end is not None:
+            matched = payload[det.start : det.end]
+        else:
+            matched = det.matched_pattern
+        out.append(
+            {
+                "type": det.detection_type.value,
+                "confidence": round(float(det.confidence), 2),
+                "matched": matched,
+            }
+        )
+    return out
 
 
 def _detection_types(verdict: Any) -> list[str]:

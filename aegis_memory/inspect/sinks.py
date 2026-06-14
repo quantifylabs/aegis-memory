@@ -58,6 +58,19 @@ _CUSTOM_NAME_HINTS = ("memory", "store", "save", "history", "context", "scratchp
 _CUSTOM_WRITE_METHODS = ("put", "add", "save", "write", "append", "set", "store", "remember", "insert")
 
 
+# ---- Shared, reusable across the package ------------------------------------------
+# ``guard.protect`` screens exactly the call shapes this catalog flags, so detection and
+# runtime enforcement key off the *same* method names and never drift.
+
+# ``put(namespace, key, value)`` style — the written value is the 3rd positional arg.
+KEYED_WRITE_METHODS: frozenset[str] = frozenset(_LANGGRAPH_WRITE_METHODS)
+
+# Every instance-method name that constitutes a durable memory write.
+WRITE_METHODS: frozenset[str] = frozenset(
+    _LANGGRAPH_WRITE_METHODS + _VECTORDB_METHODS + _CUSTOM_WRITE_METHODS
+)
+
+
 def _norm(s: str | None) -> str:
     return (s or "").lower()
 
@@ -95,4 +108,4 @@ def classify_call(*, attr: str | None, func: str | None, receiver: str | None) -
     return None
 
 
-__all__ = ["SinkMatch", "classify_call"]
+__all__ = ["KEYED_WRITE_METHODS", "WRITE_METHODS", "SinkMatch", "classify_call"]

@@ -15,6 +15,7 @@ from aegis_memory.cli.commands import (
     features,
     init,
     inspect,
+    install,
     memory,
     new,
     playbook,
@@ -75,6 +76,10 @@ app.command(name="explore", help="Interactive memory browser")(explore.explore)
 # Standalone, server-free static analysis commands.
 app.command(name="inspect", help="Inspect an agent project for unsafe memory flows")(inspect.inspect)
 app.command(name="replay", help="Replay a built-in attack against the project")(inspect.replay)
+
+# Distribution: install Aegis as a coding-assistant skill.
+app.command(name="install", help="Install the Aegis skill into a coding assistant")(install.install)
+app.command(name="uninstall", help="Remove the Aegis skill from a coding assistant")(install.uninstall)
 
 
 @app.command()

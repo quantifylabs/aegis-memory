@@ -11,12 +11,14 @@ from __future__ import annotations
 
 from .analyzer import analyze_project
 from .findings import Finding, derive_unsafe_memory_flows
-from .report import InspectionResult, run_inspection
+from .report import InspectionResult, emit_cases, ingest_verdicts, run_inspection
 
 __all__ = [
     "Finding",
     "InspectionResult",
     "analyze_project",
     "derive_unsafe_memory_flows",
+    "emit_cases",
+    "ingest_verdicts",
     "run_inspection",
 ]

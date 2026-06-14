@@ -15,13 +15,16 @@ from pathlib import Path
 
 import yaml
 
-from . import analyzer, htmlmap, policies, replay
+from . import analyzer, cases, htmlmap, policies, replay
 from . import score as scoring
 from .findings import Finding, derive_unsafe_memory_flows
 
 OUT_DIR_NAME = "aegis-out"
 
-# A fixed "before" baseline used for the headline transition in the visual/report.
+# Standalone/no-baseline fallback only: the "before" value shown in the headline transition
+# when the caller supplies no real prior-run score. A real before/after (e.g. the demo's
+# unscreened-vs-screened comparison) passes a computed ``before_score`` into ``run_inspection``,
+# which overrides this. Never let this constant stand in for a real measured run.
 BEFORE_SCORE = 86
 
 
@@ -32,6 +35,9 @@ class InspectionResult:
     run_id: str
     out_root: Path
     run_dir: Path
+    # Real "before" score from a prior/unscreened run, when the caller has one. None ->
+    # the report/visual fall back to the labeled BEFORE_SCORE baseline above.
+    before_score: int | None = None
 
 
 def run_inspection(
@@ -40,20 +46,65 @@ def run_inspection(
     out_dir: str | Path | None = None,
     framework: str | None = None,
     write: bool = True,
+    before_score: int | None = None,
 ) -> InspectionResult:
     project_root = Path(project_root).resolve()
     findings = analyzer.analyze_project(project_root, framework=framework)
-    score = scoring.compute_score(findings)
+    return _finalize(project_root, findings, out_dir=out_dir, write=write, before_score=before_score)
 
+
+def _finalize(
+    project_root: Path,
+    findings: list[Finding],
+    *,
+    out_dir: str | Path | None = None,
+    write: bool = True,
+    before_score: int | None = None,
+) -> InspectionResult:
+    """Score a finding set and (optionally) write all artifacts. Shared by the plain run,
+    emit-cases, and ingest-verdicts paths."""
+    score = scoring.compute_score(findings)
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
     run_id = f"{ts}Z-{secrets.token_hex(3)}"
     out_root = Path(out_dir).resolve() if out_dir else project_root / OUT_DIR_NAME
     run_dir = out_root / "runs" / ts
 
-    result = InspectionResult(findings, score, run_id, out_root, run_dir)
+    result = InspectionResult(findings, score, run_id, out_root, run_dir, before_score=before_score)
     if write:
         _write_artifacts(result, project_root.name)
     return result
+
+
+def emit_cases(
+    project_root: str | Path,
+    *,
+    out_dir: str | Path | None = None,
+    framework: str | None = None,
+) -> tuple[InspectionResult, dict]:
+    """Run the deterministic inspection and write ``cases/cases.json`` for the session model."""
+    project_root = Path(project_root).resolve()
+    findings = analyzer.analyze_project(project_root, framework=framework)
+    result = _finalize(project_root, findings, out_dir=out_dir, write=True)
+    case_list = cases.build_cases(findings, project_root)
+    doc = cases.write_cases(result.out_root, case_list)
+    return result, doc
+
+
+def ingest_verdicts(
+    project_root: str | Path,
+    *,
+    out_dir: str | Path | None = None,
+    framework: str | None = None,
+) -> InspectionResult:
+    """Fold session-model verdicts back into the findings and refresh the report."""
+    project_root = Path(project_root).resolve()
+    out_root = Path(out_dir).resolve() if out_dir else project_root / OUT_DIR_NAME
+    cases_doc = cases.load_cases(out_root)
+    verdicts_doc = cases.load_verdicts(out_root)
+    # Deterministic re-analysis reproduces the exact findings the cases were built from.
+    findings = analyzer.analyze_project(project_root, framework=framework)
+    cases.apply_verdicts(findings, cases_doc, verdicts_doc)
+    return _finalize(project_root, findings, out_dir=out_dir, write=True)
 
 
 def _write_artifacts(result: InspectionResult, project_name: str) -> None:
@@ -81,23 +132,34 @@ def _build_artifacts(result: InspectionResult, project_name: str) -> dict[str, s
         "flows": derive_unsafe_memory_flows(findings),
     }
     replay_result = replay.run_memory_poisoning()
-    after = result.score.get("score", 29)
+    # "after" is always the real computed score from this run. "before" is the caller's real
+    # prior-run score when supplied; otherwise the generic in-run *unscreened-exposure* baseline
+    # (the same heuristic with screening discounts ignored). When nothing is screened the two
+    # coincide -> we drop the arrow and show a single score (no "-0 after screening" noise).
+    after = result.score["score"]
+    if result.before_score is not None:
+        before: int | None = result.before_score
+    else:
+        raw = scoring.raw_score(findings)
+        before = raw if raw != after else None
     return {
         "findings.json": json.dumps(findings_json, indent=2) + "\n",
         "unsafe_memory_flows.json": json.dumps(flows_json, indent=2) + "\n",
         "suggested_policies.yml": yaml.safe_dump(
             policies.suggest_policies(findings), sort_keys=False
         ),
-        "INSPECTION_REPORT.md": _render_report(result, project_name, replay_result),
+        "INSPECTION_REPORT.md": _render_report(result, project_name, replay_result, before),
         "agent_memory_map.html": htmlmap.render_html(
-            findings, result.score, before_score=BEFORE_SCORE, after_score=after,
-            project_name=project_name,
+            findings, result.score, before_score=before, after_score=after,
+            project_name=project_name, replay_result=replay_result,
         ),
         "replay_attacks/memory_poisoning_demo.md": replay.render_markdown(replay_result),
     }
 
 
-def _render_report(result: InspectionResult, project_name: str, replay_result: dict) -> str:
+def _render_report(
+    result: InspectionResult, project_name: str, replay_result: dict, before_score: int | None
+) -> str:
     findings = result.findings
     score = result.score
     # Lead with concrete findings (file+line); score comes second.
@@ -122,7 +184,8 @@ def _render_report(result: InspectionResult, project_name: str, replay_result: d
     s = score["score"]
     c = score["counts"]
     lines.append("\n## Memory Risk Score (heuristic — UX sugar, not the benchmark)\n")
-    lines.append(f"**{BEFORE_SCORE} → {s} / 100**  ·  label: `heuristic`\n")
+    transition = f"{before_score} → {s}" if before_score is not None else f"{s}"
+    lines.append(f"**{transition} / 100**  ·  label: `heuristic` · lower is safer\n")
     lines.append(
         f"Critical {c['critical']} · High {c['high']} · Medium {c['medium']} · Low {c['low']}\n"
     )
@@ -154,4 +217,4 @@ def _finding_block(f: Finding) -> str:
     )
 
 
-__all__ = ["InspectionResult", "run_inspection"]
+__all__ = ["InspectionResult", "emit_cases", "ingest_verdicts", "run_inspection"]

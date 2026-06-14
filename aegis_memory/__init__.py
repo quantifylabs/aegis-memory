@@ -63,6 +63,9 @@ For more examples, see: https://github.com/quantifylabs/aegis-memory/tree/main/e
 
 __version__ = "2.4.0"
 
+# Runtime memory write-gate (the firewall `aegis inspect` points its findings at)
+from aegis_memory import guard
+
 # Core client (manual control)
 from aegis_memory.client import (
     AegisClient,
@@ -142,6 +145,8 @@ from aegis_memory.filters import (
 )
 
 __all__ = [
+    # Runtime write-gate
+    "guard",
     # Core
     "AegisClient",
     "AsyncAegisClient",

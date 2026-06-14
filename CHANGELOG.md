@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`aegis_memory.guard`** — a first-class, framework-agnostic runtime memory **write-gate**, exported from `aegis_memory/__init__.py` (`from aegis_memory import guard`). This makes the remediation `aegis inspect` recommends *real*: previously the suggested fix `from aegis_memory import guard; guard.write(...)` referenced a `guard` that did not exist (an `ImportError` waiting to happen).
+  - `guard.write(content, *, trust_level, scope, require_classifier=False, metadata=None, on_reject="raise") -> WriteVerdict` — screens one value and returns a `WriteVerdict` (`allowed`, `action`, possibly-redacted `content`, `detections`, `flags`, `reason`). Fail-closed by default (`on_reject="raise"` → `WriteBlocked`); `on_reject="return"` returns the verdict.
+  - `guard.protect(store, *, value_key="text", trust_level, scope, on_reject="drop") -> GuardedStore` — wraps **any** store and screens every catalogued write idiom (`put`/`aput`/`add`/`upsert`/`add_texts`/`add_documents`/`save`/… across LangGraph, vector DBs, and custom stores), sync or async. Generalizes the demo's single-method `AegisGuardedStore`. Drops + records rejected writes on `.blocked` (or raises).
+  - Adds **no detection logic of its own** — composes the one benchmark-validated `ContentSecurityScanner` (via `aegis_memory.inspect._scanner_bridge.get_scanner`, the same engine + reject-injection/secrets policy the server runs) with a small content-trust + scope policy.
+- `tests/test_guard.py` — 12 offline tests covering injection/secrets reject, benign allow, the scope policy matrix, the `protect` wrapper across `put`/`add`/`save` (drop + raise modes), and that the exact inspect fix-string now imports and runs.
+
+### Changed
+
+- `aegis_memory/inspect/analyzer.py`: the recommended-fix string findings carry now references the real shipped API — both `guard.protect(store, scope='agent-shared')` (wrap the sink) and `guard.write(content, trust_level='untrusted', scope='agent-shared')` (screen one value).
+- `aegis_memory/inspect/sinks.py`: extracted the per-framework write-method names into shared `WRITE_METHODS` / `KEYED_WRITE_METHODS` constants reused by `guard.protect`, so static detection and runtime enforcement key off the same idioms and never drift.
+- `examples/aegis-memory-firewall/_demo_common.py`: `AegisGuardedStore` is now a thin shim over `guard.GuardedStore` (the shipped API) instead of bespoke example code; the demo invariants are unchanged (`run_with_aegis.py` → `DENIED`, `run_without_aegis.py` → `APPROVED`).
+
+### Security
+
+- **Content trust ≠ agent trust.** `guard`'s `trust_level` labels the *content's provenance* (distinct from the server's `TrustPolicy`, which governs which *agent* may call the API). The gate always scans, blocks prompt-injection/secrets, flags PII, and additionally refuses to let `untrusted`/`unknown` content be written straight to `global` scope (every agent reads global; promotion there needs a privileged path). Screened-clean content is allowed into `agent-private` / `agent-shared` — screening *before* sharing is the point.
+- Untrusted content reaching `agent-shared` / `global` is now blockable at the write boundary in **local / in-process** mode (previously enforcement existed only at the server HTTP boundary).
+
 ## [2.4.0] - 2026-05-16
 
 ### Added

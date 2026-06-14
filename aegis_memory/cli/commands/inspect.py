@@ -19,18 +19,81 @@ def inspect(
     framework: str | None = typer.Option(
         None, "--framework", help="Force a sink adapter (e.g. langgraph). Auto-detect by default."
     ),
+    baseline: str | None = typer.Option(
+        None,
+        "--baseline",
+        help="Inspect this path too and use its risk score as the 'before' in the before->after map "
+        "(e.g. the unscreened version of the same agent).",
+    ),
     ci: bool = typer.Option(False, "--ci", help="CI mode: machine output + non-zero exit on breach"),
     max_risk: int = typer.Option(60, "--max-risk", help="CI risk-score threshold for a non-zero exit"),
+    emit_cases: bool = typer.Option(
+        False, "--emit-cases", help="Also write aegis-out/cases/cases.json for session-model classification"
+    ),
+    ingest_verdicts: bool = typer.Option(
+        False, "--ingest-verdicts", help="Fold aegis-out/cases/verdicts.json back into the report"
+    ),
 ):
     """Inspect an agent project for unsafe memory flows. Writes aegis-out/."""
-    from aegis_memory.inspect import run_inspection
+    from aegis_memory.inspect import (
+        emit_cases as _emit_cases,
+    )
+    from aegis_memory.inspect import (
+        ingest_verdicts as _ingest_verdicts,
+    )
+    from aegis_memory.inspect import (
+        run_inspection,
+    )
+    from aegis_memory.inspect.cases import StaleVerdictsError
 
     root = Path(path).resolve()
     if not root.is_dir():
         console.print(f"[red]Not a directory:[/red] {root}")
         raise typer.Exit(code=2)
 
-    result = run_inspection(root, framework=framework)
+    before_score: int | None = None
+    if baseline is not None:
+        baseline_root = Path(baseline).resolve()
+        if not baseline_root.is_dir():
+            console.print(f"[red]Not a directory:[/red] {baseline_root}")
+            raise typer.Exit(code=2)
+        before_score = run_inspection(baseline_root, framework=framework, write=False).score["score"]
+
+    if emit_cases and ingest_verdicts:
+        console.print("[red]Use --emit-cases and --ingest-verdicts in separate runs.[/red]")
+        raise typer.Exit(code=2)
+
+    if ingest_verdicts:
+        try:
+            result = _ingest_verdicts(root, framework=framework)
+        except FileNotFoundError:
+            console.print("[red]No cases/verdicts found.[/red] Run --emit-cases first, then write verdicts.json.")
+            raise typer.Exit(code=2) from None
+        except StaleVerdictsError as e:
+            console.print(f"[red]Stale verdicts:[/red] {e}")
+            raise typer.Exit(code=2) from None
+        score = result.score["score"]
+        counts = result.score["counts"]
+        console.print(
+            f"[green]Ingested verdicts[/green] → refreshed "
+            f"[cyan]{result.out_root / 'INSPECTION_REPORT.md'}[/cyan]  "
+            f"(score {score}/100; critical {counts['critical']}, high {counts['high']})"
+        )
+        return
+    if emit_cases:
+        result, doc = _emit_cases(root, framework=framework)
+        n_cases = len(doc["cases"])
+        console.print(
+            f"[bold]Aegis Inspect[/bold] — emitted {n_cases} case(s) → "
+            f"[cyan]{result.out_root / 'cases' / 'cases.json'}[/cyan] (run_id {doc['run_id']})"
+        )
+        console.print(
+            "Have the assistant classify each case as untrusted data, write "
+            "cases/verdicts.json, then run [bold]aegis inspect . --ingest-verdicts[/bold]."
+        )
+        return
+
+    result = run_inspection(root, framework=framework, before_score=before_score)
     score = result.score["score"]
     counts = result.score["counts"]
     n = len(result.findings)
