@@ -68,7 +68,7 @@ We audited the docs, repos, and changelogs of every major memory tool.[^comparis
 ## Guard every write (the firewall)
 
 <p align="center">
-  <img src="mas_write_boundary_chokepoint.svg" alt="Every source and every agent writes through one Aegis guard before reaching shared memory; clean writes persist, poisoned writes are rejected and never stored." width="700"/>
+  <img src=".github/mas_write_boundary_chokepoint.svg" alt="Every source and every agent writes through one Aegis guard before reaching shared memory; clean writes persist, poisoned writes are rejected and never stored." width="700"/>
 </p>
 
 <p align="center">
