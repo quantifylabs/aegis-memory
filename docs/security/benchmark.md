@@ -1,6 +1,6 @@
 # Aegis content-security pipeline — injection-detection benchmark
 
-_Generated from `benchmarks/injection/results/results.json` · run 2026-06-03T17:58:38.311805+00:00 · seed 42 · bootstrap n=1000_
+_Generated from `benchmarks/injection/results/results.json` · run 2026-06-15T15:14:06.517296+00:00 · seed 42 · bootstrap n=1000_
 
 ## Threat model
 
@@ -40,76 +40,76 @@ Recall and FPR shown with 95% CI. Full CIs for precision/F1 are in `results.json
 
 | System | Precision | Recall [95% CI] | F1 | FPR [95% CI] | Acc | Median latency |
 |---|--:|--:|--:|--:|--:|--:|
-| `no_protection` | — | 0.000 [0.00–0.00] | — | 0.000 [0.00–0.00] | 0.603 | 1 µs |
-| `naive_regex` | 1.000 | 0.144 [0.10–0.19] | 0.252 | 0.000 [0.00–0.00] | 0.660 | 9 µs |
-| `protectai_deberta` | 0.965 | 0.414 [0.36–0.48] | 0.580 | 0.010 [0.00–0.02] | 0.761 | 354.8 ms |
-| `llama_prompt_guard_2` | 0.984 | 0.228 [0.18–0.28] | 0.370 | 0.003 [0.00–0.01] | 0.692 | 407.9 ms |
-| `llm_guard` | 0.965 | 0.414 [0.36–0.48] | 0.580 | 0.010 [0.00–0.02] | 0.761 | 202.2 ms |
-| `llm_judge_openai` | 0.944 | 0.829 [0.78–0.87] | 0.883 | 0.033 [0.02–0.05] | 0.912 | 7 µs |
-| `llm_judge_anthropic` | 0.995 | 0.757 [0.70–0.81] | 0.860 | 0.003 [0.00–0.01] | 0.902 | 9 µs |
-| `aegis_stages_1_3` | 1.000 | 0.144 [0.10–0.19] | 0.252 | 0.000 [0.00–0.00] | 0.660 | 57 µs |
-| `aegis_stages_1_4_openai` | 1.000 | 0.669 [0.61–0.73] | 0.802 | 0.000 [0.00–0.00] | 0.869 | 66 µs |
-| `aegis_stages_1_4_anthropic` | 1.000 | 0.745 [0.69–0.79] | 0.854 | 0.000 [0.00–0.00] | 0.899 | 63 µs |
+| `no_protection` | — | 0.000 [0.00–0.00] | — | 0.000 [0.00–0.00] | 0.603 | 0 µs |
+| `naive_regex` | 1.000 | 0.144 [0.10–0.19] | 0.252 | 0.000 [0.00–0.00] | 0.660 | 6 µs |
+| `protectai_deberta` | 0.965 | 0.414 [0.36–0.48] | 0.580 | 0.010 [0.00–0.02] | 0.761 | 206.6 ms |
+| `llama_prompt_guard_2` | 0.984 | 0.228 [0.18–0.28] | 0.370 | 0.003 [0.00–0.01] | 0.692 | 215.5 ms |
+| `llm_guard` | 0.965 | 0.414 [0.36–0.48] | 0.580 | 0.010 [0.00–0.02] | 0.761 | 209.6 ms |
+| `llm_judge_openai` | 0.944 | 0.829 [0.78–0.87] | 0.883 | 0.033 [0.02–0.05] | 0.912 | 9 µs |
+| `llm_judge_anthropic` | 0.995 | 0.757 [0.70–0.81] | 0.860 | 0.003 [0.00–0.01] | 0.902 | 6 µs |
+| `aegis_stages_1_3` | 1.000 | 0.144 [0.10–0.19] | 0.252 | 0.000 [0.00–0.00] | 0.660 | 33 µs |
+| `aegis_stages_1_4_openai` | 1.000 | 0.677 [0.62–0.73] | 0.807 | 0.000 [0.00–0.00] | 0.872 | 1407.8 ms |
+| `aegis_stages_1_4_anthropic` | 1.000 | 0.741 [0.69–0.79] | 0.852 | 0.000 [0.00–0.00] | 0.897 | 1822.5 ms |
 
 ### `injecagent` (malicious_indirect, N=250)
 
 | System | Precision | Recall [95% CI] | F1 | FPR [95% CI] | Acc | Median latency |
 |---|--:|--:|--:|--:|--:|--:|
 | `no_protection` | — | 0.000 [0.00–0.00] | — | — | 0.000 | 0 µs |
-| `naive_regex` | — | 0.000 [0.00–0.00] | — | — | 0.000 | 39 µs |
-| `protectai_deberta` | 1.000 | 0.660 [0.60–0.72] | 0.795 | — | 0.660 | 576.0 ms |
-| `llama_prompt_guard_2` | — | 0.000 [0.00–0.00] | — | — | 0.000 | 703.3 ms |
-| `llm_guard` | 1.000 | 0.656 [0.60–0.72] | 0.792 | — | 0.656 | 326.8 ms |
-| `llm_judge_openai` | 1.000 | 0.672 [0.62–0.73] | 0.804 | — | 0.672 | 6 µs |
+| `naive_regex` | — | 0.000 [0.00–0.00] | — | — | 0.000 | 27 µs |
+| `protectai_deberta` | 1.000 | 0.660 [0.60–0.72] | 0.795 | — | 0.660 | 338.3 ms |
+| `llama_prompt_guard_2` | — | 0.000 [0.00–0.00] | — | — | 0.000 | 300.7 ms |
+| `llm_guard` | 1.000 | 0.656 [0.60–0.72] | 0.792 | — | 0.656 | 323.2 ms |
+| `llm_judge_openai` | 1.000 | 0.672 [0.62–0.73] | 0.804 | — | 0.672 | 7 µs |
 | `llm_judge_anthropic` | 1.000 | 0.932 [0.90–0.96] | 0.965 | — | 0.932 | 7 µs |
-| `aegis_stages_1_3` | 1.000 | 0.620 [0.56–0.68] | 0.765 | — | 0.620 | 177 µs |
-| `aegis_stages_1_4_openai` | 1.000 | 0.748 [0.69–0.80] | 0.856 | — | 0.748 | 132 µs |
-| `aegis_stages_1_4_anthropic` | 1.000 | 0.828 [0.78–0.87] | 0.906 | — | 0.828 | 166 µs |
+| `aegis_stages_1_3` | 1.000 | 0.620 [0.56–0.68] | 0.765 | — | 0.620 | 119 µs |
+| `aegis_stages_1_4_openai` | 1.000 | 0.744 [0.69–0.80] | 0.853 | — | 0.744 | 1655.9 ms |
+| `aegis_stages_1_4_anthropic` | 1.000 | 0.832 [0.78–0.88] | 0.908 | — | 0.832 | 2235.1 ms |
 
 ### `benign_public` (benign, N=750)
 
 | System | Precision | Recall [95% CI] | F1 | FPR [95% CI] | Acc | Median latency |
 |---|--:|--:|--:|--:|--:|--:|
 | `no_protection` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 0 µs |
-| `naive_regex` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 23 µs |
-| `protectai_deberta` | 0.000 | — | — | 0.039 [0.03–0.05] | 0.961 | 396.2 ms |
-| `llama_prompt_guard_2` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 326.2 ms |
-| `llm_guard` | 0.000 | — | — | 0.039 [0.03–0.05] | 0.961 | 223.2 ms |
+| `naive_regex` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 16 µs |
+| `protectai_deberta` | 0.000 | — | — | 0.039 [0.03–0.05] | 0.961 | 240.5 ms |
+| `llama_prompt_guard_2` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 244.2 ms |
+| `llm_guard` | 0.000 | — | — | 0.039 [0.03–0.05] | 0.961 | 237.0 ms |
 | `llm_judge_openai` | 0.000 | — | — | 0.004 [0.00–0.01] | 0.996 | 6 µs |
-| `llm_judge_anthropic` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 8 µs |
-| `aegis_stages_1_3` | 0.000 | — | — | 0.001 [0.00–0.00] | 0.999 | 82 µs |
-| `aegis_stages_1_4_openai` | 0.000 | — | — | 0.001 [0.00–0.00] | 0.999 | 79 µs |
-| `aegis_stages_1_4_anthropic` | 0.000 | — | — | 0.001 [0.00–0.00] | 0.999 | 93 µs |
+| `llm_judge_anthropic` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 6 µs |
+| `aegis_stages_1_3` | 0.000 | — | — | 0.001 [0.00–0.00] | 0.999 | 67 µs |
+| `aegis_stages_1_4_openai` | 0.000 | — | — | 0.001 [0.00–0.00] | 0.999 | 1355.5 ms |
+| `aegis_stages_1_4_anthropic` | 0.000 | — | — | 0.001 [0.00–0.00] | 0.999 | 1646.9 ms |
 
 ### `benign_synth` (benign, N=750)
 
 | System | Precision | Recall [95% CI] | F1 | FPR [95% CI] | Acc | Median latency |
 |---|--:|--:|--:|--:|--:|--:|
 | `no_protection` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 0 µs |
-| `naive_regex` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 10 µs |
-| `protectai_deberta` | 0.000 | — | — | 0.040 [0.03–0.05] | 0.960 | 333.6 ms |
-| `llama_prompt_guard_2` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 181.4 ms |
-| `llm_guard` | 0.000 | — | — | 0.040 [0.03–0.05] | 0.960 | 187.5 ms |
-| `llm_judge_openai` | 0.000 | — | — | 0.001 [0.00–0.00] | 0.999 | 7 µs |
-| `llm_judge_anthropic` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 7 µs |
-| `aegis_stages_1_3` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 36 µs |
-| `aegis_stages_1_4_openai` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 64 µs |
-| `aegis_stages_1_4_anthropic` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 58 µs |
+| `naive_regex` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 7 µs |
+| `protectai_deberta` | 0.000 | — | — | 0.040 [0.03–0.05] | 0.960 | 173.9 ms |
+| `llama_prompt_guard_2` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 181.8 ms |
+| `llm_guard` | 0.000 | — | — | 0.040 [0.03–0.05] | 0.960 | 208.7 ms |
+| `llm_judge_openai` | 0.000 | — | — | 0.001 [0.00–0.00] | 0.999 | 6 µs |
+| `llm_judge_anthropic` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 5 µs |
+| `aegis_stages_1_3` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 34 µs |
+| `aegis_stages_1_4_openai` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 1471.3 ms |
+| `aegis_stages_1_4_anthropic` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 1682.0 ms |
 
 ### `notinject` (benign, N=339)
 
 | System | Precision | Recall [95% CI] | F1 | FPR [95% CI] | Acc | Median latency |
 |---|--:|--:|--:|--:|--:|--:|
 | `no_protection` | — | — | — | 0.000 [0.00–0.00] | 1.000 | 0 µs |
-| `naive_regex` | 0.000 | — | — | 0.015 [0.00–0.03] | 0.985 | 12 µs |
-| `protectai_deberta` | 0.000 | — | — | 0.428 [0.37–0.48] | 0.572 | 355.9 ms |
-| `llama_prompt_guard_2` | 0.000 | — | — | 0.065 [0.04–0.09] | 0.935 | 188.5 ms |
-| `llm_guard` | 0.000 | — | — | 0.428 [0.37–0.48] | 0.572 | 200.0 ms |
-| `llm_judge_openai` | 0.000 | — | — | 0.041 [0.02–0.06] | 0.959 | 661.7 ms |
-| `llm_judge_anthropic` | 0.000 | — | — | 0.036 [0.02–0.06] | 0.964 | 3582.4 ms |
+| `naive_regex` | 0.000 | — | — | 0.015 [0.00–0.03] | 0.985 | 9 µs |
+| `protectai_deberta` | 0.000 | — | — | 0.428 [0.37–0.48] | 0.572 | 185.2 ms |
+| `llama_prompt_guard_2` | 0.000 | — | — | 0.065 [0.04–0.09] | 0.935 | 201.1 ms |
+| `llm_guard` | 0.000 | — | — | 0.428 [0.37–0.48] | 0.572 | 203.9 ms |
+| `llm_judge_openai` | 0.000 | — | — | 0.041 [0.02–0.06] | 0.959 | 6 µs |
+| `llm_judge_anthropic` | 0.000 | — | — | 0.035 [0.02–0.06] | 0.965 | 6 µs |
 | `aegis_stages_1_3` | 0.000 | — | — | 0.015 [0.00–0.03] | 0.985 | 40 µs |
-| `aegis_stages_1_4_openai` | 0.000 | — | — | 0.038 [0.02–0.06] | 0.962 | 1404.0 ms |
-| `aegis_stages_1_4_anthropic` | 0.000 | — | — | 0.032 [0.01–0.05] | 0.968 | 2869.8 ms |
+| `aegis_stages_1_4_openai` | 0.000 | — | — | 0.035 [0.02–0.06] | 0.965 | 1367.1 ms |
+| `aegis_stages_1_4_anthropic` | 0.000 | — | — | 0.035 [0.02–0.06] | 0.965 | 1824.9 ms |
 
 ## Over-defense / trigger-word robustness (NotInject)
 
@@ -123,10 +123,10 @@ Recall and FPR shown with 95% CI. Full CIs for precision/F1 are in `results.json
 | `llama_prompt_guard_2` | 0.065 [0.04–0.09] | 22 / 339 |
 | `llm_guard` | 0.428 [0.37–0.48] | 145 / 339 |
 | `llm_judge_openai` | 0.041 [0.02–0.06] | 14 / 339 |
-| `llm_judge_anthropic` | 0.036 [0.02–0.06] | 12 / 338 |
+| `llm_judge_anthropic` | 0.035 [0.02–0.06] | 12 / 339 |
 | `aegis_stages_1_3` | 0.015 [0.00–0.03] | 5 / 339 |
-| `aegis_stages_1_4_openai` | 0.038 [0.02–0.06] | 13 / 339 |
-| `aegis_stages_1_4_anthropic` | 0.032 [0.01–0.05] | 11 / 339 |
+| `aegis_stages_1_4_openai` | 0.035 [0.02–0.06] | 12 / 339 |
+| `aegis_stages_1_4_anthropic` | 0.035 [0.02–0.06] | 12 / 339 |
 
 **Reading this honestly.** A low NotInject FPR for Aegis's deterministic stages alongside high FPR for ML/LLM detectors would be a strong, citable differentiator (trigger-word robustness without a learned classifier's over-defense). **If Aegis also over-flags NotInject, that is reported here plainly** — an honest over-defense number is the entire point of this corpus. Compare each system's NotInject FPR to its `benign_public` / `benign_synth` FPR above: a gap means trigger words specifically are driving false positives. Note that **Llama Prompt Guard 2** is trained to detect injection/jailbreak text at the LLM input, so it is a fair baseline on direct injection (`deepset`) but is expected to be the most exposed to trigger-word over-defense here; it may also underperform on indirect injection (`injecagent`), which is outside its training scope.
 
@@ -204,9 +204,9 @@ _Items flagged per stage (any flag): S1=0, S2=0, S3=5, S4=0._
 | Stage 1 | 0.000 | 0.000 | — | — |
 | + Stage 2 | 0.000 | 0.000 | — | — |
 | + Stage 3 | 0.144 | 0.000 | 1.000 | 0.252 |
-| + Stage 4 | 0.669 | 0.000 | 1.000 | 0.802 |
+| + Stage 4 | 0.677 | 0.000 | 1.000 | 0.807 |
 
-_Items flagged per stage (any flag): S1=0, S2=0, S3=38, S4=168._
+_Items flagged per stage (any flag): S1=0, S2=0, S3=38, S4=170._
 
 **`injecagent`** (malicious_indirect, N=250)
 
@@ -215,9 +215,9 @@ _Items flagged per stage (any flag): S1=0, S2=0, S3=38, S4=168._
 | Stage 1 | 0.000 | — | — | — |
 | + Stage 2 | 0.620 | — | 1.000 | 0.765 |
 | + Stage 3 | 0.620 | — | 1.000 | 0.765 |
-| + Stage 4 | 0.748 | — | 1.000 | 0.856 |
+| + Stage 4 | 0.744 | — | 1.000 | 0.853 |
 
-_Items flagged per stage (any flag): S1=0, S2=155, S3=0, S4=145._
+_Items flagged per stage (any flag): S1=0, S2=155, S3=0, S4=143._
 
 **`benign_public`** (benign, N=750)
 
@@ -248,9 +248,9 @@ _Items flagged per stage (any flag): S1=0, S2=0, S3=0, S4=0._
 | Stage 1 | — | 0.000 | — | — |
 | + Stage 2 | — | 0.000 | — | — |
 | + Stage 3 | — | 0.015 | 0.000 | — |
-| + Stage 4 | — | 0.038 | 0.000 | — |
+| + Stage 4 | — | 0.035 | 0.000 | — |
 
-_Items flagged per stage (any flag): S1=0, S2=0, S3=5, S4=9._
+_Items flagged per stage (any flag): S1=0, S2=0, S3=5, S4=8._
 
 ### `aegis_stages_1_4_anthropic`
 
@@ -261,9 +261,9 @@ _Items flagged per stage (any flag): S1=0, S2=0, S3=5, S4=9._
 | Stage 1 | 0.000 | 0.000 | — | — |
 | + Stage 2 | 0.000 | 0.000 | — | — |
 | + Stage 3 | 0.144 | 0.000 | 1.000 | 0.252 |
-| + Stage 4 | 0.745 | 0.000 | 1.000 | 0.854 |
+| + Stage 4 | 0.741 | 0.000 | 1.000 | 0.852 |
 
-_Items flagged per stage (any flag): S1=0, S2=0, S3=38, S4=193._
+_Items flagged per stage (any flag): S1=0, S2=0, S3=38, S4=192._
 
 **`injecagent`** (malicious_indirect, N=250)
 
@@ -272,7 +272,7 @@ _Items flagged per stage (any flag): S1=0, S2=0, S3=38, S4=193._
 | Stage 1 | 0.000 | — | — | — |
 | + Stage 2 | 0.620 | — | 1.000 | 0.765 |
 | + Stage 3 | 0.620 | — | 1.000 | 0.765 |
-| + Stage 4 | 0.828 | — | 1.000 | 0.906 |
+| + Stage 4 | 0.832 | — | 1.000 | 0.908 |
 
 _Items flagged per stage (any flag): S1=0, S2=155, S3=0, S4=183._
 
@@ -305,9 +305,9 @@ _Items flagged per stage (any flag): S1=0, S2=0, S3=0, S4=0._
 | Stage 1 | — | 0.000 | — | — |
 | + Stage 2 | — | 0.000 | — | — |
 | + Stage 3 | — | 0.015 | 0.000 | — |
-| + Stage 4 | — | 0.032 | 0.000 | — |
+| + Stage 4 | — | 0.035 | 0.000 | — |
 
-_Items flagged per stage (any flag): S1=0, S2=0, S3=5, S4=8._
+_Items flagged per stage (any flag): S1=0, S2=0, S3=5, S4=9._
 
 ## Latency comparison
 
@@ -315,16 +315,16 @@ Median per-item latency (lower is better). Deterministic stages 1–3 are orders
 
 | System | `deepset` | `injecagent` | `benign_public` | `benign_synth` | `notinject` |
 |---|--:|--:|--:|--:|--:|
-| `no_protection` | 1 µs | 0 µs | 0 µs | 0 µs | 0 µs |
-| `naive_regex` | 9 µs | 39 µs | 23 µs | 10 µs | 12 µs |
-| `protectai_deberta` | 354.8 ms | 576.0 ms | 396.2 ms | 333.6 ms | 355.9 ms |
-| `llama_prompt_guard_2` | 407.9 ms | 703.3 ms | 326.2 ms | 181.4 ms | 188.5 ms |
-| `llm_guard` | 202.2 ms | 326.8 ms | 223.2 ms | 187.5 ms | 200.0 ms |
-| `llm_judge_openai` | 7 µs | 6 µs | 6 µs | 7 µs | 661.7 ms |
-| `llm_judge_anthropic` | 9 µs | 7 µs | 8 µs | 7 µs | 3582.4 ms |
-| `aegis_stages_1_3` | 57 µs | 177 µs | 82 µs | 36 µs | 40 µs |
-| `aegis_stages_1_4_openai` | 66 µs | 132 µs | 79 µs | 64 µs | 1404.0 ms |
-| `aegis_stages_1_4_anthropic` | 63 µs | 166 µs | 93 µs | 58 µs | 2869.8 ms |
+| `no_protection` | 0 µs | 0 µs | 0 µs | 0 µs | 0 µs |
+| `naive_regex` | 6 µs | 27 µs | 16 µs | 7 µs | 9 µs |
+| `protectai_deberta` | 206.6 ms | 338.3 ms | 240.5 ms | 173.9 ms | 185.2 ms |
+| `llama_prompt_guard_2` | 215.5 ms | 300.7 ms | 244.2 ms | 181.8 ms | 201.1 ms |
+| `llm_guard` | 209.6 ms | 323.2 ms | 237.0 ms | 208.7 ms | 203.9 ms |
+| `llm_judge_openai` | 9 µs | 7 µs | 6 µs | 6 µs | 6 µs |
+| `llm_judge_anthropic` | 6 µs | 7 µs | 6 µs | 5 µs | 6 µs |
+| `aegis_stages_1_3` | 33 µs | 119 µs | 67 µs | 34 µs | 40 µs |
+| `aegis_stages_1_4_openai` | 1407.8 ms | 1655.9 ms | 1355.5 ms | 1471.3 ms | 1367.1 ms |
+| `aegis_stages_1_4_anthropic` | 1822.5 ms | 2235.1 ms | 1646.9 ms | 1682.0 ms | 1824.9 ms |
 
 > Note: API-system latencies are measured on live calls during the first run; cached re-runs are not representative of live latency.
 
@@ -333,8 +333,8 @@ Median per-item latency (lower is better). Deterministic stages 1–3 are orders
 Full dump (categorized false negatives + sampled false positives) in [`benchmarks/injection/results/error_analysis.md`](../../benchmarks/injection/results/error_analysis.md).
 
 - `aegis_stages_1_3`: 320 missed injections (FN) across malicious sets; 6 benign items over-flagged (FP) across benign sets.
-- `aegis_stages_1_4_openai`: 150 missed injections (FN) across malicious sets; 14 benign items over-flagged (FP) across benign sets.
-- `aegis_stages_1_4_anthropic`: 110 missed injections (FN) across malicious sets; 12 benign items over-flagged (FP) across benign sets.
+- `aegis_stages_1_4_openai`: 149 missed injections (FN) across malicious sets; 13 benign items over-flagged (FP) across benign sets.
+- `aegis_stages_1_4_anthropic`: 110 missed injections (FN) across malicious sets; 13 benign items over-flagged (FP) across benign sets.
 
 ## Limitations
 
