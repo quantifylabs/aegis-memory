@@ -1,0 +1,15 @@
+{
+  "name": "aegis-marketplace",
+  "description": "Aegis — local, keyless security tooling for agent memory. Detect OWASP ASI06 memory & context poisoning.",
+  "owner": {
+    "name": "Quantify Labs",
+    "url": "https://github.com/quantifylabs"
+  },
+  "plugins": [
+    {
+      "name": "aegis",
+      "source": "./plugins/aegis",
+      "description": "Secure your agent's memory — detect OWASP ASI06 memory & context poisoning. Local, keyless inspect + an always-on write-path guard."
+    }
+  ]
+}
