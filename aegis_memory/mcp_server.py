@@ -380,31 +380,35 @@ def create_mcp_server() -> FastMCP:
         except Exception as exc:  # noqa: BLE001 - never crash the MCP session
             raise MCPError(f"replay failed: {exc}") from exc
 
+    # Resources are addressed purely by URI: a static resource takes no parameters,
+    # and a resource template's URI placeholders must match the function parameters by
+    # name. (FastMCP rejects a function parameter that has no matching placeholder.)
     @mcp.resource("aegis://memories/recent")
-    def recent_memories(query: RecentMemoriesInput) -> dict[str, Any]:
+    def recent_memories() -> dict[str, Any]:
         """Read-only resource: recent memories from export snapshot. Requires hosted mode."""
         if _resolve_mode() == "local":
             return _hosted_required()
         with _client() as client:
             try:
-                return run_recent_memories_resource(client, query)
+                return run_recent_memories_resource(client, RecentMemoriesInput())
             except httpx.HTTPStatusError as exc:
                 raise _handle_http_error(exc) from exc
 
-    @mcp.resource("aegis://session/state")
-    def session_state(query: SessionStateInput) -> dict[str, Any]:
+    @mcp.resource("aegis://session/state/{session_id}")
+    def session_state(session_id: str) -> dict[str, Any]:
         """Read-only resource: active session progress view. Requires hosted mode."""
         if _resolve_mode() == "local":
             return _hosted_required()
         with _client() as client:
             try:
-                return run_session_state_resource(client, query)
+                return run_session_state_resource(client, SessionStateInput(session_id=session_id))
             except httpx.HTTPStatusError as exc:
                 raise _handle_http_error(exc) from exc
 
     @mcp.resource("aegis://features/status")
-    def feature_status(query: FeatureStatusInput) -> dict[str, Any]:
+    def feature_status() -> dict[str, Any]:
         """Read-only resource: feature status snapshot. Surfaces the active AEGIS_MODE."""
+        query = FeatureStatusInput()
         if _resolve_mode() == "local":
             return run_feature_status_resource(None, query, mode="local")
         with _client() as client:

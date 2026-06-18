@@ -23,6 +23,7 @@ from aegis_memory.mcp_server import (
     _LOCAL_DEGRADE_MSG,
     _hosted_required,
     _resolve_mode,
+    create_mcp_server,
     run_feature_status_resource,
     run_inspect_project,
     run_replay_attack,
@@ -49,6 +50,35 @@ class TestModeResolution:
         assert payload["mode"] == "local"
         assert payload["error"] == "hosted_required"
         assert payload["message"] == _LOCAL_DEGRADE_MSG
+
+
+class TestServerConstruction:
+    """The server must actually *build* keyless — not just the run_* helpers.
+
+    Regression guard for the FastMCP resource-signature bug (mcp >= 1.26 rejects a
+    resource whose function parameter has no matching URI placeholder).
+    """
+
+    def test_create_mcp_server_builds_keyless(self, no_key):
+        server = create_mcp_server()
+        assert server.name == "aegis-memory"
+
+    def test_create_mcp_server_builds_hosted(self, monkeypatch):
+        monkeypatch.setenv("AEGIS_API_KEY", "sk-test")
+        server = create_mcp_server()
+        assert server.name == "aegis-memory"
+
+    def test_tools_and_resources_registered(self, no_key):
+        import asyncio
+
+        server = create_mcp_server()
+        tools = {t.name for t in asyncio.run(server.list_tools())}
+        assert {"inspect_project", "replay_attack"} <= tools
+        templates = {str(r.uriTemplate) for r in asyncio.run(server.list_resource_templates())}
+        statics = {str(r.uri) for r in asyncio.run(server.list_resources())}
+        # session/state needs a value, so it's a template; the all-optional ones are static.
+        assert "aegis://session/state/{session_id}" in templates
+        assert {"aegis://memories/recent", "aegis://features/status"} <= statics
 
 
 class TestKeylessTools:
