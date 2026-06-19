@@ -132,6 +132,20 @@ def _resolve_mode() -> str:
     return "hosted" if os.getenv("AEGIS_API_KEY") else "local"
 
 
+def _resolve_project_path(path: str) -> str:
+    """Resolve a relative inspect path against the user's Claude project.
+
+    Claude Code exports ``CLAUDE_PROJECT_DIR`` so stdio/plugin MCP servers can resolve
+    project-relative paths without depending on cwd — a plugin server may be launched from
+    a plugin/cache directory rather than the project root. Falls back to cwd for standalone
+    CLI use. Absolute paths are returned unchanged.
+    """
+    if os.path.isabs(path):
+        return path
+    base = os.getenv("CLAUDE_PROJECT_DIR") or os.getcwd()
+    return os.path.join(base, path)
+
+
 def _hosted_required() -> dict[str, Any]:
     """Non-fatal degrade payload for memory-runtime tools when no API key is set."""
     return {"mode": "local", "error": "hosted_required", "message": _LOCAL_DEGRADE_MSG}
@@ -250,7 +264,7 @@ def run_inspect_project(input_data: InspectProjectInput) -> dict[str, Any]:
     from aegis_memory.inspect.report import run_inspection
 
     result = run_inspection(
-        input_data.path,
+        _resolve_project_path(input_data.path),
         framework=input_data.framework,
         write=input_data.write,
     )

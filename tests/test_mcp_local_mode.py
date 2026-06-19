@@ -8,6 +8,7 @@ Mirrors ``test_mcp_server.py``: exercises the module-level ``run_*`` helpers dir
 (version-robust across FastMCP releases) rather than the decorated tools.
 """
 
+import os
 from pathlib import Path
 
 import pytest
@@ -15,14 +16,15 @@ import pytest
 pytest.importorskip("mcp", reason="mcp package not installed")
 
 from aegis_memory.mcp_server import (
+    _LOCAL_DEGRADE_MSG,
     AddMemoryInput,
     FeatureStatusInput,
     InspectProjectInput,
     QueryMemoryInput,
     ReplayAttackInput,
-    _LOCAL_DEGRADE_MSG,
     _hosted_required,
     _resolve_mode,
+    _resolve_project_path,
     create_mcp_server,
     run_feature_status_resource,
     run_inspect_project,
@@ -123,6 +125,50 @@ class TestFeatureStatusMode:
         assert out["message"] == _LOCAL_DEGRADE_MSG
         assert out["summary"] == {"total": 0, "passing": 0, "failing": 0, "in_progress": 0}
         assert out["features"] == []
+
+
+class TestPathResolution:
+    """inspect paths must resolve against the user's Claude project, not the server cwd.
+
+    Claude Code launches plugin/stdio MCP servers from a plugin/cache dir, so a relative
+    path (incl. the default '.') must be anchored on CLAUDE_PROJECT_DIR when set — otherwise
+    the default tool call silently scans the wrong tree.
+    """
+
+    def test_relative_path_resolves_against_claude_project_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+        assert _resolve_project_path(".") == os.path.join(str(tmp_path), ".")
+        assert _resolve_project_path("sub/dir") == os.path.join(str(tmp_path), "sub/dir")
+
+    def test_absolute_path_is_unchanged_even_with_project_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+        abs_path = str(tmp_path / "elsewhere")
+        assert _resolve_project_path(abs_path) == abs_path
+
+    def test_falls_back_to_cwd_when_project_dir_unset(self, monkeypatch):
+        monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+        assert _resolve_project_path(".") == os.path.join(os.getcwd(), ".")
+
+    def test_inspect_project_scans_claude_project_dir(self, monkeypatch, tmp_path):
+        """End-to-end: the default '.' must reach run_inspection rooted at CLAUDE_PROJECT_DIR."""
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+        captured = {}
+
+        class _StubResult:
+            findings: list = []
+            score = {"score": 0}
+            run_dir = None
+
+        def _fake_run_inspection(project_root, *, framework=None, write=False, **_):
+            captured["project_root"] = project_root
+            return _StubResult()
+
+        monkeypatch.setattr(
+            "aegis_memory.inspect.report.run_inspection", _fake_run_inspection
+        )
+        out = run_inspect_project(InspectProjectInput(path="."))
+        assert captured["project_root"] == os.path.join(str(tmp_path), ".")
+        assert out["finding_count"] == 0  # stub returned no findings -> reached our fake
 
 
 class TestInputSchemas:

@@ -3,9 +3,12 @@
 #
 # Reads the hook payload (JSON on stdin), finds the edited file, and runs the local,
 # keyless Aegis analyzer over it to spot unsafe agent-memory write sinks / untrusted-
-# content storage (OWASP ASI06). It only *warns* to stderr — it never blocks an edit
-# and always exits 0. If Python or the aegis-memory package isn't importable, it is a
-# silent no-op so it can never disrupt a session.
+# content storage (OWASP ASI06). On a risky write it emits a non-blocking warning as
+# documented PostToolUse hook JSON on *stdout* (hookSpecificOutput.additionalContext,
+# which Claude Code only parses on exit 0) — it never blocks an edit and always exits 0.
+# (stderr is only surfaced to Claude on exit 2, so it would be silent here.) If Python or
+# the aegis-memory package isn't importable, it is a silent no-op so it can never disrupt
+# a session.
 
 # Resolve a Python interpreter; no-op if none is available.
 PY="$(command -v python3 || command -v python || true)"
@@ -16,8 +19,9 @@ PY="$(command -v python3 || command -v python || true)"
 TMP="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/aegis_hook_$$.json")"
 cat > "$TMP" 2>/dev/null || { rm -f "$TMP"; exit 0; }
 
-# Scan the edited file and print a concise one-line warning to stderr. The Python is
-# fully defensive: any failure leaves no output and exits 0.
+# Scan the edited file and, on a risky write, print documented PostToolUse hook JSON to
+# stdout (so Claude actually sees it on exit 0). The Python is fully defensive: any failure
+# leaves no output and exits 0.
 "$PY" - "$TMP" <<'PY'
 import json
 import os
@@ -61,10 +65,25 @@ def main() -> None:
         return
 
     top = risky[0]
-    sys.stderr.write(
+    message = (
         f"[Aegis] {len(risky)} unsafe memory-write finding(s) in {target} "
         f"(e.g. [{top.severity}] {top.title}). "
-        f"Run /aegis:inspect for the full memory map + risk score.\n"
+        f"Run /aegis:inspect for the full memory map + risk score."
+    )
+    # Emit documented non-blocking PostToolUse hook output on stdout. Claude Code only
+    # parses stdout JSON on exit 0 (stderr is surfaced to Claude only on exit 2), so this
+    # is the supported "warn, don't block" path. additionalContext -> Claude; the optional
+    # systemMessage surfaces the same warning to the user.
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": message,
+                },
+                "systemMessage": message,
+            }
+        )
     )
 
 
