@@ -163,3 +163,27 @@ def test_guard_is_silent_no_op_on_non_python_file(tmp_path):
     proc = _run_guard({"tool_input": {"file_path": str(benign)}})
     assert proc.returncode == 0
     assert proc.stdout.strip() == ""  # no finding -> no stdout
+
+
+def test_guard_does_not_misattribute_same_basename_in_subdir(tmp_path):
+    """A same-named file in a subdir must not get its finding pinned on the edited file.
+
+    Regression for the basename-collision P3: analyze_project scans `parent` recursively,
+    so editing a safe top-level memory.py must stay silent even if sub/memory.py is unsafe.
+    """
+    risky_src = RISKY_FIXTURE.read_text(encoding="utf-8")
+    safe = tmp_path / "memory.py"
+    safe.write_text("SAFE = 1\n", encoding="utf-8")
+    subdir = tmp_path / "sub"
+    subdir.mkdir()
+    (subdir / "memory.py").write_text(risky_src, encoding="utf-8")
+
+    # Editing the safe top-level file: the subdir's unsafe finding must NOT be attributed.
+    proc_safe = _run_guard({"tool_input": {"file_path": str(safe)}})
+    assert proc_safe.returncode == 0
+    assert proc_safe.stdout.strip() == "", "must not misattribute sub/memory.py to ./memory.py"
+
+    # Editing the actually-unsafe subdir file: it must still warn.
+    proc_risky = _run_guard({"tool_input": {"file_path": str(subdir / "memory.py")}})
+    assert proc_risky.returncode == 0
+    assert "[Aegis]" in json.loads(proc_risky.stdout)["hookSpecificOutput"]["additionalContext"]

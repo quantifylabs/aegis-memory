@@ -55,12 +55,21 @@ def main() -> None:
     except Exception:
         return
 
-    risky = [
-        f
-        for f in findings
-        if os.path.basename(getattr(f.sink, "file", "")) == target
-        and f.severity in ("critical", "high")
-    ]
+    # Match on the full path of the edited file, not just its basename: analyze_project
+    # scans `parent` recursively and reports findings by path relative to that root, so a
+    # same-named file in a subdir (e.g. sub/memory.py) must not be attributed to the edited
+    # memory.py. Resolve each finding's path against `parent` and compare to the edited file.
+    edited = os.path.normcase(os.path.realpath(path))
+    risky = []
+    for f in findings:
+        if f.severity not in ("critical", "high"):
+            continue
+        sink_file = getattr(f.sink, "file", "")
+        if not sink_file:
+            continue
+        finding_path = os.path.normcase(os.path.realpath(os.path.join(parent, str(sink_file))))
+        if finding_path == edited:
+            risky.append(f)
     if not risky:
         return
 
