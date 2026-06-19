@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "aegis": {
+      "command": "python",
+      "args": ["-m", "aegis_memory.mcp_server"],
+      "env": {}
+    }
+  }
+}

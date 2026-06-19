@@ -103,6 +103,54 @@ class FeatureStatusInput(BaseModel):
     status: str | None = None
 
 
+class InspectProjectInput(BaseModel):
+    path: str = Field(default=".", max_length=4096)
+    framework: str | None = Field(default=None, max_length=64)
+    write: bool = Field(
+        default=False,
+        description="Write the aegis-out/ memory map + report artifacts to disk.",
+    )
+    max_findings: int = Field(default=20, ge=1, le=500)
+
+
+class ReplayAttackInput(BaseModel):
+    attack: Literal["memory-poisoning"] = "memory-poisoning"
+
+
+_LOCAL_DEGRADE_MSG = (
+    "Aegis memory runtime requires hosted mode — set AEGIS_API_KEY. "
+    "Local mode supports inspect + replay."
+)
+
+
+def _resolve_mode() -> str:
+    """Resolve the server mode: ``"hosted"`` when AEGIS_API_KEY is set, else ``"local"``.
+
+    Computed per-call (not cached at import) so env changes — in tests or between runs —
+    take effect.
+    """
+    return "hosted" if os.getenv("AEGIS_API_KEY") else "local"
+
+
+def _resolve_project_path(path: str) -> str:
+    """Resolve a relative inspect path against the user's Claude project.
+
+    Claude Code exports ``CLAUDE_PROJECT_DIR`` so stdio/plugin MCP servers can resolve
+    project-relative paths without depending on cwd — a plugin server may be launched from
+    a plugin/cache directory rather than the project root. Falls back to cwd for standalone
+    CLI use. Absolute paths are returned unchanged.
+    """
+    if os.path.isabs(path):
+        return path
+    base = os.getenv("CLAUDE_PROJECT_DIR") or os.getcwd()
+    return os.path.join(base, path)
+
+
+def _hosted_required() -> dict[str, Any]:
+    """Non-fatal degrade payload for memory-runtime tools when no API key is set."""
+    return {"mode": "local", "error": "hosted_required", "message": _LOCAL_DEGRADE_MSG}
+
+
 def _client() -> AegisClient:
     api_key = os.getenv("AEGIS_API_KEY")
     if not api_key:
@@ -185,9 +233,22 @@ def run_session_state_resource(client: AegisClient, query: SessionStateInput) ->
     return result.__dict__
 
 
-def run_feature_status_resource(client: AegisClient, query: FeatureStatusInput) -> dict[str, Any]:
+def run_feature_status_resource(
+    client: AegisClient | None,
+    query: FeatureStatusInput,
+    *,
+    mode: str = "hosted",
+) -> dict[str, Any]:
+    if mode == "local":
+        return {
+            "mode": "local",
+            "message": _LOCAL_DEGRADE_MSG,
+            "summary": {"total": 0, "passing": 0, "failing": 0, "in_progress": 0},
+            "features": [],
+        }
     result = client.list_features(**query.model_dump(exclude_none=True))
     return {
+        "mode": "hosted",
         "summary": {
             "total": result.total,
             "passing": result.passing,
@@ -198,12 +259,48 @@ def run_feature_status_resource(client: AegisClient, query: FeatureStatusInput) 
     }
 
 
+def run_inspect_project(input_data: InspectProjectInput) -> dict[str, Any]:
+    """Keyless, deterministic static analysis (Stages 1-3 + AST taint). No client, no network."""
+    from aegis_memory.inspect.report import run_inspection
+
+    result = run_inspection(
+        _resolve_project_path(input_data.path),
+        framework=input_data.framework,
+        write=input_data.write,
+    )
+    findings = [f.to_dict() for f in result.findings[: input_data.max_findings]]
+    return {
+        "mode": _resolve_mode(),
+        "score": result.score,
+        "finding_count": len(result.findings),
+        "findings": findings,
+        "run_dir": str(result.run_dir) if input_data.write else None,
+    }
+
+
+def run_replay_attack(input_data: ReplayAttackInput) -> dict[str, Any]:
+    """Keyless, self-contained memory-poisoning diagnostic. Real scanner, no network."""
+    from aegis_memory.inspect import replay as replay_mod
+
+    if input_data.attack != "memory-poisoning":
+        return {
+            "mode": _resolve_mode(),
+            "error": "unknown_attack",
+            "message": f"Unknown attack: {input_data.attack} (only 'memory-poisoning' is supported).",
+        }
+    result = replay_mod.run_memory_poisoning()
+    result["mode"] = _resolve_mode()
+    return result
+
+
 def create_mcp_server() -> FastMCP:
     mcp = FastMCP("aegis-memory")
 
     @mcp.tool()
     def add_memory(input_data: AddMemoryInput) -> dict[str, Any]:
-        """Add a memory with scope-aware metadata."""
+        """Add a memory with scope-aware metadata. Requires hosted mode (AEGIS_API_KEY)."""
+        if _resolve_mode() == "local":
+            return _hosted_required()
         with _client() as client:
             try:
                 return run_add_memory(client, input_data)
@@ -212,7 +309,9 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool()
     def query_memory(input_data: QueryMemoryInput) -> dict[str, Any]:
-        """Semantic query over memories."""
+        """Semantic query over memories. Requires hosted mode (AEGIS_API_KEY)."""
+        if _resolve_mode() == "local":
+            return _hosted_required()
         with _client() as client:
             try:
                 return run_query_memory(client, input_data)
@@ -221,7 +320,9 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool()
     def cross_agent_query(input_data: CrossAgentQueryInput) -> dict[str, Any]:
-        """Cross-agent query with ACL-aware retrieval."""
+        """Cross-agent query with ACL-aware retrieval. Requires hosted mode (AEGIS_API_KEY)."""
+        if _resolve_mode() == "local":
+            return _hosted_required()
         with _client() as client:
             try:
                 return run_cross_agent_query(client, input_data)
@@ -230,7 +331,9 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool()
     def vote_memory(input_data: VoteInput) -> dict[str, Any]:
-        """Vote a memory as helpful or harmful."""
+        """Vote a memory as helpful or harmful. Requires hosted mode (AEGIS_API_KEY)."""
+        if _resolve_mode() == "local":
+            return _hosted_required()
         with _client() as client:
             try:
                 return run_vote_memory(client, input_data)
@@ -239,7 +342,9 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool()
     def add_reflection(input_data: ReflectionInput) -> dict[str, Any]:
-        """Add an ACE reflection memory."""
+        """Add an ACE reflection memory. Requires hosted mode (AEGIS_API_KEY)."""
+        if _resolve_mode() == "local":
+            return _hosted_required()
         with _client() as client:
             try:
                 return run_add_reflection(client, input_data)
@@ -248,7 +353,9 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool()
     def update_session(input_data: SessionUpdateInput) -> dict[str, Any]:
-        """Patch session progress state for long-running tasks."""
+        """Patch session progress state for long-running tasks. Requires hosted mode (AEGIS_API_KEY)."""
+        if _resolve_mode() == "local":
+            return _hosted_required()
         with _client() as client:
             try:
                 return run_update_session(client, input_data)
@@ -257,37 +364,70 @@ def create_mcp_server() -> FastMCP:
 
     @mcp.tool()
     def list_features(input_data: FeatureListInput) -> dict[str, Any]:
-        """List features and current status summary."""
+        """List features and current status summary. Requires hosted mode (AEGIS_API_KEY)."""
+        if _resolve_mode() == "local":
+            return _hosted_required()
         with _client() as client:
             try:
                 return run_list_features(client, input_data)
             except httpx.HTTPStatusError as exc:
                 raise _handle_http_error(exc) from exc
 
+    @mcp.tool()
+    def inspect_project(input_data: InspectProjectInput) -> dict[str, Any]:
+        """Keyless local scan for unsafe agent-memory flows (OWASP ASI06).
+
+        Returns a memory risk score and findings. No API key or network required;
+        works in both local and hosted mode.
+        """
+        try:
+            return run_inspect_project(input_data)
+        except Exception as exc:  # noqa: BLE001 - never crash the MCP session
+            raise MCPError(f"inspect failed: {exc}") from exc
+
+    @mcp.tool()
+    def replay_attack(input_data: ReplayAttackInput) -> dict[str, Any]:
+        """Keyless local diagnostic: replay a memory-poisoning payload through the real
+        write-path scanner and show the blocked-vs-accepted before/after. No network."""
+        try:
+            return run_replay_attack(input_data)
+        except Exception as exc:  # noqa: BLE001 - never crash the MCP session
+            raise MCPError(f"replay failed: {exc}") from exc
+
+    # Resources are addressed purely by URI: a static resource takes no parameters,
+    # and a resource template's URI placeholders must match the function parameters by
+    # name. (FastMCP rejects a function parameter that has no matching placeholder.)
     @mcp.resource("aegis://memories/recent")
-    def recent_memories(query: RecentMemoriesInput) -> dict[str, Any]:
-        """Read-only resource: recent memories from export snapshot."""
+    def recent_memories() -> dict[str, Any]:
+        """Read-only resource: recent memories from export snapshot. Requires hosted mode."""
+        if _resolve_mode() == "local":
+            return _hosted_required()
         with _client() as client:
             try:
-                return run_recent_memories_resource(client, query)
+                return run_recent_memories_resource(client, RecentMemoriesInput())
             except httpx.HTTPStatusError as exc:
                 raise _handle_http_error(exc) from exc
 
-    @mcp.resource("aegis://session/state")
-    def session_state(query: SessionStateInput) -> dict[str, Any]:
-        """Read-only resource: active session progress view."""
+    @mcp.resource("aegis://session/state/{session_id}")
+    def session_state(session_id: str) -> dict[str, Any]:
+        """Read-only resource: active session progress view. Requires hosted mode."""
+        if _resolve_mode() == "local":
+            return _hosted_required()
         with _client() as client:
             try:
-                return run_session_state_resource(client, query)
+                return run_session_state_resource(client, SessionStateInput(session_id=session_id))
             except httpx.HTTPStatusError as exc:
                 raise _handle_http_error(exc) from exc
 
     @mcp.resource("aegis://features/status")
-    def feature_status(query: FeatureStatusInput) -> dict[str, Any]:
-        """Read-only resource: feature status snapshot."""
+    def feature_status() -> dict[str, Any]:
+        """Read-only resource: feature status snapshot. Surfaces the active AEGIS_MODE."""
+        query = FeatureStatusInput()
+        if _resolve_mode() == "local":
+            return run_feature_status_resource(None, query, mode="local")
         with _client() as client:
             try:
-                return run_feature_status_resource(client, query)
+                return run_feature_status_resource(client, query, mode="hosted")
             except httpx.HTTPStatusError as exc:
                 raise _handle_http_error(exc) from exc
 

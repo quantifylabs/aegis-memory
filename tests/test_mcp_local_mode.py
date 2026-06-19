@@ -1,0 +1,182 @@
+"""Keyless local-mode behaviour for the MCP server (Task 8.1-A).
+
+These tests assert the server is usable with **no** ``AEGIS_API_KEY`` and **no**
+backend: the deterministic ``inspect``/``replay`` tools work, while memory-runtime
+tools degrade with a clear message instead of crashing. Hosted mode is unchanged.
+
+Mirrors ``test_mcp_server.py``: exercises the module-level ``run_*`` helpers directly
+(version-robust across FastMCP releases) rather than the decorated tools.
+"""
+
+import os
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("mcp", reason="mcp package not installed")
+
+from aegis_memory.mcp_server import (
+    _LOCAL_DEGRADE_MSG,
+    AddMemoryInput,
+    FeatureStatusInput,
+    InspectProjectInput,
+    QueryMemoryInput,
+    ReplayAttackInput,
+    _hosted_required,
+    _resolve_mode,
+    _resolve_project_path,
+    create_mcp_server,
+    run_feature_status_resource,
+    run_inspect_project,
+    run_replay_attack,
+)
+
+FIXTURES = Path(__file__).parent / "fixtures" / "inspect"
+
+
+@pytest.fixture
+def no_key(monkeypatch):
+    monkeypatch.delenv("AEGIS_API_KEY", raising=False)
+
+
+class TestModeResolution:
+    def test_local_when_key_unset(self, no_key):
+        assert _resolve_mode() == "local"
+
+    def test_hosted_when_key_set(self, monkeypatch):
+        monkeypatch.setenv("AEGIS_API_KEY", "sk-test")
+        assert _resolve_mode() == "hosted"
+
+    def test_hosted_required_payload_is_non_fatal(self):
+        payload = _hosted_required()
+        assert payload["mode"] == "local"
+        assert payload["error"] == "hosted_required"
+        assert payload["message"] == _LOCAL_DEGRADE_MSG
+
+
+class TestServerConstruction:
+    """The server must actually *build* keyless — not just the run_* helpers.
+
+    Regression guard for the FastMCP resource-signature bug (mcp >= 1.26 rejects a
+    resource whose function parameter has no matching URI placeholder).
+    """
+
+    def test_create_mcp_server_builds_keyless(self, no_key):
+        server = create_mcp_server()
+        assert server.name == "aegis-memory"
+
+    def test_create_mcp_server_builds_hosted(self, monkeypatch):
+        monkeypatch.setenv("AEGIS_API_KEY", "sk-test")
+        server = create_mcp_server()
+        assert server.name == "aegis-memory"
+
+    def test_tools_and_resources_registered(self, no_key):
+        import asyncio
+
+        server = create_mcp_server()
+        tools = {t.name for t in asyncio.run(server.list_tools())}
+        assert {"inspect_project", "replay_attack"} <= tools
+        templates = {str(r.uriTemplate) for r in asyncio.run(server.list_resource_templates())}
+        statics = {str(r.uri) for r in asyncio.run(server.list_resources())}
+        # session/state needs a value, so it's a template; the all-optional ones are static.
+        assert "aegis://session/state/{session_id}" in templates
+        assert {"aegis://memories/recent", "aegis://features/status"} <= statics
+
+
+class TestKeylessTools:
+    def test_inspect_project_runs_with_no_key(self, no_key):
+        """A local tool call succeeds with no key and no server."""
+        out = run_inspect_project(InspectProjectInput(path=str(FIXTURES), write=False))
+        assert out["mode"] == "local"
+        assert isinstance(out["score"]["score"], int)
+        assert out["finding_count"] >= 1
+        assert out["findings"], "expected at least one finding from the inspect fixtures"
+        assert out["run_dir"] is None  # write=False -> nothing written
+
+    def test_inspect_respects_max_findings(self, no_key):
+        out = run_inspect_project(
+            InspectProjectInput(path=str(FIXTURES), write=False, max_findings=1)
+        )
+        assert len(out["findings"]) <= 1
+        # finding_count reports the true total even when the returned list is capped.
+        assert out["finding_count"] >= len(out["findings"])
+
+    def test_replay_attack_blocks_poison_with_no_key(self, no_key):
+        out = run_replay_attack(ReplayAttackInput())
+        assert out["mode"] == "local"
+        assert out["attack"] == "memory-poisoning"
+        # Unguarded baseline stores the poison; Aegis blocks it.
+        assert out["without_aegis"]["stored"] is True
+        assert out["with_aegis"]["allowed"] is False
+
+    def test_replay_unknown_attack_is_non_fatal(self, no_key):
+        # ReplayAttackInput's Literal blocks invalid values at construction; the guard
+        # inside run_replay_attack is belt-and-braces. Bypass validation to exercise it.
+        model = ReplayAttackInput.model_construct(attack="sql-injection")
+        result = run_replay_attack(model)
+        assert result["error"] == "unknown_attack"
+        assert result["mode"] == "local"
+
+
+class TestFeatureStatusMode:
+    def test_local_mode_surfaces_degrade(self):
+        out = run_feature_status_resource(None, FeatureStatusInput(), mode="local")
+        assert out["mode"] == "local"
+        assert out["message"] == _LOCAL_DEGRADE_MSG
+        assert out["summary"] == {"total": 0, "passing": 0, "failing": 0, "in_progress": 0}
+        assert out["features"] == []
+
+
+class TestPathResolution:
+    """inspect paths must resolve against the user's Claude project, not the server cwd.
+
+    Claude Code launches plugin/stdio MCP servers from a plugin/cache dir, so a relative
+    path (incl. the default '.') must be anchored on CLAUDE_PROJECT_DIR when set — otherwise
+    the default tool call silently scans the wrong tree.
+    """
+
+    def test_relative_path_resolves_against_claude_project_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+        assert _resolve_project_path(".") == os.path.join(str(tmp_path), ".")
+        assert _resolve_project_path("sub/dir") == os.path.join(str(tmp_path), "sub/dir")
+
+    def test_absolute_path_is_unchanged_even_with_project_dir(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+        abs_path = str(tmp_path / "elsewhere")
+        assert _resolve_project_path(abs_path) == abs_path
+
+    def test_falls_back_to_cwd_when_project_dir_unset(self, monkeypatch):
+        monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+        assert _resolve_project_path(".") == os.path.join(os.getcwd(), ".")
+
+    def test_inspect_project_scans_claude_project_dir(self, monkeypatch, tmp_path):
+        """End-to-end: the default '.' must reach run_inspection rooted at CLAUDE_PROJECT_DIR."""
+        monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+        captured = {}
+
+        class _StubResult:
+            findings: list = []
+            score = {"score": 0}
+            run_dir = None
+
+        def _fake_run_inspection(project_root, *, framework=None, write=False, **_):
+            captured["project_root"] = project_root
+            return _StubResult()
+
+        monkeypatch.setattr(
+            "aegis_memory.inspect.report.run_inspection", _fake_run_inspection
+        )
+        out = run_inspect_project(InspectProjectInput(path="."))
+        assert captured["project_root"] == os.path.join(str(tmp_path), ".")
+        assert out["finding_count"] == 0  # stub returned no findings -> reached our fake
+
+
+class TestInputSchemas:
+    def test_inspect_defaults(self):
+        m = InspectProjectInput()
+        assert m.path == "." and m.write is False and m.max_findings == 20
+
+    def test_memory_inputs_still_validate(self):
+        # Memory tool schemas are unchanged by local mode.
+        AddMemoryInput(content="hi")
+        QueryMemoryInput(query="hi")
