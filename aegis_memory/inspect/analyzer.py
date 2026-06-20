@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from . import sinks, taint
+from . import interproc, sinks, taint
 from .findings import Category, Finding, Sink
 
 # Directories we never descend into.
@@ -58,14 +58,21 @@ class _SinkSite:
     taint: taint.TaintResult
     namespace_shared: bool
     key: str | None = None  # literal memory key when statically known
+    # AST context kept for the bounded interprocedural resolver (taint across functions/files).
+    call: ast.Call | None = None
+    func: ast.FunctionDef | ast.AsyncFunctionDef | None = None
+    write_value: ast.expr | None = None
+    flow_path: list[dict] = field(default_factory=list)
 
 
 def analyze_project(root: str | Path, framework: str | None = None) -> list[Finding]:
-    """Analyze every ``.py`` file under ``root`` and return sorted, id-assigned findings."""
-    root = Path(root).resolve()
-    sites: list[_SinkSite] = []
-    read_flows: list[tuple[str, int]] = []
+    """Analyze every ``.py`` file under ``root`` and return sorted, id-assigned findings.
 
+    Two passes: parse every module and build a project-wide :class:`interproc.ProjectIndex`, then
+    scan sinks. Each sink's written value is resolved same-scope first; when that is inconclusive,
+    the bounded interprocedural resolver follows the value across function/file boundaries."""
+    root = Path(root).resolve()
+    modules: list[tuple[str, ast.Module]] = []
     for path in _iter_python_files(root):
         try:
             source = path.read_text(encoding="utf-8")
@@ -74,8 +81,24 @@ def analyze_project(root: str | Path, framework: str | None = None) -> list[Find
             continue
         rel = _rel(path, root)
         _annotate_parents(tree)
+        modules.append((rel, tree))
+
+    index = interproc.ProjectIndex.build(modules)
+
+    sites: list[_SinkSite] = []
+    read_flows: list[tuple[str, int]] = []
+    for rel, tree in modules:
         sites.extend(_scan_module(tree, rel))
         read_flows.extend(_scan_read_paths(tree, rel))
+
+    # Resolve each sink's source — same-scope, then bounded interprocedural/cross-file. A resolved
+    # untrusted source upgrades the (possibly internal/unknown) same-scope verdict and records the
+    # source->sink edge; an unresolved sink is left structural (never dropped).
+    for s in sites:
+        res = interproc.resolve_sink(s.write_value, s.func, s.file, index, screened=s.taint.screened)
+        if res is not None:
+            s.taint = res.taint
+            s.flow_path = res.flow_path
 
     findings = _build_findings(sites, read_flows, framework)
     return findings
@@ -110,6 +133,9 @@ def _scan_module(tree: ast.Module, rel: str) -> list[_SinkSite]:
                 taint=tr,
                 namespace_shared=_writes_shared_scope(call),
                 key=_write_key(call),
+                call=call,
+                func=func,
+                write_value=value,
             )
         )
     return out
@@ -117,13 +143,14 @@ def _scan_module(tree: ast.Module, rel: str) -> list[_SinkSite]:
 
 def _match_call(call: ast.Call) -> sinks.SinkMatch | None:
     fn = call.func
+    kwargs = tuple(kw.arg for kw in call.keywords if kw.arg)
     if isinstance(fn, ast.Attribute):
         # Use the dotted receiver path (e.g. "self.memory_store") so hint matching sees
         # the meaningful attribute name, not just the root object.
         receiver = _receiver_string(fn.value)
-        return sinks.classify_call(attr=fn.attr, func=None, receiver=receiver)
+        return sinks.classify_call(attr=fn.attr, func=None, receiver=receiver, keywords=kwargs)
     if isinstance(fn, ast.Name):
-        return sinks.classify_call(attr=None, func=fn.id, receiver=None)
+        return sinks.classify_call(attr=None, func=fn.id, receiver=None, keywords=kwargs)
     return None
 
 
@@ -230,7 +257,7 @@ def _build_findings(
     raw: list[Finding] = []
 
     for s in sites:
-        if framework and s.match.framework not in (framework, "custom", "vectordb"):
+        if framework and s.match.framework not in (framework, "custom", "vectordb", "aegis"):
             # Explicit --framework filters to that adapter (+ generic fallbacks).
             if s.match.framework != framework:
                 continue
@@ -272,6 +299,8 @@ def _build_findings(
                     ),
                     screened=tr.screened,
                     notes=notes,
+                    owasp="ASI06",  # OWASP ASI06 — Memory & Context Poisoning
+                    flow_path=list(s.flow_path),
                 )
             )
             # Absence finding: missing injection screening before an untrusted write.
@@ -310,7 +339,11 @@ def _build_findings(
                     title=f"Memory write sink: {s.match.call}",
                     fix="Confirm the written value's trust level; route untrusted content through the guard.",
                     screened=tr.screened,
-                    notes=["structural sink; source not resolved as untrusted in-scope"],
+                    notes=[
+                        "Looks like a memory write, but I couldn't tell where the stored data "
+                        "comes from (source not resolved within the bounded search — best-effort, "
+                        "not proof the value is safe)."
+                    ],
                 )
             )
         # Over-broad shared/global access (absence/structural).
