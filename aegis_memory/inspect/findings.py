@@ -68,6 +68,12 @@ class Finding:
     fix: str
     screened: bool = False  # True when a content-security guard wraps this sink
     notes: list[str] = field(default_factory=list)
+    # OWASP Agentic Security Initiative tag, set on real flow findings (ASI06 = Memory & Context
+    # Poisoning). None for structural/absence findings that aren't a proven untrusted flow.
+    owasp: str | None = None
+    # Ordered source -> sink evidence trail (each step: {"file","line","note"}). Populated when the
+    # taint resolver — same-scope or bounded interprocedural — connects an untrusted source to a sink.
+    flow_path: list[dict] = field(default_factory=list)
     # Populated only when the session-model classification loop runs (skill mode).
     classifier: str | None = None  # e.g. "session_model"
     classifier_label: str | None = None  # "malicious" | "benign" | "uncertain"
@@ -79,6 +85,9 @@ class Finding:
         if self.classifier is None:
             for k in ("classifier", "classifier_label", "classifier_reason"):
                 d.pop(k, None)
+        # Drop the OWASP tag when this finding isn't a tagged flow.
+        if self.owasp is None:
+            d.pop("owasp", None)
         return d
 
 

@@ -167,6 +167,15 @@ def _render_report(
     lines.append(f"# Aegis Inspection Report — {project_name}\n")
     lines.append(f"_Run `{result.run_id}` · {len(findings)} findings_\n")
 
+    # Two engines, two credibility levels — stated up front so neither borrows the other's standing.
+    lines.append(
+        "> **Two engines, labeled separately.** _Runtime content scanner_: benchmarked "
+        "(see `benchmarks/results.json`) — the live `scan()` replay below uses it. "
+        "_Static memory-map_ (the findings, flows, and risk score here): **heuristic, preliminary, "
+        "not yet benchmarked** — best-effort, bounded-depth dataflow. Flow findings are tagged "
+        "**OWASP ASI06 (Memory & Context Poisoning)**.\n"
+    )
+
     headline = [f for f in findings if f.severity in ("critical", "high")]
     lines.append("## Findings (the defensible core)\n")
     if headline:
@@ -209,10 +218,18 @@ def _render_report(
 def _finding_block(f: Finding) -> str:
     notes = ("\n  " + "\n  ".join(f"- {n}" for n in f.notes)) if f.notes else ""
     fix_lines = "\n  ".join(f.fix.splitlines())
+    tag = f" · `OWASP {f.owasp}`" if f.owasp else ""
+    edge = ""
+    if f.flow_path:
+        steps = " → ".join(f"`{s['file']}:{s['line']}`" for s in f.flow_path)
+        edge = f"\n  Source→sink path: {steps} → `{f.sink.file}:{f.sink.line}` (the sink)\n"
+        for s in f.flow_path:
+            edge += f"  - {s['file']}:{s['line']} — {s['note']}\n"
     return (
-        f"- **{f.id} [{f.severity}/{f.confidence}]** {f.title}\n"
+        f"- **{f.id} [{f.severity}/{f.confidence}]**{tag} {f.title}\n"
         f"  `{f.sink.file}:{f.sink.line}` · sink `{f.sink.call}` ({f.sink.framework}) · "
         f"source `{f.source}` · trust `{f.trust}`{' · screened' if f.screened else ''}\n"
+        f"{edge}"
         f"  Fix:\n  ```python\n  {fix_lines}\n  ```{notes}\n"
     )
 

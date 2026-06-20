@@ -153,12 +153,14 @@ def _lane(f: Finding) -> str:
     mem_meta = f"key={html.escape(f.sink.key)}" if f.sink.key else "shared scope"
     # the screening boundary: a guard glyph (blocked) or a bare arrow (reaches memory)
     boundary = "&#9211;" if screened else "&#9654;"  # ⛛ gate vs ▶
+    owasp = f'<span class="conf">OWASP {html.escape(f.owasp)}</span>' if f.owasp else ""
     return (
         f'<article class="lane {state}">'
         f'<div class="lane-head">'
         f'<span class="aeg">{html.escape(f.id)}</span>'
         f'<span class="badge {html.escape(f.severity)}">{html.escape(f.severity)}</span>'
         f'<span class="conf">{html.escape(f.confidence)}</span>'
+        f"{owasp}"
         f'<span class="status {state}">{status}</span>'
         f"</div>"
         f'<div class="flow">'
@@ -367,6 +369,10 @@ _TEMPLATE = """<!doctype html>
     <p class="eyebrow">Aegis · static memory inspection</p>
     <h1>Memory inspection — {project}</h1>
     <p class="sub">Untrusted source&#8594;memory flows, anchored to <strong>file + line</strong></p>
+    <p class="sub engines"><strong>Runtime content scanner:</strong> benchmarked (the live
+      <code>scan()</code> replay). &nbsp;<strong>Static memory-map</strong> (flows, findings, score
+      below): <strong>heuristic, preliminary, not yet benchmarked</strong> — best-effort,
+      bounded-depth dataflow. Flow findings are tagged <strong>OWASP ASI06</strong>.</p>
   </header>
 
   <div class="panel scorebar">

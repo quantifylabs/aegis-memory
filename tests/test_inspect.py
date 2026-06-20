@@ -17,6 +17,7 @@ from aegis_memory.inspect import analyze_project, derive_unsafe_memory_flows, ru
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect"
+TAINT_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_taint"
 DEMO_DIR = REPO_ROOT / "examples" / "aegis-memory-firewall"
 AGENT_DIR = DEMO_DIR / "agent"
 
@@ -25,19 +26,23 @@ AGENT_DIR = DEMO_DIR / "agent"
 
 
 @pytest.mark.parametrize(
-    "attr,func,receiver,expect_framework",
+    "attr,func,receiver,keywords,expect_framework",
     [
-        ("put", None, "store", "langgraph"),
-        ("put", None, "self.memory_store", "langgraph"),
-        ("put", None, "checkpointer", "langgraph"),
-        (None, "add_messages", None, "langgraph"),
-        ("upsert", None, "pinecone_index", "vectordb"),
-        ("add_texts", None, "vectorstore", "vectordb"),
-        ("append", None, "self.history", "custom"),
+        ("put", None, "store", (), "langgraph"),
+        ("put", None, "self.memory_store", (), "langgraph"),
+        ("put", None, "checkpointer", (), "langgraph"),
+        (None, "add_messages", None, (), "langgraph"),
+        ("upsert", None, "pinecone_index", (), "vectordb"),
+        ("add_texts", None, "vectorstore", (), "vectordb"),
+        ("remember", None, "self.scratchpad", (), "custom"),
+        # Distinctive memory-write method — matched on the method alone, no name hint needed.
+        ("store_intelligence", None, "self.memory", (), "aegis"),
+        # Generic verb on a non-hinted receiver, matched by the memory-API keyword signature.
+        ("add", None, "self.client", ("scope", "shared_with_agents"), "aegis"),
     ],
 )
-def test_sink_catalog_matches(attr, func, receiver, expect_framework):
-    match = sinks.classify_call(attr=attr, func=func, receiver=receiver)
+def test_sink_catalog_matches(attr, func, receiver, keywords, expect_framework):
+    match = sinks.classify_call(attr=attr, func=func, receiver=receiver, keywords=keywords)
     assert match is not None
     assert match.framework == expect_framework
 
@@ -46,6 +51,12 @@ def test_sink_catalog_ignores_unrelated_calls():
     assert sinks.classify_call(attr="get", func=None, receiver="store") is None
     assert sinks.classify_call(attr="put", func=None, receiver="widget") is None
     assert sinks.classify_call(attr=None, func="print", receiver=None) is None
+    # A plain local ``list.append`` is never a sink — even when the variable name contains
+    # "store" (the old false-positive shape). ``append`` was dropped from the static matcher.
+    assert sinks.classify_call(attr="append", func=None, receiver="stored") is None
+    assert sinks.classify_call(attr="append", func=None, receiver="self.history") is None
+    # A generic ``add`` on a non-memory receiver without an API signature is not a sink.
+    assert sinks.classify_call(attr="add", func=None, receiver="self.client") is None
 
 
 # --- the demo's five untrusted channels --------------------------------------------
@@ -93,6 +104,51 @@ def test_generality_multisource_fixture_all_channels_found():
     assert all(not f.screened for f in flows)
     # Spans LangGraph store/checkpointer, a vector store, and a custom sink — no demo tuning.
     assert {f.sink.framework for f in flows} == {"langgraph", "vectordb", "custom"}
+
+
+# --- the regression gate: cross-file ASI06 flow + the list.append false positive -----
+
+
+def test_crossfile_store_intelligence_flow_is_flagged_asi06():
+    """The canonical missed flow: untrusted web content -> helper -> store_intelligence (and the
+    cross-file client.add) must be detected, ASI06-tagged, with a non-empty source->sink edge."""
+    findings = analyze_project(TAINT_FIXTURES)
+    flows = [f for f in findings if f.category.endswith("_to_memory")]
+    assert flows, "expected the cross-file untrusted->memory flow to be detected"
+    assert all(f.trust == "untrusted" for f in flows)
+    assert all(f.owasp == "ASI06" for f in flows), "flow findings must carry the OWASP ASI06 tag"
+    assert all(f.flow_path for f in flows), "each flow must carry a non-empty source->sink edge"
+
+    # The distinctive-method sink (store_intelligence) is recognized despite a receiver named `memory`.
+    assert any("store_intelligence" in f.sink.call for f in flows)
+    # The signature sink (client.add(scope=...)) is recognized despite a receiver named `client`, and
+    # its source resolves cross-file (the edge references the other fixture file).
+    add_flow = next((f for f in flows if f.sink.call.endswith(".add")), None)
+    assert add_flow is not None, "client.add(scope=...) must be recognized via its API signature"
+    assert add_flow.sink.file.endswith("client.py")
+    assert any(step["file"].endswith("hunter.py") for step in add_flow.flow_path), (
+        "the client.add flow must trace its source across the file boundary into hunter.py"
+    )
+
+
+def test_crossfile_flow_is_in_derived_unsafe_memory_flows():
+    """unsafe_memory_flows.json (the derived view) is non-empty for the fixture and points at a real
+    memory-write sink line — never a list append."""
+    result = run_inspection(TAINT_FIXTURES, write=False)
+    flows = derive_unsafe_memory_flows(result.findings)
+    assert flows, "unsafe_memory_flows must be non-empty for the cross-file fixture"
+    calls = {f["sink"]["call"] for f in flows}
+    assert any(c.endswith(".add") or "store_intelligence" in c for c in calls)
+    assert all("append" not in f["sink"]["call"] for f in flows)
+    assert all(f.get("owasp") == "ASI06" for f in flows)
+
+
+def test_local_list_append_is_not_flagged():
+    """The true negative: a plain ``stored.append(x)`` returned locally is NOT a memory sink, even
+    though the variable name contains 'store' (the old false-positive shape)."""
+    findings = analyze_project(TAINT_FIXTURES)
+    append_findings = [f for f in findings if f.sink.file.endswith("local_list.py")]
+    assert append_findings == [], f"local list.append must not be flagged, got {append_findings}"
 
 
 def test_clean_fixture_has_no_untrusted_flow():
