@@ -28,6 +28,15 @@ import json
 from .findings import FLOW_CATEGORIES, Finding
 
 
+def _risk_class(score: int) -> str:
+    """Risk band for colouring a score number — high is alarming, low is calm. Lower is safer."""
+    if score >= 67:
+        return "risk-high"
+    if score >= 34:
+        return "risk-mid"
+    return "risk-low"
+
+
 def _channel_label(file_path: str) -> str:
     """Human channel name from the sink's file (general — module stem, no demo tuning)."""
     stem = file_path.rsplit("/", 1)[-1].removesuffix(".py")
@@ -65,18 +74,20 @@ def render_html(
     data_json = html.escape(json.dumps({"before": before_score, "after": after}))
 
     # --- score header (direction unambiguous; the spans are a stable contract) ---
+    # Colour every number by its own risk value: high (~100) is alarming red, low is calm green.
+    # "Lower is safer" — so a green 100 (the old bug) would have read like an A+ at maximum risk.
     if before_score is not None:
         delta = before_score - after
         score_block = (
-            f'<span class="before">{before_score}</span>'
+            f'<span class="{_risk_class(before_score)} before">{before_score}</span>'
             f'<span class="to">&#8594;</span>'
-            f'<span class="after">{after}</span><span class="scale">/100</span>'
+            f'<span class="{_risk_class(after)} after">{after}</span><span class="scale">/100</span>'
         )
         score_note = (
             f'<span class="pill delta">{("-" if delta >= 0 else "+")}{abs(delta)} after screening</span>'
         )
     else:
-        score_block = f'<span class="after">{after}</span><span class="scale">/100</span>'
+        score_block = f'<span class="{_risk_class(after)} after">{after}</span><span class="scale">/100</span>'
         score_note = ""
 
     trace = _trace_section(flows)
@@ -130,13 +141,48 @@ def _trace_section(flows: list[Finding]) -> str:
             "</section>"
         )
     n_exposed = sum(1 for f in flows if not f.screened)
+    n_screened = len(flows) - n_exposed
+    explainer = _howto_explainer(n_exposed, n_screened)
     lanes = "".join(_lane(f) for f in flows)
     return (
         '<section class="trace"><h2 class="sec-h">Untrusted memory flows</h2>'
         f'<p class="sec-sub">{len(flows)} write(s) into shared memory &#183; '
         f'<b class="x-exposed">{n_exposed} reach memory unscreened</b> &#183; '
-        f'{len(flows) - n_exposed} blocked at a guard. Each lane is anchored to a file and line.</p>'
+        f'{n_screened} blocked at a guard. Each lane is anchored to a file and line.</p>'
+        f'{explainer}'
         '<div class="lanes">' + lanes + "</div></section>"
+    )
+
+
+def _howto_explainer(n_exposed: int, n_screened: int) -> str:
+    """One calm, collapsible 'how to fix & verify' explainer — progressive disclosure, shown once.
+
+    Serves the seasoned dev (collapsed by default, out of the way) and the engineer new to AI
+    tooling (the explicit loop). The per-lane snippets carry the actual fix; this names the re-run
+    action and points at the already-green screened lane as the live example."""
+    if n_exposed == 0:
+        return ""
+    green_ref = (
+        ' The green <b>blocked at gate</b> lane below is the live example: it&#8217;s safe because '
+        'a guard already wraps that write &#8212; an exposed lane looks exactly like it once you fix '
+        'and re-run.'
+        if n_screened
+        else ""
+    )
+    return (
+        '<details class="howto"><summary>How to fix &amp; verify</summary>'
+        '<div class="howto-body">'
+        '<p>Each exposed lane below carries the exact, verdict-checked fix for <em>its own</em> '
+        'write. To close the loop:</p>'
+        '<ol>'
+        '<li>Apply the fix shown on the lane in your code &#8212; screen the value through '
+        '<code>guard.write(&#8230;)</code>, or wrap the store with <code>guard.protect(&#8230;)</code>.</li>'
+        '<li>Save the file.</li>'
+        '<li>Re-run <code>/aegis:inspect</code>.</li>'
+        '<li>The lane flips from red <b>reaches memory</b> to green <b>blocked at gate</b>.</li>'
+        '</ol>'
+        f'<p class="howto-ref">{green_ref}</p>'
+        '</div></details>'
     )
 
 
@@ -175,7 +221,28 @@ def _lane(f: Finding) -> str:
         f'<div class="node mem"><div class="nk">memory</div>'
         f'<div class="nv">shared memory</div>'
         f'<div class="nm mono">{mem_meta}</div></div>'
-        f"</div></article>"
+        f"</div>"
+        f"{_lane_fix(f)}"
+        f"</article>"
+    )
+
+
+def _lane_fix(f: Finding) -> str:
+    """Per-lane disclosure: the screened lane shows why it's green; an exposed lane shows its own
+    verdict-checked fix + a single 're-run to verify' cue (no repeated step list — that lives once
+    in the explainer above)."""
+    if f.screened:
+        return (
+            '<p class="lane-note screened-note">This lane is <b>green</b> because a content-security '
+            'guard already wraps this write. An exposed lane looks like this once you apply its fix '
+            'and re-run.</p>'
+        )
+    fix = html.escape(f.fix)
+    return (
+        '<details class="lane-fix"><summary>Fix this lane'
+        '<span class="cue"> &#8212; apply, then re-run <code>/aegis:inspect</code> to verify '
+        '&#8594;</span></summary>'
+        f'<pre class="fix-code"><code>{fix}</code></pre></details>'
     )
 
 
@@ -255,9 +322,11 @@ _TEMPLATE = """<!doctype html>
   .panel {{ background:var(--panel); border:1px solid var(--line); border-radius:14px; }}
   .scorebar {{ display:flex; align-items:center; gap:18px; flex-wrap:wrap; padding:16px 18px; margin-bottom:22px; }}
   .gauge {{ display:flex; align-items:baseline; gap:9px; font-family:var(--mono); }}
-  .gauge .before {{ font-size:2.0rem; font-weight:700; color:var(--danger); }}
+  .gauge .before, .gauge .after {{ font-size:2.0rem; font-weight:700; }}
   .gauge .to {{ color:var(--muted); font-size:1.1rem; }}
-  .gauge .after {{ font-size:2.0rem; font-weight:700; color:var(--safe); }}
+  .gauge .risk-high {{ color:var(--danger); }}
+  .gauge .risk-mid {{ color:var(--warn); }}
+  .gauge .risk-low {{ color:var(--safe); }}
   .gauge .scale {{ color:var(--muted); font-size:.95rem; }}
   .meta {{ display:flex; flex-direction:column; gap:5px; }}
   .pill {{ font-family:var(--mono); font-size:.7rem; letter-spacing:.06em; text-transform:uppercase;
@@ -354,6 +423,36 @@ _TEMPLATE = """<!doctype html>
   .rubric {{ color:var(--muted); font-size:.72rem; margin-top:14px; line-height:1.5; }}
   .rubric .prov {{ display:block; margin-top:6px; }}
 
+  /* per-lane fix + how-to-fix explainer (progressive disclosure) */
+  .howto {{ border:1px solid var(--line); border-radius:10px; background:var(--panel2);
+            margin:0 0 14px; font-size:.84rem; }}
+  .howto > summary {{ cursor:pointer; padding:9px 13px; color:var(--accent); font-family:var(--mono);
+                      font-size:.74rem; letter-spacing:.04em; text-transform:uppercase; list-style:none; }}
+  .howto > summary::-webkit-details-marker {{ display:none; }}
+  .howto > summary::before {{ content:"+ "; color:var(--soft); }}
+  .howto[open] > summary::before {{ content:"\\2212 "; }}
+  .howto-body {{ padding:2px 15px 12px; color:var(--muted); }}
+  .howto-body code {{ font-family:var(--mono); color:var(--text); }}
+  .howto-body ol {{ margin:8px 0; padding-left:20px; line-height:1.7; }}
+  .howto-ref {{ color:var(--muted); margin:6px 0 0; }}
+
+  .lane-fix {{ margin-top:11px; border-top:1px solid var(--line); padding-top:9px; }}
+  .lane-fix > summary {{ cursor:pointer; color:var(--accent); font-family:var(--mono); font-size:.72rem;
+                         list-style:none; }}
+  .lane-fix > summary::-webkit-details-marker {{ display:none; }}
+  .lane-fix > summary::before {{ content:"\\25B8 "; color:var(--soft); }}
+  .lane-fix[open] > summary::before {{ content:"\\25BE "; }}
+  .lane-fix .cue {{ color:var(--muted); text-transform:none; letter-spacing:0; }}
+  .lane-fix .cue code {{ color:var(--accent); }}
+  .fix-code {{ margin:10px 0 2px; padding:11px 13px; background:var(--ink); border:1px solid var(--line);
+               border-radius:9px; overflow-x:auto; font-family:var(--mono); font-size:.76rem;
+               line-height:1.55; color:var(--text); white-space:pre; }}
+  .lane-note {{ margin:11px 0 0; padding-top:9px; border-top:1px solid var(--line);
+                font-size:.78rem; color:var(--muted); }}
+  .screened-note b {{ color:var(--safe); }}
+  .footnote {{ color:var(--soft); font-size:.72rem; margin:18px 0 0; }}
+  .footnote code {{ font-family:var(--mono); color:var(--muted); }}
+
   @media (max-width:720px) {{
     .flow {{ grid-template-columns:1fr; }}
     .arrow {{ flex-direction:row; gap:6px; padding:2px 0; }}
@@ -378,7 +477,7 @@ _TEMPLATE = """<!doctype html>
   <div class="panel scorebar">
     <div class="gauge">{score_block}</div>
     <div class="meta">
-      <span class="pill">risk score · heuristic · lower is safer</span>
+      <span class="pill">Memory Risk Score &#8212; 100 = maximum risk &#183; lower is safer</span>
       {score_note}
     </div>
     <div class="counts">Critical <b>{crit}</b> &nbsp; High <b>{high}</b> &nbsp; Medium <b>{med}</b> &nbsp; Low <b>{low}</b></div>
@@ -392,6 +491,8 @@ _TEMPLATE = """<!doctype html>
     &ldquo;not detected at this site&rdquo;, never &ldquo;none exist&rdquo;. Confidence:
     EXTRACTED (same-scope dataflow), INFERRED (cross-call heuristic), AMBIGUOUS (source unresolved).</span>
   </p>
+  <p class="footnote">Full source&#8594;sink paths and machine-readable findings are in
+    <code>aegis-out/</code> (<code>INSPECTION_REPORT.md</code>, <code>findings.json</code>).</p>
 </div>
 <script>var AEGIS_SCORE = JSON.parse("{data_json}".replace(/&quot;/g,'"'));</script>
 </body>

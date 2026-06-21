@@ -247,7 +247,28 @@ def _is_sanitizer_call(node: ast.expr) -> bool:
         name = fn.attr
     elif isinstance(fn, ast.Name):
         name = fn.id
-    return name.lower() in _SANITIZER_TOKENS or any(t in name.lower() for t in ("scan", "guard", "sanitize", "redact"))
+    n = name.lower()
+    if n in _SANITIZER_TOKENS or any(t in n for t in ("scan", "guard", "sanitize", "redact")):
+        return True
+    # The aegis guard idiom — ``guard.write(...)`` / ``guard.protect(...)`` — is exactly the fix
+    # ``aegis inspect`` recommends. Its methods are named ``write``/``protect`` (no sanitizer token
+    # in the name), so the screening signal is the ``guard`` *receiver*. Recognising it is what lets
+    # the inspect -> fix -> rescan loop close: apply the suggested guard, re-run, the lane flips green.
+    if isinstance(fn, ast.Attribute) and n in ("write", "protect") and "guard" in _receiver_tokens(fn.value):
+        return True
+    return False
+
+
+def _receiver_tokens(node: ast.expr) -> set[str]:
+    """Lowercased identifier + attribute tokens in a call's receiver (e.g. ``self.guard`` ->
+    {"self","guard"}), so the guard idiom is recognised however the module is referenced."""
+    toks: set[str] = set()
+    for n in ast.walk(node):
+        if isinstance(n, ast.Name):
+            toks.add(n.id.lower())
+        elif isinstance(n, ast.Attribute):
+            toks.add(n.attr.lower())
+    return toks
 
 
 def _root_name(node: ast.expr) -> str | None:

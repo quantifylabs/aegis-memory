@@ -194,7 +194,9 @@ def _render_report(
     c = score["counts"]
     lines.append("\n## Memory Risk Score (heuristic — UX sugar, not the benchmark)\n")
     transition = f"{before_score} → {s}" if before_score is not None else f"{s}"
-    lines.append(f"**{transition} / 100**  ·  label: `heuristic` · lower is safer\n")
+    lines.append(
+        f"**{transition} / 100** — **100 = maximum risk · lower is safer** (heuristic)\n"
+    )
     lines.append(
         f"Critical {c['critical']} · High {c['high']} · Medium {c['medium']} · Low {c['low']}\n"
     )

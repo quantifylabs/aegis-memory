@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from . import interproc, sinks, taint
+from . import fixgen, interproc, sinks, taint
 from .findings import Category, Finding, Sink
 
 # Directories we never descend into.
@@ -292,10 +292,11 @@ def _build_findings(
                     source=("tool_output" if is_tool else "untrusted_input"),
                     trust="untrusted",
                     title=title,
-                    fix=(
-                        "from aegis_memory import guard\n"
-                        "store = guard.protect(store, scope='agent-shared')  # screen every write, or:\n"
-                        "guard.write(content, trust_level='untrusted', scope='agent-shared')"
+                    fix=fixgen.build_flow_fix(
+                        s.call,
+                        s.write_value,
+                        scope="agent-shared" if s.namespace_shared else "agent-private",
+                        trust="untrusted",
                     ),
                     screened=tr.screened,
                     notes=notes,
