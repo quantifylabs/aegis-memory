@@ -144,6 +144,15 @@ def classify_call(
     if not a:
         return None
 
+    # The aegis guard screening calls themselves — ``guard.write(...)`` / ``guard.protect(...)`` —
+    # are the *fix* inspect recommends, not a durable write: ``guard.write`` returns a verdict and
+    # persists nothing; ``guard.protect`` wraps a store. Excluding the ``guard`` receiver keeps a
+    # rescan of fixed code from minting a bogus screened sink (and, with ``scope=``, an overbroad
+    # shared-access finding) for the very call that fixed it. The wrapped ``store.put(...)`` writes
+    # are still matched and screened sink-tied (see taint.protected_receivers).
+    if a in ("write", "protect") and "guard" in r.split("."):
+        return None
+
     # --- Tier 1: distinctive memory-write methods (receiver-agnostic) ---
     if a in _DISTINCTIVE_WRITE_METHODS:
         return SinkMatch("aegis", f"{receiver}.{attr}" if receiver else attr,

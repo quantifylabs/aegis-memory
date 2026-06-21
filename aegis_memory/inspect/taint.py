@@ -90,7 +90,12 @@ class FunctionScope:
     assignments: dict[str, ast.expr] = field(default_factory=dict)
     # variable names that flowed through a sanitizer call somewhere in the scope
     sanitized_names: set[str] = field(default_factory=set)
-    # True if a guard/scan call appears anywhere in this scope (screening present)
+    # receiver names wrapped by ``guard.protect(...)`` — a write *through* one is screened (sink-tied)
+    protected_receivers: set[str] = field(default_factory=set)
+    # True if a scanner/sanitizer call appears anywhere in this scope (screening present). NB: the
+    # guard idiom (``guard.write``/``guard.protect``) deliberately does NOT set this blanket flag —
+    # it screens sink-tied (via sanitized_names / protected_receivers) so a discarded verdict or a
+    # write to a *different* unprotected store is never green-lit. See _build_findings/build_scope.
     has_sanitizer_call: bool = False
 
 
@@ -111,11 +116,19 @@ def build_scope(func: ast.FunctionDef | ast.AsyncFunctionDef) -> FunctionScope:
             for tgt in node.targets:
                 if isinstance(tgt, ast.Name):
                     scope.assignments[tgt.id] = node.value
-            # var assigned from a sanitizer call -> mark sanitized
-            if _is_sanitizer_call(node.value):
+            rhs = node.value
+            # A value assigned from a screening call (``scanner.scan`` / ``guard.write``) is
+            # sanitized: the sink is screened ONLY if it then actually uses this variable
+            # (``verdict.content`` / the scanned text). A discarded verdict screens nothing.
+            if _is_sanitizer_call(rhs) or _is_guard_write_call(rhs):
                 for tgt in node.targets:
                     if isinstance(tgt, ast.Name):
                         scope.sanitized_names.add(tgt.id)
+            # ``store = guard.protect(store)`` -> writes whose receiver is this name are screened.
+            if _is_guard_protect_call(rhs):
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name):
+                        scope.protected_receivers.add(tgt.id)
         elif isinstance(node, ast.Call) and _is_sanitizer_call(node):
             scope.has_sanitizer_call = True
     return scope
@@ -247,16 +260,33 @@ def _is_sanitizer_call(node: ast.expr) -> bool:
         name = fn.attr
     elif isinstance(fn, ast.Name):
         name = fn.id
-    n = name.lower()
-    if n in _SANITIZER_TOKENS or any(t in n for t in ("scan", "guard", "sanitize", "redact")):
-        return True
-    # The aegis guard idiom — ``guard.write(...)`` / ``guard.protect(...)`` — is exactly the fix
-    # ``aegis inspect`` recommends. Its methods are named ``write``/``protect`` (no sanitizer token
-    # in the name), so the screening signal is the ``guard`` *receiver*. Recognising it is what lets
-    # the inspect -> fix -> rescan loop close: apply the suggested guard, re-run, the lane flips green.
-    if isinstance(fn, ast.Attribute) and n in ("write", "protect") and "guard" in _receiver_tokens(fn.value):
-        return True
-    return False
+    name = name.lower()
+    return name in _SANITIZER_TOKENS or any(t in name for t in ("scan", "guard", "sanitize", "redact"))
+
+
+def _is_guard_write_call(node: ast.expr) -> bool:
+    """``guard.write(...)`` — the screening gate. Recognised by the ``guard`` *receiver* (its method
+    is named ``write``). The assigned verdict is sanitized; a sink counts as screened only if it then
+    uses it (``verdict.content``). This is what lets the inspect -> fix -> rescan loop close soundly:
+    apply the suggested guard *and route the screened value to the write*, re-run, the lane flips."""
+    return _is_guard_method_call(node, "write")
+
+
+def _is_guard_protect_call(node: ast.expr) -> bool:
+    """``guard.protect(store)`` — wraps a store so its writes are screened. The wrapped receiver name
+    is recorded; a write through it counts as screened (a write to a different store does not)."""
+    return _is_guard_method_call(node, "protect")
+
+
+def _is_guard_method_call(node: ast.expr, method: str) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    fn = node.func
+    return (
+        isinstance(fn, ast.Attribute)
+        and fn.attr.lower() == method
+        and "guard" in _receiver_tokens(fn.value)
+    )
 
 
 def _receiver_tokens(node: ast.expr) -> set[str]:

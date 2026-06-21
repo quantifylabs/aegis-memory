@@ -125,6 +125,12 @@ def _scan_module(tree: ast.Module, rel: str) -> list[_SinkSite]:
             scope_cache[id(func)] = scope
         value = _write_value(call)
         tr = taint.analyze(value, scope)
+        # ``store = guard.protect(store)`` in this scope screens writes *through that receiver*
+        # (sink-tied — a write to a different, unprotected store is left exposed).
+        if not tr.screened and isinstance(call.func, ast.Attribute):
+            recv_root = _root_name(call.func.value)
+            if recv_root and recv_root in scope.protected_receivers:
+                tr.screened = True
         out.append(
             _SinkSite(
                 file=rel,

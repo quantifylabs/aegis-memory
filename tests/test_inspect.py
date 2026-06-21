@@ -196,6 +196,72 @@ def test_loop_demo_guard_write_flips_finding_green(tmp_path):
     assert aflow and all(f.screened and f.severity != "critical" for f in aflow), aflow
 
 
+def test_discarded_verdict_does_not_screen_a_raw_write(tmp_path):
+    """Soundness gate (codex P1): computing a guard verdict but writing the RAW value must NOT be
+    screened — the fix/verify loop must never accept an unsafe patch. Screening is sink-tied: only
+    a write that uses verdict.content (or a guard-protected receiver) counts."""
+    unsafe = (
+        "import httpx\n"
+        "from aegis_memory import guard\n"
+        "class A:\n"
+        "    def __init__(self, memory): self.memory = memory\n"
+        "    def hunt(self, url):\n"
+        "        raw = httpx.get(url)\n"
+        "        verdict = guard.write(raw, trust_level='untrusted', scope='agent-shared',"
+        " on_reject='return')\n"
+        "        self.memory.store_intelligence(content=raw)  # BUG: ignores verdict, writes raw\n"
+    )
+    d = tmp_path / "unsafe"; d.mkdir()
+    (d / "agent.py").write_text(unsafe, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(not f.screened and f.severity == "critical" for f in flows), flows
+
+
+def test_applied_guard_write_is_not_itself_a_sink(tmp_path):
+    """codex P2: the recommended fix contains ``guard.write(value, trust_level=..., scope=...)`` —
+    that screening call must NOT be re-flagged as a memory-write sink (nor an overbroad-shared
+    finding) on rescan; only the real downstream write is a sink."""
+    fixed = (
+        "import httpx\n"
+        "from aegis_memory import guard\n"
+        "class A:\n"
+        "    def __init__(self, memory): self.memory = memory\n"
+        "    def hunt(self, url):\n"
+        "        raw = httpx.get(url)\n"
+        "        verdict = guard.write(raw, trust_level='untrusted', scope='agent-shared',"
+        " on_reject='return')\n"
+        "        if verdict.allowed:\n"
+        "            self.memory.store_intelligence(content=verdict.content)\n"
+    )
+    d = tmp_path / "fixed"; d.mkdir()
+    (d / "agent.py").write_text(fixed, encoding="utf-8")
+    findings = analyze_project(d)
+    assert all("guard.write" not in f.sink.call and "guard.protect" not in f.sink.call
+               for f in findings), [f.sink.call for f in findings]
+    # The single real sink is the store_intelligence write, and it's screened (uses verdict.content).
+    flows = [f for f in findings if f.category.endswith("_to_memory")]
+    assert flows and all(f.screened for f in flows)
+
+
+def test_guard_protect_screens_only_its_own_receiver(tmp_path):
+    """Sink-tied screening for ``guard.protect``: a write through the wrapped receiver is screened;
+    a write to a *different*, unprotected store in the same function is not (no blanket green)."""
+    src = (
+        "import httpx\n"
+        "from aegis_memory import guard\n"
+        "def run(store, audit_store, url):\n"
+        "    raw = httpx.get(url)\n"
+        "    store = guard.protect(store, scope='agent-shared')\n"
+        "    store.put(('ns',), 'k', {'text': raw})       # screened: through the protected store\n"
+        "    audit_store.put(('ns',), 'k', {'text': raw}) # exposed: different, unprotected store\n"
+    )
+    d = tmp_path / "protect"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = {f.sink.call: f for f in analyze_project(d) if f.category.endswith("_to_memory")}
+    assert flows.get("store.put") and flows["store.put"].screened
+    assert flows.get("audit_store.put") and not flows["audit_store.put"].screened
+
+
 def test_generated_flow_fix_is_verdict_checked_and_tailored():
     """Task A: the generated fix uses the real verdict-checked API (never the old
     verdict-discarding ``guard.write(content, ...)``), built from the finding's own call site."""
