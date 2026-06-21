@@ -192,7 +192,14 @@ def _resolve(
         call_expr = expr
     callee = _callee_name(call_expr) if isinstance(call_expr, ast.Call) else None
     if callee:
-        for fr in index.functions.get(callee, []):
+        # Name-based dispatch hazard: several files may define a helper of the same name (e.g. each
+        # agent has its own ``_format_for_storage``). Resolve against the *same-file* definition
+        # first so we never stamp another module's line numbers onto this sink. Only when no
+        # same-file definition exists do we fall back to cross-file candidates (a genuine
+        # imported helper), which the bounded-depth note already flags as best-effort.
+        candidates = index.functions.get(callee, [])
+        same_file = [fr for fr in candidates if fr.file == file]
+        for fr in same_file or candidates:
             for ret in fr.returns:
                 sub = _resolve(ret, fr.node, fr.file, index, depth + 1, nvisited)
                 if sub is not None:

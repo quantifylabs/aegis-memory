@@ -18,6 +18,7 @@ from aegis_memory.inspect import analyze_project, derive_unsafe_memory_flows, ru
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect"
 TAINT_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_taint"
+NAMECOLLIDE_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_namecollide"
 DEMO_DIR = REPO_ROOT / "examples" / "aegis-memory-firewall"
 AGENT_DIR = DEMO_DIR / "agent"
 
@@ -143,6 +144,137 @@ def test_crossfile_flow_is_in_derived_unsafe_memory_flows():
     assert all(f.get("owasp") == "ASI06" for f in flows)
 
 
+def test_namecollision_flow_paths_resolve_per_file():
+    """Two agents each define their own ``_format_for_storage`` fed by their own untrusted source.
+    Each finding's flow_path must cite *its own* file — no cross-file contamination (the resolver
+    must not resolve the helper by name to the first definition and stamp another file's lines)."""
+    findings = analyze_project(NAMECOLLIDE_FIXTURES)
+    flows = [f for f in findings if f.category.endswith("_to_memory")]
+    by_file = {f.sink.file.rsplit("/", 1)[-1]: f for f in flows}
+    assert "alpha_agent.py" in by_file and "beta_agent.py" in by_file, by_file
+
+    for stem, f in by_file.items():
+        assert f.flow_path, f"{stem} must carry a source->sink edge"
+        cited = {step["file"].rsplit("/", 1)[-1] for step in f.flow_path}
+        assert cited == {stem}, (
+            f"{stem}'s flow_path must cite only its own file, got {cited}"
+        )
+
+
+def test_loop_demo_guard_write_flips_finding_green(tmp_path):
+    """The fix->verify loop, proven: the *same* write is critical/red when unscreened and
+    screened/green once the recommended ``guard.write(...)`` fix is applied — no auto-apply, just
+    re-run. This is the loop the report promises (apply fix -> /aegis:inspect -> lane turns green)."""
+    unscreened = (
+        "import httpx\n"
+        "class A:\n"
+        "    def __init__(self, memory): self.memory = memory\n"
+        "    def hunt(self, url):\n"
+        "        raw = httpx.get(url)\n"
+        "        self.memory.store_intelligence(content=f'intel: {raw}')\n"
+    )
+    screened = (
+        "import httpx\n"
+        "from aegis_memory import guard\n"
+        "class A:\n"
+        "    def __init__(self, memory): self.memory = memory\n"
+        "    def hunt(self, url):\n"
+        "        raw = httpx.get(url)\n"
+        "        verdict = guard.write(f'intel: {raw}', trust_level='untrusted',"
+        " scope='agent-shared', on_reject='return')\n"
+        "        if verdict.allowed:\n"
+        "            self.memory.store_intelligence(content=verdict.content)\n"
+    )
+    before = tmp_path / "before"; before.mkdir()
+    after = tmp_path / "after"; after.mkdir()
+    (before / "agent.py").write_text(unscreened, encoding="utf-8")
+    (after / "agent.py").write_text(screened, encoding="utf-8")
+
+    bflow = [f for f in analyze_project(before) if f.category.endswith("_to_memory")]
+    aflow = [f for f in analyze_project(after) if f.category.endswith("_to_memory")]
+    assert bflow and all(not f.screened and f.severity == "critical" for f in bflow), bflow
+    assert aflow and all(f.screened and f.severity != "critical" for f in aflow), aflow
+
+
+def test_discarded_verdict_does_not_screen_a_raw_write(tmp_path):
+    """Soundness gate (codex P1): computing a guard verdict but writing the RAW value must NOT be
+    screened — the fix/verify loop must never accept an unsafe patch. Screening is sink-tied: only
+    a write that uses verdict.content (or a guard-protected receiver) counts."""
+    unsafe = (
+        "import httpx\n"
+        "from aegis_memory import guard\n"
+        "class A:\n"
+        "    def __init__(self, memory): self.memory = memory\n"
+        "    def hunt(self, url):\n"
+        "        raw = httpx.get(url)\n"
+        "        verdict = guard.write(raw, trust_level='untrusted', scope='agent-shared',"
+        " on_reject='return')\n"
+        "        self.memory.store_intelligence(content=raw)  # BUG: ignores verdict, writes raw\n"
+    )
+    d = tmp_path / "unsafe"; d.mkdir()
+    (d / "agent.py").write_text(unsafe, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(not f.screened and f.severity == "critical" for f in flows), flows
+
+
+def test_applied_guard_write_is_not_itself_a_sink(tmp_path):
+    """codex P2: the recommended fix contains ``guard.write(value, trust_level=..., scope=...)`` —
+    that screening call must NOT be re-flagged as a memory-write sink (nor an overbroad-shared
+    finding) on rescan; only the real downstream write is a sink."""
+    fixed = (
+        "import httpx\n"
+        "from aegis_memory import guard\n"
+        "class A:\n"
+        "    def __init__(self, memory): self.memory = memory\n"
+        "    def hunt(self, url):\n"
+        "        raw = httpx.get(url)\n"
+        "        verdict = guard.write(raw, trust_level='untrusted', scope='agent-shared',"
+        " on_reject='return')\n"
+        "        if verdict.allowed:\n"
+        "            self.memory.store_intelligence(content=verdict.content)\n"
+    )
+    d = tmp_path / "fixed"; d.mkdir()
+    (d / "agent.py").write_text(fixed, encoding="utf-8")
+    findings = analyze_project(d)
+    assert all("guard.write" not in f.sink.call and "guard.protect" not in f.sink.call
+               for f in findings), [f.sink.call for f in findings]
+    # The single real sink is the store_intelligence write, and it's screened (uses verdict.content).
+    flows = [f for f in findings if f.category.endswith("_to_memory")]
+    assert flows and all(f.screened for f in flows)
+
+
+def test_guard_protect_screens_only_its_own_receiver(tmp_path):
+    """Sink-tied screening for ``guard.protect``: a write through the wrapped receiver is screened;
+    a write to a *different*, unprotected store in the same function is not (no blanket green)."""
+    src = (
+        "import httpx\n"
+        "from aegis_memory import guard\n"
+        "def run(store, audit_store, url):\n"
+        "    raw = httpx.get(url)\n"
+        "    store = guard.protect(store, scope='agent-shared')\n"
+        "    store.put(('ns',), 'k', {'text': raw})       # screened: through the protected store\n"
+        "    audit_store.put(('ns',), 'k', {'text': raw}) # exposed: different, unprotected store\n"
+    )
+    d = tmp_path / "protect"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = {f.sink.call: f for f in analyze_project(d) if f.category.endswith("_to_memory")}
+    assert flows.get("store.put") and flows["store.put"].screened
+    assert flows.get("audit_store.put") and not flows["audit_store.put"].screened
+
+
+def test_generated_flow_fix_is_verdict_checked_and_tailored():
+    """Task A: the generated fix uses the real verdict-checked API (never the old
+    verdict-discarding ``guard.write(content, ...)``), built from the finding's own call site."""
+    findings = analyze_project(TAINT_FIXTURES)
+    flow = next(f for f in findings if "store_intelligence" in f.sink.call and not f.screened)
+    fix = flow.fix
+    assert "guard.write(" in fix and "verdict.allowed" in fix and "verdict.content" in fix
+    assert 'on_reject="return"' in fix
+    # Tailored to the real receiver/method, not a hardcoded ``store``.
+    assert "guard.protect(self.memory" in fix
+    assert flow.sink.call.split(".")[-1] in fix  # the real sink method appears in the rewritten call
+
+
 def test_local_list_append_is_not_flagged():
     """The true negative: a plain ``stored.append(x)`` returned locally is NOT a memory sink, even
     though the variable name contains 'store' (the old false-positive shape)."""
@@ -231,7 +363,7 @@ def test_inspection_writes_all_artifacts(tmp_path):
     html = (out / "agent_memory_map.html").read_text(encoding="utf-8")
     # Responsive, and the header renders the real computed "after" score (not the 29 fallback).
     assert "viewport" in html
-    assert f'"after">{result.score["score"]}<' in html
+    assert f' after">{result.score["score"]}<' in html
 
 
 def test_real_before_score_renders_through_html_not_fallback(tmp_path):
@@ -240,9 +372,9 @@ def test_real_before_score_renders_through_html_not_fallback(tmp_path):
     out = tmp_path / "out"
     result = run_inspection(DEMO_DIR, out_dir=out, write=True, before_score=42)
     html = (out / "agent_memory_map.html").read_text(encoding="utf-8")
-    assert '"before">42<' in html  # the real supplied "before"
-    assert f'"after">{result.score["score"]}<' in html  # the real computed "after"
-    assert '"before">86<' not in html and '"after">29<' not in html  # fallbacks not used
+    assert ' before">42<' in html  # the real supplied "before" (risk-coloured span)
+    assert f' after">{result.score["score"]}<' in html  # the real computed "after"
+    assert ' before">86<' not in html and ' after">29<' not in html  # fallbacks not used
     # The report leads with the real transition too.
     report = (out / "INSPECTION_REPORT.md").read_text(encoding="utf-8")
     assert f"**42 → {result.score['score']} / 100**" in report

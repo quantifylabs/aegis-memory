@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from . import interproc, sinks, taint
+from . import fixgen, interproc, sinks, taint
 from .findings import Category, Finding, Sink
 
 # Directories we never descend into.
@@ -125,6 +125,12 @@ def _scan_module(tree: ast.Module, rel: str) -> list[_SinkSite]:
             scope_cache[id(func)] = scope
         value = _write_value(call)
         tr = taint.analyze(value, scope)
+        # ``store = guard.protect(store)`` in this scope screens writes *through that receiver*
+        # (sink-tied — a write to a different, unprotected store is left exposed).
+        if not tr.screened and isinstance(call.func, ast.Attribute):
+            recv_root = _root_name(call.func.value)
+            if recv_root and recv_root in scope.protected_receivers:
+                tr.screened = True
         out.append(
             _SinkSite(
                 file=rel,
@@ -292,10 +298,11 @@ def _build_findings(
                     source=("tool_output" if is_tool else "untrusted_input"),
                     trust="untrusted",
                     title=title,
-                    fix=(
-                        "from aegis_memory import guard\n"
-                        "store = guard.protect(store, scope='agent-shared')  # screen every write, or:\n"
-                        "guard.write(content, trust_level='untrusted', scope='agent-shared')"
+                    fix=fixgen.build_flow_fix(
+                        s.call,
+                        s.write_value,
+                        scope="agent-shared" if s.namespace_shared else "agent-private",
+                        trust="untrusted",
                     ),
                     screened=tr.screened,
                     notes=notes,
