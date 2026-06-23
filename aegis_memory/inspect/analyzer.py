@@ -10,11 +10,11 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import cast
 
-from . import fixgen, interproc, sinks, taint
+from . import fixgen, interproc, notebooks, sinks, taint
 from .findings import Category, Finding, Sink
 
 # Directories we never descend into.
@@ -31,6 +31,7 @@ _SKIP_DIRS = {
     ".mypy_cache",
     ".pytest_cache",
     ".ruff_cache",
+    ".ipynb_checkpoints",
     "build",
     "dist",
     ".tox",
@@ -73,12 +74,17 @@ def analyze_project(root: str | Path, framework: str | None = None) -> list[Find
     the bounded interprocedural resolver follows the value across function/file boundaries."""
     root = Path(root).resolve()
     modules: list[tuple[str, ast.Module]] = []
-    for path in _iter_python_files(root):
-        try:
-            source = path.read_text(encoding="utf-8")
-            tree = ast.parse(source, filename=str(path))
-        except (SyntaxError, UnicodeDecodeError):
-            continue
+    for path in _iter_source_files(root):
+        if path.suffix == ".ipynb":
+            tree = notebooks.load_notebook(path)
+            if tree is None:
+                continue
+        else:
+            try:
+                source = path.read_text(encoding="utf-8")
+                tree = ast.parse(source, filename=str(path))
+            except (SyntaxError, UnicodeDecodeError):
+                continue
         rel = _rel(path, root)
         _annotate_parents(tree)
         modules.append((rel, tree))
@@ -111,12 +117,18 @@ def _scan_module(tree: ast.Module, rel: str) -> list[_SinkSite]:
     """Visit each Call once, scoped to its nearest enclosing function (no double-count)."""
     out: list[_SinkSite] = []
     scope_cache: dict[int, taint.FunctionScope] = {}
+    framework_hint = _module_framework(tree)
     for call in ast.walk(tree):
         if not isinstance(call, ast.Call):
             continue
         match = _match_call(call)
         if match is None:
             continue
+        # Label-only refinement: a generic sink in a module that clearly imports a known memory
+        # library is attributed to it (e.g. ``custom`` -> ``mem0``). Never relabels the precise
+        # ``aegis``/``langgraph`` tiers, and never changes which sinks are detected.
+        if framework_hint and match.framework in ("custom", "vectordb"):
+            match = replace(match, framework=framework_hint)
         func = _enclosing_function(call)
         if func is None:
             scope = taint.FunctionScope(func=_EMPTY_FUNC)
@@ -145,6 +157,31 @@ def _scan_module(tree: ast.Module, rel: str) -> list[_SinkSite]:
             )
         )
     return out
+
+
+# Top-level import roots that attribute a module's generic memory sinks to a known library.
+_FRAMEWORK_IMPORTS = {
+    "mem0": "mem0",
+    "embedchain": "embedchain",
+    "crewai": "crewai",
+    "crewai_tools": "crewai",
+}
+
+
+def _module_framework(tree: ast.Module) -> str | None:
+    """A framework label inferred from the module's imports, or None. Label-only (Fix 4) — a
+    lightweight stand-in for receiver->library binding (deferred to Batch B)."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                root = alias.name.split(".")[0]
+                if root in _FRAMEWORK_IMPORTS:
+                    return _FRAMEWORK_IMPORTS[root]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            root = node.module.split(".")[0]
+            if root in _FRAMEWORK_IMPORTS:
+                return _FRAMEWORK_IMPORTS[root]
+    return None
 
 
 def _match_call(call: ast.Call) -> sinks.SinkMatch | None:
@@ -403,8 +440,9 @@ def _assign_ids(findings: list[Finding]) -> list[Finding]:
 # --- ast utilities -----------------------------------------------------------------
 
 
-def _iter_python_files(root: Path) -> Iterator[Path]:
-    for path in sorted(root.rglob("*.py")):
+def _iter_source_files(root: Path) -> Iterator[Path]:
+    """Python source and Jupyter notebooks, skipping vendored/output dirs. Sorted for determinism."""
+    for path in sorted(root.rglob("*.py")) + sorted(root.rglob("*.ipynb")):
         if any(part in _SKIP_DIRS for part in path.parts):
             continue
         yield path

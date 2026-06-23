@@ -19,6 +19,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect"
 TAINT_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_taint"
 NAMECOLLIDE_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_namecollide"
+STREAMLIT_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_streamlit"
+NOTEBOOK_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_notebook"
 DEMO_DIR = REPO_ROOT / "examples" / "aegis-memory-firewall"
 AGENT_DIR = DEMO_DIR / "agent"
 
@@ -403,6 +405,101 @@ def test_map_is_proof_first_trace_then_scan_then_table(tmp_path):
     # The live-scan panel renders the REAL scanner verdict, not a story.
     assert 'class="verdict-chip reject"' in html
     assert "injection_override" in html
+
+
+# --- Batch A: source vocabulary + notebook ingestion + framework labels ------------
+
+
+def test_batcha_streamlit_chat_input_flow_is_tailored_and_labeled_mem0():
+    """Fix 1 (the conversion gate): raw ``st.chat_input`` (captured via a walrus) written to Mem0
+    memory must resolve untrusted, escalate above ``low``, and — crucially — emit the TAILORED
+    ``guard.write(...)`` fix with the sink arg replaced by ``verdict.content`` (node identity held).
+    Fix 4: the sink is labeled ``mem0`` (the module imports ``mem0``), not ``custom``."""
+    findings = analyze_project(STREAMLIT_FIXTURES)
+    flow = next((f for f in findings if f.category.endswith("_to_memory")), None)
+    assert flow is not None, "the chat_input -> memory.add flow must be detected"
+    assert flow.trust == "untrusted" and flow.severity == "critical" and not flow.screened
+    assert flow.source == "untrusted_input"
+    assert "chat_input" in " ".join(flow.notes + [s.get("note", "") for s in flow.flow_path])
+    # Fix 4: label refined to the imported library.
+    assert flow.sink.framework == "mem0", flow.sink.framework
+    # The tailored fix — not the generic nudge — with the written value swapped for verdict.content.
+    fix = flow.fix
+    assert "guard.write(" in fix and "verdict.allowed" in fix and "verdict.content" in fix
+    assert "messages=verdict.content" in fix, fix
+
+
+def test_batcha_crewai_tool_run_param_is_untrusted_on_catalog_sink(tmp_path):
+    """Fix 1: a CrewAI tool ``_run`` parameter is treated as untrusted. Proven on a sink the catalog
+    already matches (a vector-store ``collection.add``); detecting the embedchain ``app.add`` shape
+    itself is alias-receiver work deferred to Batch B."""
+    src = (
+        "class AddVideoToVectorDBTool(BaseTool):\n"
+        "    def _run(self, video_url):\n"
+        "        self.collection.add(video_url)\n"
+    )
+    d = tmp_path / "crewai"; d.mkdir()
+    (d / "tool.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows, "the _run param must trace untrusted to the catalog-matched vectordb sink"
+    assert all(f.trust == "untrusted" and f.severity == "critical" for f in flows)
+    assert any(f.source == "tool_output" for f in flows)
+
+
+def test_batcha_langgraph_state_param_is_untrusted(tmp_path):
+    """Fix 1: a LangGraph node's ``state`` parameter is untrusted-by-default, so a value read from
+    it and written to the store resolves untrusted."""
+    src = (
+        "def write_memory(state):\n"
+        "    store.put(('memories',), 'k', state['text'])\n"
+    )
+    d = tmp_path / "lg"; d.mkdir()
+    (d / "node.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(f.trust == "untrusted" for f in flows)
+
+
+def test_batcha_input_builtin_is_untrusted(tmp_path):
+    """Fix 1: builtin ``input(...)`` is an untrusted source (generic CLI agents)."""
+    src = (
+        "def run(store):\n"
+        "    text = input('> ')\n"
+        "    store.put(('ns',), 'k', text)\n"
+    )
+    d = tmp_path / "cli"; d.mkdir()
+    (d / "main.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(f.trust == "untrusted" for f in flows)
+
+
+def test_batcha_notebook_ingested_pip_cell_does_not_drop_file():
+    """Fix 2: a ``.ipynb`` with a leading ``%pip`` cell is ingested (magic-stripped) and its
+    ``store.put`` sink is found with a real line anchor — not silently skipped."""
+    findings = analyze_project(NOTEBOOK_FIXTURES)
+    puts = [f for f in findings if f.sink.call.endswith("put") and f.sink.file.endswith(".ipynb")]
+    assert puts, "the notebook's store.put sink must be detected despite the %pip cell"
+    assert all(f.sink.line > 0 for f in puts), "line numbers must map back into the notebook"
+    assert any(f.sink.framework == "langgraph" for f in puts)
+
+
+def test_batcha_notebook_per_cell_fallback_recovers_good_cell(tmp_path):
+    """Fix 2: when whole-file parse fails (a cell with a syntax error), the per-cell fallback still
+    recovers the other cells' sinks instead of losing the whole notebook."""
+    import json
+
+    nb = {
+        "cells": [
+            {"cell_type": "code", "source": ["%pip install -q langgraph"]},
+            {"cell_type": "code", "source": ["def n(state):\n", "    store.put(('ns',), 'k', state['x'])\n"]},
+            {"cell_type": "code", "source": ["def broken(:\n", "    pass\n"]},  # SyntaxError
+        ],
+        "metadata": {}, "nbformat": 4, "nbformat_minor": 5,
+    }
+    d = tmp_path / "nb"; d.mkdir()
+    (d / "x.ipynb").write_text(json.dumps(nb), encoding="utf-8")
+    findings = analyze_project(d)
+    puts = [f for f in findings if f.sink.call.endswith("put")]
+    assert puts, "the good cell's store.put must survive the broken cell (per-cell fallback)"
 
 
 # --- the real replay scan ----------------------------------------------------------
