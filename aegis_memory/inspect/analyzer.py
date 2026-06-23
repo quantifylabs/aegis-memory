@@ -63,6 +63,9 @@ class _SinkSite:
     call: ast.Call | None = None
     func: ast.FunctionDef | ast.AsyncFunctionDef | None = None
     write_value: ast.expr | None = None
+    # The untrusted *leaf* within ``write_value`` (e.g. ``state['x']`` inside ``{'text': state['x']}``),
+    # so the generated fix screens that leaf and preserves the written container's shape.
+    write_leaf: ast.expr | None = None
     flow_path: list[dict] = field(default_factory=list)
 
 
@@ -137,6 +140,7 @@ def _scan_module(tree: ast.Module, rel: str) -> list[_SinkSite]:
             scope_cache[id(func)] = scope
         value = _write_value(call)
         tr = taint.analyze(value, scope)
+        leaf = taint.untrusted_leaf(value, scope)
         # ``store = guard.protect(store)`` in this scope screens writes *through that receiver*
         # (sink-tied — a write to a different, unprotected store is left exposed).
         if not tr.screened and isinstance(call.func, ast.Attribute):
@@ -154,6 +158,7 @@ def _scan_module(tree: ast.Module, rel: str) -> list[_SinkSite]:
                 call=call,
                 func=func,
                 write_value=value,
+                write_leaf=leaf,
             )
         )
     return out
@@ -338,6 +343,7 @@ def _build_findings(
                     fix=fixgen.build_flow_fix(
                         s.call,
                         s.write_value,
+                        screen_value=s.write_leaf,
                         scope="agent-shared" if s.namespace_shared else "agent-private",
                         trust="untrusted",
                     ),

@@ -447,9 +447,10 @@ def test_batcha_crewai_tool_run_param_is_untrusted_on_catalog_sink(tmp_path):
 
 
 def test_batcha_langgraph_state_param_is_untrusted(tmp_path):
-    """Fix 1: a LangGraph node's ``state`` parameter is untrusted-by-default, so a value read from
-    it and written to the store resolves untrusted."""
+    """Fix 1: a LangGraph node's ``state`` parameter is untrusted-by-default (the module imports
+    langgraph), so a value read from it and written to the store resolves untrusted."""
     src = (
+        "from langgraph.graph import StateGraph\n"
         "def write_memory(state):\n"
         "    store.put(('memories',), 'k', state['text'])\n"
     )
@@ -457,6 +458,46 @@ def test_batcha_langgraph_state_param_is_untrusted(tmp_path):
     (d / "node.py").write_text(src, encoding="utf-8")
     flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
     assert flows and all(f.trust == "untrusted" for f in flows)
+
+
+def test_batcha_state_param_not_tainted_without_langgraph(tmp_path):
+    """Codex P2: the ``state`` heuristic is gated on a langgraph import. An ordinary internal
+    ``def persist(state): store.put(..., state)`` in a non-LangGraph app must NOT be escalated to an
+    untrusted/critical flow — it stays a structural memory-write finding."""
+    src = (
+        "def persist(state):\n"
+        "    store.put(('memories',), 'k', state)\n"
+    )
+    d = tmp_path / "plain"; d.mkdir()
+    (d / "app.py").write_text(src, encoding="utf-8")
+    findings = analyze_project(d)
+    assert not [f for f in findings if f.category.endswith("_to_memory")], (
+        "bare `state` in a non-langgraph module must not be treated as untrusted"
+    )
+    puts = [f for f in findings if f.sink.call.endswith("put")]
+    assert puts and all(f.trust != "untrusted" and f.severity != "critical" for f in puts)
+
+
+def test_batcha_container_fix_preserves_shape(tmp_path):
+    """Codex P2: a sink that writes a structured container (``store.put(ns, key, {'text': state['x']})``)
+    must screen the untrusted *leaf* and keep the container shape — the generated fix writes
+    ``{'text': verdict.content}``, never ``guard.write({'text': ...})`` / a whole-dict swap that would
+    corrupt the stored schema."""
+    src = (
+        "from langgraph.graph import StateGraph\n"
+        "def node(state):\n"
+        "    store.put(('memories',), 'k', {'text': state['x'], 'meta': 'static'})\n"
+    )
+    d = tmp_path / "container"; d.mkdir()
+    (d / "node.py").write_text(src, encoding="utf-8")
+    flow = next(f for f in analyze_project(d) if f.category.endswith("_to_memory"))
+    fix = flow.fix
+    # Screens the leaf, not the dict; the written container keeps its shape.
+    assert "guard.write(state['x']" in fix, fix
+    assert "{'text': verdict.content, 'meta': 'static'}" in fix, fix
+    # The corrupting whole-dict forms must not appear.
+    assert "guard.write({'text'" not in fix
+    assert "'k', verdict.content)" not in fix
 
 
 def test_batcha_input_builtin_is_untrusted(tmp_path):
