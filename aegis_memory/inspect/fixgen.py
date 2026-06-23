@@ -22,20 +22,36 @@ import copy
 _GUARD_IMPORT = "from aegis_memory import guard"
 
 
+# Structured containers whose schema a whole-value swap would corrupt (dict -> string, etc.).
+# An f-string / concatenation is NOT here: it evaluates to a string, so a whole swap preserves shape.
+_STRUCTURED_CONTAINERS = (ast.Dict, ast.List, ast.Tuple, ast.Set)
+
+
 def build_flow_fix(
     call: ast.Call | None,
     write_value: ast.expr | None,
     *,
+    screen_value: ast.expr | None = None,
     scope: str = "agent-shared",
     trust: str = "untrusted",
 ) -> str:
-    """Return a verdict-checked fix tailored to this sink, or a generic verdict-checked fallback."""
+    """Return a verdict-checked fix tailored to this sink, or a generic verdict-checked fallback.
+
+    ``screen_value`` is the untrusted *leaf* to screen (e.g. ``state['x']`` inside a written
+    ``{'text': state['x']}``); when given, the fix screens that leaf and swaps it in place, so the
+    written container keeps its shape. When omitted it defaults to ``write_value``. If the value to
+    screen is a structured container (dict/list/tuple/set), a whole-value swap would change the
+    stored schema, so we emit the safe generic snippet instead of a corrupting surgical fix."""
     try:
         if call is None or write_value is None:
             return _generic_fix(scope, trust)
+        target = screen_value if screen_value is not None else write_value
+        if isinstance(target, _STRUCTURED_CONTAINERS):
+            # No scalar leaf was resolved; screening the whole container would corrupt its schema.
+            return _generic_fix(scope, trust)
         receiver, _method = _split_receiver_method(call)
-        value_src = ast.unparse(write_value)
-        rewritten = _rewrite_sink_call(call, write_value)
+        value_src = ast.unparse(target)
+        rewritten = _rewrite_sink_call(call, target)
         resolved_scope = _scope_from_call(call) or scope
         if value_src and rewritten:
             return _tailored_fix(value_src, rewritten, receiver, resolved_scope, trust)
@@ -97,23 +113,52 @@ def _split_receiver_method(call: ast.Call) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _rewrite_sink_call(call: ast.Call, write_value: ast.expr) -> str | None:
-    """The original sink call with the tainted argument replaced by ``verdict.content``.
+def _rewrite_sink_call(call: ast.Call, target: ast.expr) -> str | None:
+    """The original sink call with the tainted node replaced by ``verdict.content``.
 
-    Identity-matches ``write_value`` against the original call's args/keywords to locate the
-    tainted slot, then swaps it in a deep copy — preserving every other argument (``scope=``,
-    ``shared_with_agents=``, the ``put(ns, key, value)`` positionals, …)."""
+    Locates ``target`` *anywhere* in the call by object identity — a top-level argument
+    (``add(value)``), a keyword (``add(messages=value)``), a ``put(ns, key, value)`` positional, or a
+    node nested inside a container (the ``state['x']`` inside ``{'text': state['x']}``) — and swaps
+    only that node in a deep copy, preserving every other argument and the container's shape."""
+    path = _path_to(call, target)
+    if path is None:
+        return None
     placeholder = ast.parse("verdict.content", mode="eval").body
     new_call = copy.deepcopy(call)
-    for orig_kw, new_kw in zip(call.keywords, new_call.keywords):
-        if orig_kw.value is write_value:
-            new_kw.value = placeholder
-            return ast.unparse(new_call)
-    for i, orig_arg in enumerate(call.args):
-        if orig_arg is write_value:
-            new_call.args[i] = placeholder
-            return ast.unparse(new_call)
+    if not _set_at_path(new_call, path, placeholder):
+        return None
+    return ast.unparse(new_call)
+
+
+def _path_to(node: ast.AST, target: ast.AST, path: tuple = ()) -> tuple | None:
+    """Field/index path from ``node`` to ``target`` (matched by identity), or None. Empty path
+    (``node is target``) is treated as no path — the swap target must be inside the call."""
+    if node is target:
+        return path or None
+    for field, value in ast.iter_fields(node):
+        if isinstance(value, list):
+            for i, item in enumerate(value):
+                if isinstance(item, ast.AST):
+                    found = _path_to(item, target, path + ((field, i),))
+                    if found is not None:
+                        return found
+        elif isinstance(value, ast.AST):
+            found = _path_to(value, target, path + ((field, None),))
+            if found is not None:
+                return found
     return None
+
+
+def _set_at_path(root: ast.AST, path: tuple, new_node: ast.AST) -> bool:
+    cur: object = root
+    for field, idx in path[:-1]:
+        cur = getattr(cur, field) if idx is None else getattr(cur, field)[idx]
+    field, idx = path[-1]
+    if idx is None:
+        setattr(cur, field, new_node)
+    else:
+        getattr(cur, field)[idx] = new_node
+    return True
 
 
 def _scope_from_call(call: ast.Call) -> str | None:

@@ -53,6 +53,10 @@ _UNTRUSTED_CALL_HINTS = (
     "run",
     "call",
     "complete",
+    # Streamlit user-input widgets — the value typed by an end user is untrusted.
+    "chat_input",
+    "text_input",
+    "text_area",
 )
 _UNTRUSTED_CALL_RECEIVERS = (
     "requests",
@@ -62,6 +66,8 @@ _UNTRUSTED_CALL_RECEIVERS = (
     "client",
     "tool",
     "open",
+    # Builtin ``input(...)`` — raw user input from the console.
+    "input",
 )
 
 # Tokens that mark a value as sanitized/screened by a content-security guard.
@@ -86,6 +92,10 @@ class FunctionScope:
 
     func: ast.FunctionDef | ast.AsyncFunctionDef
     param_names: set[str] = field(default_factory=set)
+    # Parameter names that are untrusted-by-default for this function shape: a CrewAI
+    # ``BaseTool._run`` carries scraped/fetched content, and a LangGraph node's ``state``
+    # carries incoming (email/tool) content. Specific shapes only — never a blanket rule.
+    untrusted_params: set[str] = field(default_factory=set)
     # name -> the value expression last assigned to it (best effort, top-level body)
     assignments: dict[str, ast.expr] = field(default_factory=dict)
     # variable names that flowed through a sanitizer call somewhere in the scope
@@ -111,7 +121,12 @@ class TaintResult:
 def build_scope(func: ast.FunctionDef | ast.AsyncFunctionDef) -> FunctionScope:
     scope = FunctionScope(func=func)
     scope.param_names = {a.arg for a in _all_args(func)}
+    scope.untrusted_params = _untrusted_params(func)
     for node in ast.walk(func):
+        if isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            # Walrus assignment (``prompt := st.chat_input(...)``) — record it like an Assign so
+            # the variable resolves to its source. Common in Streamlit (``if x := st.chat_input()``).
+            scope.assignments[node.target.id] = node.value
         if isinstance(node, ast.Assign):
             for tgt in node.targets:
                 if isinstance(tgt, ast.Name):
@@ -190,6 +205,40 @@ def _classify(node: ast.expr, scope: FunctionScope, depth: int) -> tuple[str, st
     return best
 
 
+def untrusted_leaf(write_value: ast.expr | None, scope: FunctionScope) -> ast.expr | None:
+    """The specific sub-expression of ``write_value`` that carries the untrusted data, so a fix can
+    screen *that leaf* and preserve the surrounding container shape.
+
+    For a scalar untrusted value (``prompt``, ``state['x']``, an f-string of untrusted parts) this is
+    ``write_value`` itself. For a structured container (``{'text': state['x']}``) it is the inner
+    untrusted node (``state['x']``), so the generated fix writes ``{'text': verdict.content}`` rather
+    than replacing the whole dict with a string. Returns None if no untrusted leaf resolves."""
+    if write_value is None:
+        return None
+    return _leaf(write_value, scope, 0)
+
+
+def _leaf(node: ast.expr, scope: FunctionScope, depth: int) -> ast.expr | None:
+    if depth > 4:
+        return None
+    # A node that is itself an untrusted source (name/subscript/attr/call/f-string/concat) — screen
+    # it whole. This keeps f-strings and concatenations intact (they evaluate to a string anyway).
+    if _untrusted_label(node, scope) is not None:
+        return node
+    # A bare variable assigned from an untrusted source: screen the variable at the call site.
+    if isinstance(node, ast.Name):
+        assigned = scope.assignments.get(node.id)
+        if assigned is not None and depth < 4 and _classify(assigned, scope, depth + 1) is not None:
+            return node
+        return None
+    # Structured/wrapper container: descend to the first untrusted leaf, preserving the container.
+    for child in _child_exprs(node):
+        found = _leaf(child, scope, depth + 1)
+        if found is not None:
+            return found
+    return None
+
+
 def _child_exprs(node: ast.expr) -> list[ast.expr]:
     if isinstance(node, ast.Dict):
         return [v for v in node.values if v is not None]
@@ -212,11 +261,91 @@ def _all_args(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.arg]:
     return [*a.posonlyargs, *a.args, *([a.vararg] if a.vararg else []), *a.kwonlyargs]
 
 
+def _untrusted_params(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    """Parameter names untrusted-by-default for two specific, high-signal function shapes.
+
+    * **CrewAI tool ``_run``/``_arun``** — a method on a class that subclasses a ``*Tool`` base;
+      its parameters carry the scraped/fetched content the tool exists to retrieve.
+    * **LangGraph node** — a function with a parameter named exactly ``state`` (the node signature)
+      **in a module that imports ``langgraph``**; ``state`` then carries the incoming email/tool
+      content the graph is processing. The import gate keeps an ordinary internal
+      ``def persist(state): ...`` in a non-LangGraph app from being treated as untrusted.
+
+    Deliberately narrow: this only re-scores *already-detected* sinks, never adds sink sites."""
+    out: set[str] = set()
+    params = [a.arg for a in _all_args(func)]
+    # LangGraph node — exact ``state`` parameter, gated on a langgraph import in the module.
+    if "state" in params and _module_imports_langgraph(func):
+        out.add("state")
+    # CrewAI tool _run — method whose enclosing class subclasses something named ``*Tool``.
+    if func.name in ("_run", "_arun") and _enclosing_is_tool_subclass(func):
+        out.update(p for p in params if p not in ("self", "cls"))
+    return out
+
+
+def _module_imports_langgraph(func: ast.AST) -> bool:
+    """True if the module enclosing ``func`` imports ``langgraph`` — the framework gate for the
+    LangGraph-node ``state`` heuristic. Uses the parent pointers the analyzer annotates; an
+    un-annotated (hand-parsed) tree simply yields False."""
+    mod = _root_module(func)
+    if mod is None:
+        return False
+    for node in ast.walk(mod):
+        if isinstance(node, ast.Import):
+            if any(a.name.split(".")[0] == "langgraph" for a in node.names):
+                return True
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.split(".")[0] == "langgraph":
+                return True
+    return False
+
+
+def _root_module(node: ast.AST) -> ast.Module | None:
+    """Walk parent pointers to the enclosing :class:`ast.Module`, or None if not reachable."""
+    cur: ast.AST | None = node
+    seen = 0
+    while cur is not None and seen < 200:
+        if isinstance(cur, ast.Module):
+            return cur
+        cur = getattr(cur, "parent", None)
+        seen += 1
+    return None
+
+
+def _enclosing_is_tool_subclass(func: ast.AST) -> bool:
+    """True if ``func``'s nearest enclosing class has a base whose name contains ``Tool``
+    (e.g. CrewAI ``BaseTool``). Relies on parent pointers annotated by the analyzer; absent
+    parents (hand-parsed trees) simply yield False."""
+    cur = getattr(func, "parent", None)
+    while cur is not None:
+        if isinstance(cur, ast.ClassDef):
+            for base in cur.bases:
+                if "tool" in (_attr_or_name(base) or "").lower():
+                    return True
+            return False
+        cur = getattr(cur, "parent", None)
+    return False
+
+
+def _attr_or_name(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
 def _untrusted_label(node: ast.expr, scope: FunctionScope) -> tuple[str, str] | None:
     """Return (source, human-note) if node reads an untrusted source, else None."""
-    # Name matching an untrusted hint (param or var).
+    # Name matching an untrusted hint (param or var), or a param marked untrusted-by-shape
+    # (CrewAI tool ``_run`` arg / LangGraph ``state``).
     if isinstance(node, ast.Name):
         n = node.id.lower()
+        if node.id in scope.untrusted_params:
+            # LangGraph ``state`` carries incoming (email/user) content; a CrewAI tool ``_run``
+            # parameter carries scraped/fetched tool output.
+            kind = "untrusted_input" if node.id == "state" else "tool_output"
+            return (kind, f"untrusted param '{node.id}'")
         if any(h in n for h in _UNTRUSTED_NAME_HINTS):
             kind = "tool_output" if ("tool" in n or "observation" in n) else "untrusted_input"
             return (kind, f"name '{node.id}'")
@@ -315,4 +444,4 @@ def _expr_names(node: ast.expr) -> set[str]:
     return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
 
 
-__all__ = ["FunctionScope", "TaintResult", "analyze", "build_scope"]
+__all__ = ["FunctionScope", "TaintResult", "analyze", "build_scope", "untrusted_leaf"]
