@@ -173,47 +173,59 @@ def _own_scope_stmts(scope: ast.AST) -> Iterator[ast.AST]:
         yield from _own_scope_stmts(child)
 
 
+def _assign_pairs(stmt: ast.AST) -> Iterator[tuple[ast.expr, ast.expr]]:
+    """(target, value) pairs for both plain (``m = X()``) and annotated (``m: T = X()``) assignments.
+    Annotated assignments are :class:`ast.AnnAssign`, not :class:`ast.Assign`, so a collector that
+    only inspects ``Assign`` would silently miss typed aliases."""
+    if isinstance(stmt, ast.Assign):
+        for tgt in stmt.targets:
+            yield tgt, stmt.value
+    elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+        yield stmt.target, stmt.value
+
+
 def _local_constructors(scope: ast.AST) -> Iterator[tuple[str, str]]:
-    """``name = Constructor()`` assignments in a scope's own body (a function or the module) ->
-    (name, class name)."""
+    """``name = Constructor()`` / ``name: T = Constructor()`` assignments in a scope's own body (a
+    function or the module) -> (name, class name)."""
     for stmt in _own_scope_stmts(scope):
-        if isinstance(stmt, ast.Assign):
-            ctor = _ctor_name(stmt.value)
-            if ctor is None:
-                continue
-            for tgt in stmt.targets:
-                if isinstance(tgt, ast.Name):
-                    yield tgt.id, ctor
+        for tgt, value in _assign_pairs(stmt):
+            ctor = _ctor_name(value)
+            if ctor is not None and isinstance(tgt, ast.Name):
+                yield tgt.id, ctor
 
 
 def _func_local_names(func: _FuncDef) -> set[str]:
-    """Names that belong to ``func``'s own scope — its parameters plus every plain-``Name`` assignment
-    target. Used to detect a local that shadows a module global of the same name."""
+    """Names that belong to ``func``'s own scope — its parameters plus every ``Name`` assignment
+    target (plain, annotated, or a ``for`` target). Used to detect a local that shadows a module
+    global of the same name. Annotated locals (``m: set = set()`` — even value-less ``m: set``) make
+    ``m`` function-local in Python, so they must be recorded or the shadow guard leaks to the global."""
     names = {a.arg for a in _all_args(func)}
     for stmt in _own_scope_stmts(func):
         if isinstance(stmt, ast.Assign):
             for tgt in stmt.targets:
                 if isinstance(tgt, ast.Name):
                     names.add(tgt.id)
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            names.add(stmt.target.id)
         elif isinstance(stmt, ast.For) and isinstance(stmt.target, ast.Name):
             names.add(stmt.target.id)
     return names
 
 
 def _self_attr_constructors(klass: ast.ClassDef) -> Iterator[tuple[str, str]]:
-    """``self.attr = Constructor()`` assignments in the class's methods -> (attr, class name)."""
+    """``self.attr = Constructor()`` (or ``self.attr: T = Constructor()``) assignments in the class's
+    methods -> (attr, class name)."""
     for item in klass.body:
         if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for stmt in _own_scope_stmts(item):
-            if isinstance(stmt, ast.Assign):
-                ctor = _ctor_name(stmt.value)
+            for tgt, value in _assign_pairs(stmt):
+                ctor = _ctor_name(value)
                 if ctor is None:
                     continue
-                for tgt in stmt.targets:
-                    attr = _self_attr_name(tgt)
-                    if attr is not None:
-                        yield attr, ctor
+                attr = _self_attr_name(tgt)
+                if attr is not None:
+                    yield attr, ctor
 
 
 def _ctor_name(value: ast.expr) -> str | None:

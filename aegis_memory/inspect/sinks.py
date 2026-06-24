@@ -118,8 +118,13 @@ _CUSTOM_WRITE_METHODS_STATIC = ("put", "add", "save", "write", "store", "remembe
 # enforcement key off the *same* method names and never drift. These frozensets are the
 # runtime contract and are kept stable on purpose (they still include ``append``/``set`` so the
 # runtime guard continues to wrap those calls); the *static* matcher above is deliberately more
-# conservative to avoid local-container false positives.
-_CUSTOM_WRITE_METHODS = ("put", "add", "save", "write", "append", "set", "store", "remember", "insert")
+# conservative to avoid local-container false positives. ``update`` is in the runtime contract
+# because Batch B emits ``update`` sinks on constructor-bound receivers and recommends
+# ``guard.protect`` for them — so ``GuardedStore`` must actually intercept ``.update(...)`` at
+# runtime, or the secondary fix would screen nothing.
+_CUSTOM_WRITE_METHODS = (
+    "put", "add", "save", "write", "append", "set", "store", "remember", "insert", "update",
+)
 
 # ``put(namespace, key, value)`` style — the written value is the 3rd positional arg.
 KEYED_WRITE_METHODS: frozenset[str] = frozenset(_LANGGRAPH_WRITE_METHODS)
