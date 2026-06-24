@@ -176,6 +176,14 @@ def _render_report(
         "**OWASP ASI06 (Memory & Context Poisoning)**.\n"
     )
 
+    # Scope is stated up front so a reader never reads the absence of `list.append` as a miss.
+    lines.append(
+        "> **Scope.** Aegis inspects writes to **persistent and shared** memory. Ephemeral in-process "
+        "buffers (`list.append`, a local `dict`) are **out of scope by design** — a planned opt-in "
+        "`--include-buffers` mode (see `docs/issues/buffer-memory-mode.md`) would flag them only when "
+        "the value taints to an untrusted source.\n"
+    )
+
     headline = [f for f in findings if f.severity in ("critical", "high")]
     lines.append("## Findings (the defensible core)\n")
     if headline:

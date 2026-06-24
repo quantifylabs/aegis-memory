@@ -14,7 +14,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import cast
 
-from . import fixgen, interproc, notebooks, sinks, taint
+from . import bindings, fixgen, interproc, notebooks, sinks, taint
 from .findings import Category, Finding, Sink
 
 # Directories we never descend into.
@@ -93,11 +93,14 @@ def analyze_project(root: str | Path, framework: str | None = None) -> list[Find
         modules.append((rel, tree))
 
     index = interproc.ProjectIndex.build(modules)
+    # Constructor-resolved receiver->library bindings (Batch B): recover aliased-receiver sinks
+    # (m.add / self.warm.put) the name-hint catalog misses, without widening the substring hints.
+    receiver_bindings = bindings.ReceiverBindings.build(modules)
 
     sites: list[_SinkSite] = []
     read_flows: list[tuple[str, int]] = []
     for rel, tree in modules:
-        sites.extend(_scan_module(tree, rel))
+        sites.extend(_scan_module(tree, rel, receiver_bindings))
         read_flows.extend(_scan_read_paths(tree, rel))
 
     # Resolve each sink's source — same-scope, then bounded interprocedural/cross-file. A resolved
@@ -116,7 +119,7 @@ def analyze_project(root: str | Path, framework: str | None = None) -> list[Find
 # --- module scan -------------------------------------------------------------------
 
 
-def _scan_module(tree: ast.Module, rel: str) -> list[_SinkSite]:
+def _scan_module(tree: ast.Module, rel: str, receiver_bindings: bindings.ReceiverBindings) -> list[_SinkSite]:
     """Visit each Call once, scoped to its nearest enclosing function (no double-count)."""
     out: list[_SinkSite] = []
     scope_cache: dict[int, taint.FunctionScope] = {}
@@ -124,15 +127,21 @@ def _scan_module(tree: ast.Module, rel: str) -> list[_SinkSite]:
     for call in ast.walk(tree):
         if not isinstance(call, ast.Call):
             continue
-        match = _match_call(call)
+        func = _enclosing_function(call)
+        # Resolve the receiver to a memory constructor (Batch B). Supplies the binding that recovers
+        # aliased receivers and upgrades the label; None leaves the name-hint tiers in charge.
+        binding = None
+        if isinstance(call.func, ast.Attribute):
+            receiver = _receiver_string(call.func.value)
+            binding = receiver_bindings.resolve(rel, func, _enclosing_class(call), receiver)
+        match = _match_call(call, binding)
         if match is None:
             continue
-        # Label-only refinement: a generic sink in a module that clearly imports a known memory
-        # library is attributed to it (e.g. ``custom`` -> ``mem0``). Never relabels the precise
-        # ``aegis``/``langgraph`` tiers, and never changes which sinks are detected.
-        if framework_hint and match.framework in ("custom", "vectordb"):
+        # Label-only refinement: when the receiver did NOT bind, a generic sink in a module that
+        # clearly imports a known memory library is still attributed to it (Batch-A heuristic, e.g.
+        # ``custom`` -> ``mem0``). A bound receiver already carries the precise label from the binding.
+        if binding is None and framework_hint and match.framework in ("custom", "vectordb"):
             match = replace(match, framework=framework_hint)
-        func = _enclosing_function(call)
         if func is None:
             scope = taint.FunctionScope(func=_EMPTY_FUNC)
         else:
@@ -189,14 +198,16 @@ def _module_framework(tree: ast.Module) -> str | None:
     return None
 
 
-def _match_call(call: ast.Call) -> sinks.SinkMatch | None:
+def _match_call(call: ast.Call, binding: sinks.BindingInfo | None = None) -> sinks.SinkMatch | None:
     fn = call.func
     kwargs = tuple(kw.arg for kw in call.keywords if kw.arg)
     if isinstance(fn, ast.Attribute):
         # Use the dotted receiver path (e.g. "self.memory_store") so hint matching sees
         # the meaningful attribute name, not just the root object.
         receiver = _receiver_string(fn.value)
-        return sinks.classify_call(attr=fn.attr, func=None, receiver=receiver, keywords=kwargs)
+        return sinks.classify_call(
+            attr=fn.attr, func=None, receiver=receiver, keywords=kwargs, binding=binding
+        )
     if isinstance(fn, ast.Name):
         return sinks.classify_call(attr=None, func=fn.id, receiver=None, keywords=kwargs)
     return None
@@ -463,6 +474,16 @@ def _enclosing_function(node: ast.AST) -> ast.FunctionDef | ast.AsyncFunctionDef
     cur = getattr(node, "parent", None)
     while cur is not None:
         if isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return cur
+        cur = getattr(cur, "parent", None)
+    return None
+
+
+def _enclosing_class(node: ast.AST) -> ast.ClassDef | None:
+    """Nearest enclosing ClassDef via parent pointers, or None — scopes ``self.attr`` bindings."""
+    cur = getattr(node, "parent", None)
+    while cur is not None:
+        if isinstance(cur, ast.ClassDef):
             return cur
         cur = getattr(cur, "parent", None)
     return None

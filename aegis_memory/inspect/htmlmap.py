@@ -132,13 +132,21 @@ def render_html(
 # Faithful trace: one lane per source->sink->memory flow, anchored to file:line.
 # ---------------------------------------------------------------------------------
 
+# Stated on the map so the absence of `list.append` reads as a deliberate scope, not a miss.
+_SCOPE_NOTE = (
+    '<p class="scope-note">Scope: Aegis inspects writes to <b>persistent and shared</b> memory. '
+    'Ephemeral in-process buffers (<code>list.append</code>, a local <code>dict</code>) are out of '
+    'scope by design.</p>'
+)
+
+
 def _trace_section(flows: list[Finding]) -> str:
     if not flows:
         return (
             '<section class="trace"><h2 class="sec-h">Untrusted memory flows</h2>'
             '<p class="empty">No untrusted source&#8594;memory flow was detected at these '
             'sites. (Absence finding — "not detected here", not a proof that none exists.)</p>'
-            "</section>"
+            f"{_SCOPE_NOTE}</section>"
         )
     n_exposed = sum(1 for f in flows if not f.screened)
     n_screened = len(flows) - n_exposed
@@ -150,7 +158,8 @@ def _trace_section(flows: list[Finding]) -> str:
         f'<b class="x-exposed">{n_exposed} reach memory unscreened</b> &#183; '
         f'{n_screened} blocked at a guard. Each lane is anchored to a file and line.</p>'
         f'{explainer}'
-        '<div class="lanes">' + lanes + "</div></section>"
+        '<div class="lanes">' + lanes + "</div>"
+        f"{_SCOPE_NOTE}</section>"
     )
 
 
@@ -343,6 +352,7 @@ _TEMPLATE = """<!doctype html>
   .sec-sub {{ color:var(--muted); font-size:.82rem; margin:0 0 14px; }}
   .sec-sub b.x-exposed {{ color:var(--danger); font-weight:600; }}
   .empty {{ color:var(--muted); font-size:.85rem; }}
+  .scope-note {{ color:var(--muted); font-size:.74rem; margin:14px 0 0; opacity:.85; }}
 
   /* trace lanes */
   .trace {{ margin-bottom:26px; }}
