@@ -21,6 +21,7 @@ TAINT_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_taint"
 NAMECOLLIDE_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_namecollide"
 STREAMLIT_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_streamlit"
 NOTEBOOK_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_notebook"
+BINDING_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_binding"
 DEMO_DIR = REPO_ROOT / "examples" / "aegis-memory-firewall"
 AGENT_DIR = DEMO_DIR / "agent"
 
@@ -541,6 +542,137 @@ def test_batcha_notebook_per_cell_fallback_recovers_good_cell(tmp_path):
     findings = analyze_project(d)
     puts = [f for f in findings if f.sink.call.endswith("put")]
     assert puts, "the good cell's store.put must survive the broken cell (per-cell fallback)"
+
+
+# --- Batch B: constructor-binding receiver resolution (FP-gated) -------------------
+
+
+def test_batchb_binding_recovers_aliased_receivers():
+    """Fix 3: aliased receivers the name-hint tiers miss are recovered via constructor binding —
+    ``m.add`` (mem0), ``app.add`` (embedchain), ``manager.store`` / tiered ``self.warm.put`` /
+    ``router.write`` / ``self.backend.save`` (custom). Labels follow the binding."""
+    findings = analyze_project(BINDING_FIXTURES)
+    by_call = {(f.sink.file.rsplit("/", 1)[-1], f.sink.call): f for f in findings}
+
+    # Each aliased-receiver sink is detected, with the framework attributed from the binding.
+    expected = {
+        ("tp_mem0.py", "m.add"): "mem0",
+        ("tp_embedchain.py", "app.add"): "embedchain",
+        ("tp_custom.py", "manager.store"): "custom",
+        ("tp_custom.py", "self.warm.put"): "custom",
+        ("tp_custom.py", "self.hot.put"): "custom",
+        ("tp_custom.py", "router.write"): "custom",
+        ("tp_custom.py", "self.backend.save"): "custom",
+        ("tp_custom.py", "store.update"): "custom",  # Fix C — bound-only `update`
+    }
+    for key, framework in expected.items():
+        assert key in by_call, f"{key} must be detected via constructor binding"
+        assert by_call[key].sink.framework == framework, (key, by_call[key].sink.framework)
+
+
+def test_batchb_fp_gate_true_negatives_unflagged():
+    """The precision bar: plain in-process containers (`list.append`, `set.add`, `dict.update`, a
+    dict named ``store``) must produce ZERO findings — binding, not the receiver name, drives
+    detection. If this fires, the binding is too loose."""
+    findings = analyze_project(BINDING_FIXTURES)
+    tn = [f for f in findings if f.sink.file.endswith("tn_unbound.py")]
+    assert tn == [], f"true-negative sites must not be flagged, got {[f.sink.call for f in tn]}"
+
+
+def test_batchb_bound_mem0_flow_is_critical_and_tailored():
+    """A bound receiver routes through the same severity/fix machinery: ``m.add(input())`` is a
+    critical mem0 flow with the TAILORED guard fix (the written value swapped for ``verdict.content``),
+    not a generic nudge."""
+    findings = analyze_project(BINDING_FIXTURES)
+    flow = next(
+        f for f in findings if f.sink.call == "m.add" and f.category.endswith("_to_memory")
+    )
+    assert flow.severity == "critical" and flow.trust == "untrusted" and not flow.screened
+    assert flow.sink.framework == "mem0"
+    fix = flow.fix
+    assert "guard.write(" in fix and "verdict.allowed" in fix and "verdict.content" in fix
+    assert "m.add(verdict.content)" in fix, fix
+
+
+def test_batchb_update_is_bound_only_never_on_name_hint():
+    """Decision (codex/owner): ``update`` is a write verb ONLY on a bound receiver — never on a name
+    hint, because ``dict.update`` is too common. ``store.update`` without a binding is not a sink;
+    with a binding it is."""
+    # Hinted receiver name "store", no binding -> not a sink (update is bound-only).
+    assert sinks.classify_call(attr="update", func=None, receiver="store") is None
+    # Same call, but the receiver resolved to a memory constructor -> a sink.
+    binding = sinks.BindingInfo("custom", frozenset({"update"}), "memory_write", "AMBIGUOUS")
+    assert sinks.classify_call(attr="update", func=None, receiver="store", binding=binding) is not None
+
+
+def test_batchb_label_upgraded_on_hinted_receiver_when_bound(tmp_path):
+    """Fix 3 (label upgrade): a sink that already matches a generic tier by name hint is re-attributed
+    to the bound library — ``memory.add`` (hinted ``custom``) becomes ``mem0`` once ``memory`` resolves
+    to ``Memory()``."""
+    src = (
+        "from mem0 import Memory\n"
+        "def run(x):\n"
+        "    memory = Memory()\n"
+        "    memory.add(x)\n"
+    )
+    d = tmp_path / "upgrade"; d.mkdir()
+    (d / "app.py").write_text(src, encoding="utf-8")
+    adds = [f for f in analyze_project(d) if f.sink.call == "memory.add"]
+    assert adds and all(f.sink.framework == "mem0" for f in adds), [f.sink.framework for f in adds]
+
+
+def test_batchb_constructor_binding_is_import_gated(tmp_path):
+    """``App`` carries no memory token, so it binds to embedchain ONLY via the import gate. A stray
+    local ``App()`` in an unrelated module (no embedchain import) must NOT make ``app.add`` a sink."""
+    src = (
+        "class App:\n"
+        "    def add(self, x): ...\n"
+        "def run(x):\n"
+        "    app = App()\n"
+        "    app.add(x)\n"
+    )
+    d = tmp_path / "noimport"; d.mkdir()
+    (d / "app.py").write_text(src, encoding="utf-8")
+    adds = [f for f in analyze_project(d) if f.sink.call == "app.add"]
+    assert adds == [], f"unimported App() must not bind, got {adds}"
+
+
+def test_batchb_module_scope_binding_and_shadow_guard(tmp_path):
+    """Module-scope ``m = Memory()`` (the dominant notebook/script shape) binds, and a global ``m``
+    used inside a function binds too — but a function PARAMETER named ``m`` shadows the global and
+    must NOT be bound to it (precision)."""
+    src = (
+        "from mem0 import Memory\n"
+        "m = Memory()\n"
+        "m.add('top-level')\n"            # module-scope bound -> mem0 sink
+        "def uses_global(x):\n"
+        "    m.add(x)\n"                   # global m used in a function -> still bound
+        "def shadows(m):\n"               # param m shadows the global -> NOT bound
+        "    m.add(x)\n"
+    )
+    d = tmp_path / "scope"; d.mkdir()
+    (d / "nb.py").write_text(src, encoding="utf-8")
+    findings = analyze_project(d)
+    add_lines = {f.sink.line for f in findings if f.sink.call == "m.add"}
+    assert 3 in add_lines, "module-scope m.add must bind"
+    assert 5 in add_lines, "global m used inside a function must bind"
+    assert 7 not in add_lines, "a param `m` shadowing the global must NOT be bound"
+
+
+def test_batchb_append_scope_note_in_report_and_html(tmp_path):
+    """Fix D: append stays out of scope by design, but the report and HTML state that scope
+    explicitly (and point at the tracked `--include-buffers` issue) so its absence isn't read as a
+    miss. No `append` detection is added."""
+    out = tmp_path / "out"
+    run_inspection(DEMO_DIR, out_dir=out, write=True)
+    report = (out / "INSPECTION_REPORT.md").read_text(encoding="utf-8")
+    html = (out / "agent_memory_map.html").read_text(encoding="utf-8")
+    assert "out of scope by design" in report and "list.append" in report
+    assert "buffer-memory-mode.md" in report
+    assert "scope-note" in html and "list.append" in html
+    # No append sink was minted on the demo (scope note is documentation, not detection).
+    findings = analyze_project(DEMO_DIR)
+    assert all("append" not in f.sink.call for f in findings)
 
 
 # --- the real replay scan ----------------------------------------------------------

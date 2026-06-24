@@ -33,10 +33,26 @@ from .findings import Category
 
 @dataclass(frozen=True)
 class SinkMatch:
-    framework: str  # "langgraph" | "vectordb" | "aegis" | "custom"
+    framework: str  # "langgraph" | "vectordb" | "aegis" | "custom" | "mem0" | "embedchain"
     call: str  # canonical call label, e.g. "store.put"
     category: str  # Category value (structural)
     base_confidence: str  # "EXTRACTED" baseline trust we can place in the *sink* match
+
+
+@dataclass(frozen=True)
+class BindingInfo:
+    """A receiver resolved to a memory library via its **constructor** (Batch B, ``bindings.py``).
+
+    This is the precision-first alternative to receiver-name guessing: ``methods`` are the write-method
+    names authorized on this *bound* receiver, and ``category``/``confidence`` shape the resulting
+    :class:`SinkMatch`. A ``BindingInfo`` only ever comes from resolving ``m = Memory()`` /
+    ``self.warm = WarmTier()`` to a known/heuristic memory constructor — never from a substring on the
+    receiver variable's name (that was the old false-positive source)."""
+
+    library: str  # "mem0" | "embedchain" | "custom"
+    methods: frozenset[str]  # write methods authorized on this bound receiver
+    category: str  # Category value for the emitted sink
+    confidence: str  # base_confidence for the emitted SinkMatch
 
 
 # ---- Tier 1: distinctive memory-write methods (match on method name alone) ---------
@@ -118,18 +134,30 @@ def _norm(s: str | None) -> str:
     return (s or "").lower()
 
 
+def _bound_label(default: str, binding: BindingInfo | None) -> str:
+    """Label upgrade (Batch B Fix 3): when a generic-tier sink's receiver also binds to a library,
+    attribute it to that library (``custom``/``vectordb`` -> ``mem0``/``embedchain``). The precise
+    ``aegis``/``langgraph`` tiers are never relabeled."""
+    return binding.library if binding is not None else default
+
+
 def classify_call(
     *,
     attr: str | None,
     func: str | None,
     receiver: str | None,
     keywords: Sequence[str] = (),
+    binding: BindingInfo | None = None,
 ) -> SinkMatch | None:
     """Return a :class:`SinkMatch` if this call is a known memory-write sink, else None.
 
     ``attr`` is the method name for ``obj.method(...)`` calls; ``func`` is the function name for
     bare ``func(...)`` calls; ``receiver`` is the (possibly dotted) root-object name for method
     calls; ``keywords`` are the call's keyword-argument names (used by the API-signature tier).
+    ``binding`` (Batch B) is a constructor-resolved receiver->library binding: it adds a final tier
+    that recovers aliased receivers (``m.add``/``self.warm.put``) the name-hint tiers miss, and
+    upgrades the label on the generic tiers. It is supplied only when the receiver provably resolves
+    to a memory constructor — never from a receiver-name guess.
     """
     a = _norm(attr)
     f = _norm(func)
@@ -170,13 +198,22 @@ def classify_call(
 
     # --- Tier 3b: vector DB writes (receiver-shape, lower confidence) ---
     if a in _VECTORDB_METHODS and any(h in r for h in _VECTORDB_RECEIVER_HINTS):
-        return SinkMatch("vectordb", f"{receiver}.{attr}", Category.VECTOR_DB_WRITE.value, "INFERRED")
+        return SinkMatch(_bound_label("vectordb", binding), f"{receiver}.{attr}",
+                         Category.VECTOR_DB_WRITE.value, "INFERRED")
 
     # --- Tier 3c: custom memory-ish receivers (receiver-shape, lowest confidence) ---
     if a in _CUSTOM_WRITE_METHODS_STATIC and any(h in r for h in _CUSTOM_NAME_HINTS):
-        return SinkMatch("custom", f"{receiver}.{attr}", Category.MEMORY_WRITE.value, "AMBIGUOUS")
+        return SinkMatch(_bound_label("custom", binding), f"{receiver}.{attr}",
+                         Category.MEMORY_WRITE.value, "AMBIGUOUS")
+
+    # --- Tier 3d (Batch B): constructor-bound receiver — resolved to a memory handle ---
+    # Recovers aliased receivers the name-hint tiers miss (``m.add``/``app.add``/``manager.store``/
+    # ``self.warm.put``/``router.write``/``self.backend.save``) and the bound-only ``store.update``.
+    # Fires ONLY when ``binding`` resolved the receiver to a memory constructor — never on a name.
+    if binding is not None and a in binding.methods:
+        return SinkMatch(binding.library, f"{receiver}.{attr}", binding.category, binding.confidence)
 
     return None
 
 
-__all__ = ["KEYED_WRITE_METHODS", "WRITE_METHODS", "SinkMatch", "classify_call"]
+__all__ = ["KEYED_WRITE_METHODS", "WRITE_METHODS", "BindingInfo", "SinkMatch", "classify_call"]
