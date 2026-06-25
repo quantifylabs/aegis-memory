@@ -876,5 +876,20 @@ class TestExports:
         assert ConsolidationCandidate is not None
 
     def test_version_bumped(self):
+        # Version-source-driven: assert the exported __version__ stays in sync with
+        # the single source of truth in pyproject.toml, rather than a hardcoded literal
+        # that goes stale on every release bump.
+        from pathlib import Path
+
+        try:
+            import tomllib  # Python 3.11+
+        except ModuleNotFoundError:
+            import pytest
+
+            pytest.skip("tomllib unavailable on Python < 3.11")
+
         from aegis_memory import __version__
-        assert __version__ == "2.5.3"
+
+        pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+        expected = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]["version"]
+        assert __version__ == expected
