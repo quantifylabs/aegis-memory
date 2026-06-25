@@ -5,6 +5,18 @@ All notable changes to Aegis Memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] - 2026-06-25
+
+### Added
+
+- **`aegis inspect` — Claude Code plugin and keyless local MCP mode.** Ships the Aegis Claude Code plugin (commands, guard hook, bundled `.mcp.json`) and a local, keyless MCP server mode so `inspect` and the memory write-gate run without provisioning credentials (includes a FastMCP 1.26 compatibility fix).
+- **Notebook ingestion + generalized source vocabulary.** `inspect` now ingests Jupyter notebooks (`.ipynb`) and recognizes a broader set of untrusted-input sources, with labeled findings.
+- **Inline fix generation and verify-loop.** `inspect` can emit inline fixes for ASI06 flows and re-verify after applying them, with improved score direction and flow-path precision.
+
+### Changed
+
+- **More precise taint analysis.** Receiver+method sink detection, bounded cross-file taint propagation, and constructor-binding recovery for aliased-receiver sinks (FP-gated). Catches additional ASI06 flows while dropping known false positives (e.g. `list.append`).
+
 ## [2.5.3] - 2026-06-14
 
 ### Fixed
