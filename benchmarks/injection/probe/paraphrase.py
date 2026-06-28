@@ -59,7 +59,13 @@ class Paraphraser:
             return cached
         from openai import OpenAI
 
-        client = OpenAI()  # reads OPENAI_API_KEY
+        # Configure SDK-level retries with exponential backoff (the default is 2)
+        # so a long adaptive sweep rides out transient 429s instead of failing a
+        # cheap mutation/intent call, plus a connect-bounded timeout so a stalled
+        # DNS/connect fails fast and retries rather than freezing the run. Mirrors
+        # the async clients in systems.py.
+        client = OpenAI(max_retries=sys_mod.MAX_RETRIES,
+                        timeout=sys_mod._request_timeout())  # reads OPENAI_API_KEY
         resp = client.chat.completions.create(
             model=model, temperature=temperature, max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],

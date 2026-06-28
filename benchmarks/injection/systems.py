@@ -388,6 +388,20 @@ CONCURRENCY = {"openai": 8, "anthropic": 4}
 MAX_RETRIES = 8  # SDK-level retries with exponential backoff (handles 429s)
 
 
+def _request_timeout():
+    """Connect-bounded HTTP timeout for the API clients.
+
+    A bare ``getaddrinfo``/connect has no default deadline, so on a flaky network
+    a single call can block the process indefinitely (no socket, no CPU). Bounding
+    the *connect* phase to 15s means a stalled DNS/connect fails fast and the
+    SDK's exponential-backoff retries (``MAX_RETRIES``) ride it out instead of
+    freezing a long run; the read budget stays generous for slow model responses.
+    """
+    import httpx
+
+    return httpx.Timeout(120.0, connect=15.0)
+
+
 async def _run_batch(afn, texts: list[str], concurrency: int = 8) -> list[tuple["Prediction", float]]:
     """Run ``afn(text)`` over texts with bounded concurrency.
 
@@ -472,11 +486,11 @@ class LLMJudge(System):
             if self.provider == "openai":
                 from openai import AsyncOpenAI
 
-                self._aclient = AsyncOpenAI(max_retries=MAX_RETRIES)
+                self._aclient = AsyncOpenAI(max_retries=MAX_RETRIES, timeout=_request_timeout())
             else:
                 from anthropic import AsyncAnthropic
 
-                self._aclient = AsyncAnthropic(max_retries=MAX_RETRIES)
+                self._aclient = AsyncAnthropic(max_retries=MAX_RETRIES, timeout=_request_timeout())
         return self._aclient
 
     async def _araw(self, prompt: str) -> str:
@@ -663,13 +677,15 @@ class AegisStages14(System):
             # Inject a retry-configured client (the adapter's lazy client uses
             # only default retries; 429s otherwise drop items).
             inner._async_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"),
-                                              max_retries=MAX_RETRIES)
+                                              max_retries=MAX_RETRIES,
+                                              timeout=_request_timeout())
         else:
             from anthropic import AsyncAnthropic
 
             inner = AnthropicAdapter(api_key=os.getenv("ANTHROPIC_API_KEY"), model=self.model, temperature=0)
             inner._async_client = AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"),
-                                                 max_retries=MAX_RETRIES)
+                                                 max_retries=MAX_RETRIES,
+                                                 timeout=_request_timeout())
         adapter = CachingAdapter(inner, self.id, self.model, self._cache)
         self._scanner = ContentSecurityScanner(_make_settings())
         self._scanner.set_classifier(InjectionClassifier(adapter, threshold=0.7))
