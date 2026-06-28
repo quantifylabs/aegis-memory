@@ -20,20 +20,62 @@ verbatim.
 
 from __future__ import annotations
 
+import json
 import random
+from pathlib import Path
 
 from .. import datasets as ds_mod
 from ..probe.seed_picker import Seed, _even_split
 from . import config
 
+# Seed pools are loaded ONCE per process and persisted to a local JSON cache so the
+# long sweep never re-fetches a dataset (pick_seeds is called ~10x across the
+# attacks/tiers/targets). This removes the flaky HF/GitHub network + file-lock
+# surface from the hot path: after the first successful load the pools come from
+# disk, deterministically, even across process restarts. The cache lives under the
+# gitignored benchmark ``cache/`` dir.
+_POOL_CACHE_PATH = Path(__file__).resolve().parent.parent / "cache" / "adaptive_seed_pools.json"
+_POOL_MEM: dict[str, list[str]] = {}
+
+
+def _load_pool_disk_cache() -> dict[str, list[str]]:
+    try:
+        if _POOL_CACHE_PATH.exists():
+            return json.loads(_POOL_CACHE_PATH.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — a corrupt cache just forces a reload
+        pass
+    return {}
+
+
+def _save_pool_disk_cache(cache: dict[str, list[str]]) -> None:
+    try:
+        _POOL_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _POOL_CACHE_PATH.write_text(json.dumps(cache), encoding="utf-8")
+    except Exception:  # noqa: BLE001 — best-effort persistence
+        pass
+
 
 def _malicious_pool(name: str) -> list[str]:
-    """Malicious (``label is True``) texts from dataset ``name`` (full set, no subsample)."""
+    """Malicious (``label is True``) texts from dataset ``name`` (full set, no subsample).
+
+    Memoized in-process and on disk (see module note). The live loader is hit at
+    most once per dataset per machine; thereafter the pool is served from cache.
+    """
+    if name in _POOL_MEM:
+        return _POOL_MEM[name]
+    disk = _load_pool_disk_cache()
+    if name in disk:
+        _POOL_MEM[name] = disk[name]
+        return disk[name]
     loader = ds_mod.LOADERS[name]
     dataset = loader()
     if dataset.status != "ok":
         return []
-    return [text for text, label in dataset.items if label is True]
+    pool = [text for text, label in dataset.items if label is True]
+    _POOL_MEM[name] = pool
+    disk[name] = pool
+    _save_pool_disk_cache(disk)
+    return pool
 
 
 def _stratified_candidates(rng: random.Random) -> list[tuple[str, str]]:
