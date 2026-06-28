@@ -1,6 +1,6 @@
 {
   "meta": {
-    "timestamp": "2026-06-28T06:38:28.754969+00:00",
+    "timestamp": "2026-06-28T09:04:44.143113+00:00",
     "seed": 42,
     "n_bootstrap": 1000,
     "limit": null,
@@ -925,6 +925,7 @@
       "aegis_stages_1_4_openai": {
         "status": "ok",
         "n_errors": 0,
+        "evaders_errored": 0,
         "caught": 13,
         "total": 14,
         "fraction": 0.9285714285714286
@@ -932,6 +933,7 @@
       "aegis_stages_1_4_anthropic": {
         "status": "ok",
         "n_errors": 0,
+        "evaders_errored": 0,
         "caught": 14,
         "total": 14,
         "fraction": 1.0

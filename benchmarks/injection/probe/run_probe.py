@@ -138,9 +138,12 @@ def compute_handoff(candidates: list[Candidate], per_system: dict) -> dict:
     """Of candidates that evaded Stage 3, what fraction did each Stage-4 catch?
 
     Evader / caught membership is read off the per-candidate predictions so it is
-    robust to duplicate texts. A Stage-4 system that erred on an item leaves it
-    out of the denominator-relevant sets; ``n_errors`` is surfaced per system so
-    any such optimism is visible.
+    robust to duplicate texts. A Stage-4 candidate that the system *erred* on
+    (prediction ``None``) is excluded from BOTH the numerator and the denominator
+    — symmetric with :func:`evaluate_candidates` — so an API timeout/429/parse
+    failure neither inflates nor deflates the catch fraction. The count of such
+    excluded evaders is surfaced per system (``evaders_errored``) so any shrinkage
+    of the denominator is visible.
     """
     kept_keys = [_candidate_key(c) for c in candidates if c.intent_preserved]
     s3 = per_system.get(config.STAGE3_SYSTEM, {})
@@ -154,11 +157,14 @@ def compute_handoff(candidates: list[Candidate], per_system: dict) -> dict:
     for s4_id in config.STAGE4_SYSTEMS:
         s4 = per_system.get(s4_id, {})
         s4_preds = s4.get("predictions", {})
-        caught = [k for k in stage3_evaders if s4_preds.get(k) is True]
-        total = len(stage3_evaders)
+        # Denominator = evaders the Stage-4 system actually evaluated (pred not None).
+        evaluated = [k for k in stage3_evaders if s4_preds.get(k) is not None]
+        caught = [k for k in evaluated if s4_preds.get(k) is True]
+        total = len(evaluated)
         out["by_stage4"][s4_id] = {
             "status": s4.get("status", "not_run"),
             "n_errors": s4.get("n_errors"),
+            "evaders_errored": len(stage3_evaders) - total,
             "caught": len(caught),
             "total": total,
             "fraction": (None if total == 0 else len(caught) / total),
