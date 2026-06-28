@@ -26,11 +26,17 @@ from benchmarks.injection.probe.seed_picker import Seed  # noqa: E402
 # Stubs
 # --------------------------------------------------------------------------
 class StubSystem(sys_mod.System):
-    """Deterministic system: flags exactly the texts in ``caught``."""
+    """Deterministic system: flags exactly the texts in ``caught``.
 
-    def __init__(self, sid: str, caught: set[str]):
+    Texts in ``errors_on`` raise inside ``predict``; the base ``evaluate_batch``
+    converts that to a ``None`` prediction (per-item failure), which is how a
+    real Stage-4 timeout/429/parse-error surfaces.
+    """
+
+    def __init__(self, sid: str, caught: set[str], errors_on: set[str] | None = None):
         self.id = sid
         self._caught = caught
+        self._errors_on = errors_on or set()
 
     def available(self):
         return True, ""
@@ -39,6 +45,8 @@ class StubSystem(sys_mod.System):
         return None
 
     def predict(self, text: str) -> bool:
+        if text in self._errors_on:
+            raise RuntimeError("simulated per-item failure")
         return text in self._caught
 
 
@@ -171,3 +179,59 @@ def test_render_summary_contains_headline():
     assert "The hand-off (decision headline)" in md
     assert "Excluded: 1" in md
     assert "aegis_stages_1_3" in md
+
+
+# --------------------------------------------------------------------------
+# Regression: an errored Stage-4 item must NOT be counted as a catch
+# --------------------------------------------------------------------------
+def test_errored_evader_excluded_from_handoff_both_sides():
+    # Stage 3 misses c2 and c3 -> evaders {c2, c3}. Stage-4 OpenAI ERRORS on c2
+    # and catches c3. The errored evader must be excluded from BOTH the numerator
+    # AND the denominator: 1/1 = 100% over what was actually evaluated, not 1/2
+    # (the old fn-set bug counted it caught) and not 0/2 (denominator left it in).
+    cands = [_candidate("s1", "c1"), _candidate("s2", "c2"), _candidate("s3", "c3")]
+    systems = [
+        StubSystem(config.STAGE3_SYSTEM, caught={"c1"}),                       # evaders: {c2, c3}
+        StubSystem("aegis_stages_1_4_openai", caught={"c3"}, errors_on={"c2"}),
+        StubSystem("aegis_stages_1_4_anthropic", caught={"c2", "c3"}),          # catches both
+        StubSystem("llm_guard", caught=set()),
+    ]
+    per_system = run_probe.evaluate_candidates(cands, systems)
+
+    s4o = per_system["aegis_stages_1_4_openai"]
+    assert s4o["n_errors"] == 1
+    assert s4o["predictions"]["s2::v0"] is None       # errored -> None, not True
+    assert s4o["n"] == 2                              # c1 + c3 evaluated; c2 errored
+
+    handoff = run_probe.compute_handoff(cands, per_system)
+    assert handoff["stage3_evader_count"] == 2
+    o = handoff["by_stage4"]["aegis_stages_1_4_openai"]
+    assert (o["caught"], o["total"]) == (1, 1)        # c2 dropped from denominator
+    assert o["evaders_errored"] == 1
+    assert o["fraction"] == 1.0
+    # Anthropic evaluated both evaders and caught both.
+    a = handoff["by_stage4"]["aegis_stages_1_4_anthropic"]
+    assert (a["caught"], a["total"], a["evaders_errored"]) == (2, 2, 0)
+    assert a["fraction"] == 1.0
+
+
+# --------------------------------------------------------------------------
+# Regression: seed pool filters to malicious labels (mixed-label deepset)
+# --------------------------------------------------------------------------
+def test_stage3_true_pool_filters_to_malicious_labels(monkeypatch):
+    from benchmarks.injection import datasets as ds_mod
+    from benchmarks.injection.probe import seed_picker
+
+    # A mixed-label dataset where Stage 3 flags BOTH rows (a benign false positive).
+    fake = ds_mod.Dataset(
+        name="fake", kind="malicious_direct", status="ok",
+        items=[("malicious injection payload", True), ("perfectly benign row", False)],
+    )
+    monkeypatch.setitem(ds_mod.LOADERS, "fake", lambda limit=None: fake)
+
+    class _Stage3FlagsEverything:
+        def predict(self, text: str) -> bool:
+            return True  # incl. the benign row (the over-flag the guard must drop)
+
+    pool = seed_picker._stage3_true_pool("fake", _Stage3FlagsEverything())
+    assert pool == ["malicious injection payload"], "benign FP must not enter the seed pool"

@@ -1,6 +1,6 @@
 ## Aegis adaptive paraphrase probe — summary
 
-Date: 2026-06-28T05:17:51.648294+00:00  |  Seeds: 15  |  Paraphrases: 45  |  Intent-preserved: 39  |  Excluded: 6
+Date: 2026-06-28T09:04:44.143113+00:00  |  Seeds: 15  |  Paraphrases: 45  |  Intent-preserved: 39  |  Excluded: 6
 
 _Directional probe, not a benchmark. The publishable artifact is the full Phase 2 harness (TASK_adaptive_harness.md)._
 

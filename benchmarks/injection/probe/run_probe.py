@@ -36,7 +36,6 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .. import datasets as ds_mod
 from .. import metrics as metrics_mod
 from .. import run_benchmark as rb_mod
 from .. import systems as sys_mod
@@ -59,20 +58,17 @@ def _candidate_key(c: Candidate) -> str:
 def evaluate_candidates(candidates: list[Candidate], systems: list) -> dict:
     """Run each system over the intent-preserved candidates via the metrics path.
 
-    Returns ``{system_id: {...}}``. For a malicious-only dataset (every label
-    True) ``fn_items`` from :func:`run_benchmark.run_system_on_dataset` is exactly
-    the set of candidates that *evaded* the system, and ``fp_items`` is always
-    empty — so a candidate's prediction is ``flagged = text not in fn_set`` and
-    evasion-rate is ``1 - recall``, both straight off the existing metrics path.
+    Returns ``{system_id: {...}}``. Predictions are read off an *aligned*
+    ``evaluate_batch`` pass (the same per-item path
+    :func:`run_benchmark.run_system_on_dataset` uses internally) so a per-item
+    failure surfaces as ``None`` for that candidate rather than being silently
+    folded into "caught": an errored Stage-3 evader must NOT inflate the hand-off.
+    Successful items feed :func:`metrics.evaluate_run` (the existing metric — no
+    parallel implementation), giving ``recall`` + bootstrap CI; evasion-rate is
+    ``1 - recall`` over the successfully-evaluated, malicious-only candidates.
     """
     kept = [c for c in candidates if c.intent_preserved]
     texts = [c.paraphrase_text for c in kept]
-    dataset = ds_mod.Dataset(
-        name="probe", kind="malicious_direct",
-        items=[(t, True) for t in texts],
-        revision="probe-synthetic", source="probe:paraphrase",
-        notes="synthetic malicious-only set of intent-preserved paraphrases",
-    )
 
     per_system: dict[str, dict] = {}
     for system in systems:
@@ -86,19 +82,41 @@ def evaluate_candidates(candidates: list[Candidate], systems: list) -> dict:
             per_system[system.id] = {"status": "not_run", "reason": f"warmup failed: {e}"}
             continue
 
-        res, y_true, _stage_records, fn_items, _fp_items, n_err = \
-            rb_mod.run_system_on_dataset(system, dataset)
-        if res is None:
+        try:
+            batch = system.evaluate_batch(texts)
+        except Exception as e:  # noqa: BLE001 — whole-system failure (e.g. API down)
+            per_system[system.id] = {"status": "not_run", "reason": f"batch failed: {e}"}
+            continue
+
+        predictions: dict[str, bool | None] = {}
+        y_true: list[bool] = []
+        y_pred: list[bool] = []
+        latencies: list[float] = []
+        n_err = 0
+        for (pred, dt_ms), cand in zip(batch, kept):
+            key = _candidate_key(cand)
+            if pred is None:  # per-item failure: exclude, never count as caught
+                predictions[key] = None
+                n_err += 1
+                continue
+            predictions[key] = pred.flagged
+            y_true.append(True)            # synthetic set is malicious-only
+            y_pred.append(pred.flagged)
+            latencies.append(dt_ms)
+
+        if not y_true:  # every item errored
             per_system[system.id] = {"status": "not_run",
                                      "reason": f"all {n_err} items errored"}
             continue
 
-        fn_set = set(fn_items)
+        res = metrics_mod.evaluate_run(y_true, y_pred, latencies)
         recall = res["recall"]
         evasion = None if recall is None else 1.0 - recall
         rec_ci = (res.get("ci95") or {}).get("recall")
         evasion_ci = None if rec_ci is None else [1.0 - rec_ci[1], 1.0 - rec_ci[0]]
-        predictions = {_candidate_key(c): (c.paraphrase_text not in fn_set) for c in kept}
+        # Evaders = successfully-evaluated candidates the system did NOT flag.
+        fn_texts = sorted({c.paraphrase_text for c in kept
+                           if predictions[_candidate_key(c)] is False})
 
         per_system[system.id] = {
             "status": "ok",
@@ -107,7 +125,7 @@ def evaluate_candidates(candidates: list[Candidate], systems: list) -> dict:
             "recall": recall,
             "evasion_rate": evasion,
             "evasion_ci95": evasion_ci,
-            "fn_texts": sorted(fn_set),
+            "fn_texts": fn_texts,
             "predictions": predictions,
         }
     return per_system
@@ -120,9 +138,12 @@ def compute_handoff(candidates: list[Candidate], per_system: dict) -> dict:
     """Of candidates that evaded Stage 3, what fraction did each Stage-4 catch?
 
     Evader / caught membership is read off the per-candidate predictions so it is
-    robust to duplicate texts. A Stage-4 system that erred on an item leaves it
-    out of the denominator-relevant sets; ``n_errors`` is surfaced per system so
-    any such optimism is visible.
+    robust to duplicate texts. A Stage-4 candidate that the system *erred* on
+    (prediction ``None``) is excluded from BOTH the numerator and the denominator
+    — symmetric with :func:`evaluate_candidates` — so an API timeout/429/parse
+    failure neither inflates nor deflates the catch fraction. The count of such
+    excluded evaders is surfaced per system (``evaders_errored``) so any shrinkage
+    of the denominator is visible.
     """
     kept_keys = [_candidate_key(c) for c in candidates if c.intent_preserved]
     s3 = per_system.get(config.STAGE3_SYSTEM, {})
@@ -136,11 +157,14 @@ def compute_handoff(candidates: list[Candidate], per_system: dict) -> dict:
     for s4_id in config.STAGE4_SYSTEMS:
         s4 = per_system.get(s4_id, {})
         s4_preds = s4.get("predictions", {})
-        caught = [k for k in stage3_evaders if s4_preds.get(k) is True]
-        total = len(stage3_evaders)
+        # Denominator = evaders the Stage-4 system actually evaluated (pred not None).
+        evaluated = [k for k in stage3_evaders if s4_preds.get(k) is not None]
+        caught = [k for k in evaluated if s4_preds.get(k) is True]
+        total = len(evaluated)
         out["by_stage4"][s4_id] = {
             "status": s4.get("status", "not_run"),
             "n_errors": s4.get("n_errors"),
+            "evaders_errored": len(stage3_evaders) - total,
             "caught": len(caught),
             "total": total,
             "fraction": (None if total == 0 else len(caught) / total),

@@ -34,14 +34,21 @@ class Seed:
 
 
 def _stage3_true_pool(name: str, stage3: sys_mod.AegisStages13) -> list[str]:
-    """All texts in dataset ``name`` that Stage 3 flags True (deterministic)."""
+    """Texts in dataset ``name`` that are *malicious* AND Stage 3 flags True.
+
+    deepset is a mixed-label set (``label 1=injection, 0=legitimate``), so the
+    ``label is True`` guard is load-bearing: without it a Stage-3 false positive
+    on a benign row would be paraphrased and counted as an evasion candidate,
+    contaminating the experiment. injecagent is all-malicious, so the guard is a
+    no-op there. (Evading something on a benign row isn't evasion.)
+    """
     loader = ds_mod.LOADERS[name]
     dataset = loader()  # full dataset; Stage-3 prediction is free, so don't subsample here
     if dataset.status != "ok":
         return []
     out: list[str] = []
-    for text, _label in dataset.items:
-        if stage3.predict(text):
+    for text, label in dataset.items:
+        if label is True and stage3.predict(text):
             out.append(text)
     return out
 
