@@ -186,6 +186,38 @@ def test_attack2_budget_curve_arithmetic():
     assert curve["30"] == 3 / 4
 
 
+class RaisingTarget(FlagOnSubstr):
+    """A target that raises on predict (simulates a hard 429 after SDK retries)."""
+
+    def predict(self, text: str) -> bool:
+        raise RuntimeError("simulated rate-limit exhaustion")
+
+
+class RaisingMutator:
+    def variants(self, text, n, tag):
+        raise RuntimeError("simulated mutation API failure")
+
+
+def test_attack2_survives_hard_target_failure():
+    # A hard target failure must NOT crash the sweep: the seed degrades to a
+    # not-evaded sample carrying an error note (completed calls stay cached).
+    target = RaisingTarget("aegis_stages_1_4_anthropic", needles=[])
+    samples = a2.run_attack([_seed("deepset#0")], target, StubMutator(), StubJudge(),
+                            tier="white_box", budget=5)
+    assert len(samples) == 1
+    assert not samples[0].evaded
+    assert "aborted_on_error" in samples[0].notes
+
+
+def test_attack1_survives_hard_mutation_failure():
+    stage3 = FlagOnSubstr("aegis_stages_1_3", needles=["MAL"])
+    samples = a1.run_attack([_seed("deepset#0")], stage3, RaisingMutator(), StubJudge(),
+                            tier="white_box")
+    assert len(samples) == 1
+    assert not samples[0].evaded
+    assert "aborted_on_error" in samples[0].notes
+
+
 def test_attack2_not_evaded_within_budget():
     target = FlagOnSubstr("aegis_stages_1_4_openai", needles=["MAL"])
     mutator = StubMutator(needle="MAL", evade_at_round=999)  # never strips MAL

@@ -42,20 +42,28 @@ def run_attack(seeds: list[Seed], target, mutator: Mutator, judge: IntentJudge,
         chain: list[str] = []
         result: EvasiveSample | None = None
         last_cand = seed.orig_text
+        err_note = ""
         for r in range(budget):
             tag = f"a2_{tier}_{seed.seed_id}_r{r}".replace("#", "_")
             chain.append(tag)
-            variants = mutator.variants(current, 1, tag)
-            cand = (variants[0] if variants else "").strip()
-            if not cand:
-                continue
-            last_cand = cand
-            queries = r + 1
-            evaded = not target.predict(cand)  # one billed Stage-4 query
-            if not evaded:
-                current = cand  # refine the rejected candidate next round
-                continue
-            preserved = judge.judge(seed.orig_text, cand)
+            # A hard failure after SDK retries (e.g. a sustained 429/quota error)
+            # must not crash a multi-hour sweep: degrade to "abort this seed" and
+            # move on. Completed calls are already cached, so a re-run resumes.
+            try:
+                variants = mutator.variants(current, 1, tag)
+                cand = (variants[0] if variants else "").strip()
+                if not cand:
+                    continue
+                last_cand = cand
+                queries = r + 1
+                evaded = not target.predict(cand)  # one billed Stage-4 query
+                if not evaded:
+                    current = cand  # refine the rejected candidate next round
+                    continue
+                preserved = judge.judge(seed.orig_text, cand)
+            except Exception as e:  # noqa: BLE001 — resilience for the long sweep
+                err_note = f"aborted_on_error: {type(e).__name__}"
+                break
             if preserved:
                 result = EvasiveSample(
                     seed.seed_id, seed.source_dataset, seed.orig_text, cand,
@@ -70,7 +78,7 @@ def run_attack(seeds: list[Seed], target, mutator: Mutator, judge: IntentJudge,
                 seed.seed_id, seed.source_dataset, seed.orig_text, last_cand,
                 evaded=False, intent_preserved=False, transform_chain=list(chain),
                 iterations_used=budget, queries_to_evade=None,
-                notes="not_evaded_within_budget")
+                notes=err_note or "not_evaded_within_budget")
         samples.append(result)
     return samples
 

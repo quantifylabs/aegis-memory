@@ -77,62 +77,73 @@ def run_attack(seeds: list[Seed], stage3, mutator: Mutator, judge: IntentJudge,
         chain: list[str] = []
         best: EvasiveSample | None = None
         success: EvasiveSample | None = None
+        err_note = ""
         for gen in range(gen_budget):
             tag = f"a1_{tier}_{seed.seed_id}_g{gen}".replace("#", "_")
             chain.append(tag)
-            variants = mutator.variants(current, population, tag)
+            # A hard mutation/intent failure after SDK retries must not crash the
+            # sweep: abort this seed's search and fall back to its best attempt.
+            try:
+                variants = mutator.variants(current, population, tag)
+            except Exception as e:  # noqa: BLE001 — resilience for the long sweep
+                err_note = f"aborted_on_error: {type(e).__name__}"
+                break
             promising = None  # an evaded-but-intent-lost candidate to carry forward
-            for cand in variants:
-                if not cand:
-                    continue
-                if blind:
-                    # Grey-box: pick by intent first (no stage feedback), then
-                    # measure evasion only for reporting.
-                    preserved = judge.judge(seed.orig_text, cand)
-                    if not preserved:
+            try:
+                for cand in variants:
+                    if not cand:
                         continue
-                    evaded = not stage3.predict(cand)
+                    if blind:
+                        # Grey-box: pick by intent first (no stage feedback), then
+                        # measure evasion only for reporting.
+                        preserved = judge.judge(seed.orig_text, cand)
+                        if not preserved:
+                            continue
+                        evaded = not stage3.predict(cand)
+                        sample = EvasiveSample(seed.seed_id, seed.source_dataset,
+                                               seed.orig_text, cand, evaded=evaded,
+                                               intent_preserved=True,
+                                               transform_chain=list(chain),
+                                               iterations_used=gen + 1)
+                        if best is None or (sample.evaded and not best.evaded):
+                            best = sample
+                        if evaded:
+                            success = sample
+                            break
+                        continue
+                    evaded = not stage3.predict(cand)  # Stage 3 benign == evaded
+                    if not evaded:
+                        if best is None:
+                            best = EvasiveSample(seed.seed_id, seed.source_dataset,
+                                                 seed.orig_text, cand, evaded=False,
+                                                 intent_preserved=False,
+                                                 transform_chain=list(chain),
+                                                 iterations_used=gen + 1)
+                        continue
+                    preserved = judge.judge(seed.orig_text, cand)
                     sample = EvasiveSample(seed.seed_id, seed.source_dataset,
-                                           seed.orig_text, cand, evaded=evaded,
-                                           intent_preserved=True,
+                                           seed.orig_text, cand, evaded=True,
+                                           intent_preserved=preserved,
                                            transform_chain=list(chain),
                                            iterations_used=gen + 1)
-                    if best is None or (sample.evaded and not best.evaded):
-                        best = sample
-                    if evaded:
+                    if preserved:
                         success = sample
                         break
-                    continue
-                evaded = not stage3.predict(cand)  # Stage 3 benign == evaded
-                if not evaded:
-                    if best is None:
-                        best = EvasiveSample(seed.seed_id, seed.source_dataset,
-                                             seed.orig_text, cand, evaded=False,
-                                             intent_preserved=False,
-                                             transform_chain=list(chain),
-                                             iterations_used=gen + 1)
-                    continue
-                preserved = judge.judge(seed.orig_text, cand)
-                sample = EvasiveSample(seed.seed_id, seed.source_dataset,
-                                       seed.orig_text, cand, evaded=True,
-                                       intent_preserved=preserved,
-                                       transform_chain=list(chain),
-                                       iterations_used=gen + 1)
-                if preserved:
-                    success = sample
-                    break
-                # Evaded but lost intent — keep as the best fallback + carry forward.
-                if promising is None:
-                    promising = cand
-                if best is None or not best.evaded:
-                    best = sample
+                    # Evaded but lost intent — keep as the best fallback + carry forward.
+                    if promising is None:
+                        promising = cand
+                    if best is None or not best.evaded:
+                        best = sample
+            except Exception as e:  # noqa: BLE001 — resilience for the long sweep
+                err_note = f"aborted_on_error: {type(e).__name__}"
+                break
             if success is not None:
                 break
             current = promising if promising is not None else current
         samples.append(success or best or EvasiveSample(
             seed.seed_id, seed.source_dataset, seed.orig_text, seed.orig_text,
             evaded=False, intent_preserved=False, transform_chain=list(chain),
-            iterations_used=gen_budget, notes="no_candidate_generated"))
+            iterations_used=gen_budget, notes=err_note or "no_candidate_generated"))
     return samples
 
 
