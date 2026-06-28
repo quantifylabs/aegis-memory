@@ -54,7 +54,8 @@ class EvasiveSample:
 def run_attack(seeds: list[Seed], stage3, mutator: Mutator, judge: IntentJudge,
                tier: str, blind: bool = False,
                population: int = config.ATTACK1_POPULATION,
-               generations: int = config.ATTACK1_GENERATIONS) -> list[EvasiveSample]:
+               generations: int = config.ATTACK1_GENERATIONS,
+               progress=None) -> list[EvasiveSample]:
     """Run rule-evasion over ``seeds`` and return one :class:`EvasiveSample` each.
 
     ``stage3`` exposes ``predict(text) -> bool`` (the free Stage-3 oracle).
@@ -72,7 +73,9 @@ def run_attack(seeds: list[Seed], stage3, mutator: Mutator, judge: IntentJudge,
     """
     samples: list[EvasiveSample] = []
     gen_budget = 1 if blind else generations
-    for seed in seeds:
+    for i, seed in enumerate(seeds):
+        if progress is not None:
+            progress(i, len(seeds))
         current = seed.orig_text
         chain: list[str] = []
         best: EvasiveSample | None = None

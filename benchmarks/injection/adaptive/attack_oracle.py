@@ -28,7 +28,8 @@ from .seeds import Seed
 
 
 def run_attack(seeds: list[Seed], target, mutator: Mutator, judge: IntentJudge,
-               tier: str, budget: int = config.QUERY_BUDGET) -> list[EvasiveSample]:
+               tier: str, budget: int = config.QUERY_BUDGET,
+               progress=None) -> list[EvasiveSample]:
     """Run the oracle loop over ``seeds`` against ``target`` (an ``AegisStages14``).
 
     ``target.predict(text) -> bool`` is the billed Stage-4 query. Returns one
@@ -37,7 +38,9 @@ def run_attack(seeds: list[Seed], target, mutator: Mutator, judge: IntentJudge,
     so the test can drive the loop with a stub target + stub mutator.
     """
     samples: list[EvasiveSample] = []
-    for seed in seeds:
+    for i, seed in enumerate(seeds):
+        if progress is not None:
+            progress(i, len(seeds))
         current = seed.orig_text
         chain: list[str] = []
         result: EvasiveSample | None = None

@@ -40,6 +40,7 @@ import argparse
 import json
 import platform
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -63,6 +64,24 @@ CACHE_DIR = rb_mod.CACHE_DIR  # share the static benchmark's cache so re-runs hi
 # --------------------------------------------------------------------------
 # Evaluation — reuse the canonical run_system_on_dataset / metrics path
 # --------------------------------------------------------------------------
+def _progress(label: str, cache, every: int = 10):
+    """A per-seed progress callback: log every ``every`` seeds and flush the cache.
+
+    The attack search is sequential and long, with no other intermediate output;
+    without this a working run looks frozen from the outside (no console output,
+    and mutation cache writes stay in per-tag in-memory stores until a flush). The
+    flush also persists progress so a kill resumes cheaply from cache.
+    """
+    t0 = time.time()
+
+    def cb(i: int, total: int) -> None:
+        if i % every == 0:
+            print(f"          [{label}] seed {i}/{total}  ({time.time() - t0:.0f}s)", flush=True)
+            cache.flush()
+
+    return cb
+
+
 def evaluate_corpus(corpus, systems: list) -> dict:
     """Evaluate ``corpus`` against each (warmed) system; ``evasion = 1 - recall``.
 
@@ -105,10 +124,12 @@ def _intent_counts(samples, evaded_attr="evaded") -> dict:
     }
 
 
-def run_attack1(tier, stage3, mutator, judge, eval_systems, n) -> tuple[dict, object, list]:
+def run_attack1(tier, stage3, mutator, judge, eval_systems, n, cache) -> tuple[dict, object, list]:
     seeds = pick_seeds(n, stage3, max_probe=None)  # Stage 3 is free: scan freely
+    print(f"          [a1/{tier}] picked {len(seeds)} Stage-3-flagged seeds", flush=True)
     samples = a1.run_attack(seeds, stage3, mutator, judge, tier,
-                            blind=(tier == "grey_box"))
+                            blind=(tier == "grey_box"),
+                            progress=_progress(f"a1/{tier}", cache))
     corpus = a1.to_corpus(samples, tier)
     per_system = evaluate_corpus(corpus, eval_systems)
     # Hand-off: every corpus item evaded Stage 3 by construction, so a Stage-4
@@ -133,7 +154,7 @@ def run_attack1(tier, stage3, mutator, judge, eval_systems, n) -> tuple[dict, ob
     return block, corpus, samples
 
 
-def run_attack2(tier, stage3, stage4_targets, mutator, judge, eval_systems, n, budget):
+def run_attack2(tier, stage3, stage4_targets, mutator, judge, eval_systems, n, budget, cache):
     """Attack 2 across the Stage-4 targets. Returns a list of per-target blocks."""
     blocks = []
     corpora = []
@@ -144,7 +165,10 @@ def run_attack2(tier, stage3, stage4_targets, mutator, judge, eval_systems, n, b
         else:  # grey_box: search the FREE Stage-3 surrogate, transfer to Stage 4
             search_target, max_probe = stage3, None
         seeds = pick_seeds(n, search_target, max_probe=max_probe)
-        samples = a2.run_attack(seeds, search_target, mutator, judge, tier, budget=budget)
+        print(f"          [a2/{tier}/{target.id}] picked {len(seeds)} seeds via "
+              f"{search_target.id}", flush=True)
+        samples = a2.run_attack(seeds, search_target, mutator, judge, tier, budget=budget,
+                                progress=_progress(f"a2/{tier}/{target.id}", cache))
         corpus = a2.to_corpus(samples, tier, target.id)
         per_system = evaluate_corpus(corpus, eval_systems)  # transfer evasion across systems
         block = {
@@ -275,7 +299,7 @@ def main(argv: list[str] | None = None) -> int:
 
         # ---- Attack 1: rule-evasion -> Stage 3 ----
         print("[attack1] rule-evasion vs Stage 3")
-        b1, c1, s1 = run_attack1(tier, stage3, mutator, judge, eval_systems, n)
+        b1, c1, s1 = run_attack1(tier, stage3, mutator, judge, eval_systems, n, cache)
         results["attack1"][tier] = b1
         _write_corpus(c1, s1); corpora_written.append(c1.name)
         cache.flush()
@@ -290,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
         # ---- Attack 2: classifier-oracle -> Stage 4 ----
         print("[attack2] classifier-oracle vs Stage 4")
         b2_list, c2_list, _s2map = run_attack2(tier, stage3, stage4_targets, mutator,
-                                               judge, eval_systems, n, budget)
+                                               judge, eval_systems, n, budget, cache)
         results["attack2"][tier] = b2_list
         for blk, corp in zip(b2_list, c2_list):
             samples = _s2map_get(_s2map, tier, blk["target"])
