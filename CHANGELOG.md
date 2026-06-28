@@ -5,6 +5,12 @@ All notable changes to Aegis Memory will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Adaptive attack harness for the injection benchmark** (`benchmarks/injection/adaptive/`). Three adaptive attacks that actively try to *evade* the content-security pipeline rather than scoring it on a fixed corpus: (1) **rule-evasion** — AutoDAN-style iterated paraphrase against the free, deterministic Stage 3, headlined by the **Stage-3 → Stage-4 hand-off** (of the Stage-3 evaders produced, what fraction Stage 4 still catches); (2) **classifier-oracle** — a DataSentinel-style detector-evasion loop against the Stage-4 LLM classifier that records *queries-to-evade* and an evasion-vs-budget curve, direct-searching the Aegis Stage-4 systems and *transferring* found samples to baselines; (3) **composition / payload-splitting** — an illustrative, smaller-by-design study of sub-threshold fragments whose assembled text carries intent. Reuses the existing `Dataset` / `System` / `ResponseCache` / `metrics` machinery and the `probe` primitives rather than forking them: **evasion = 1 − recall** comes from the same `bootstrap_cis` (n=1000, seed=42) as the static benchmark. A mandatory cheap-model **intent-preservation judge** (distinct from any Stage-4 classifier) excludes intent-lost candidates from the evasion numerator and reports them rather than silently dropping them. Results are written to a **separate** `adaptive/results/adaptive_results.json` with provenance-rich corpora; the static `results/results.json` is never touched. Network-free regression tests in `tests/test_injection_adaptive.py`. The harness is **smoke-validated end-to-end**; full pre-registered adaptive numbers (N=250/tier, budget=30) are pending a separate, approved billed sweep.
+
 ## [2.6.0] - 2026-06-25
 
 ### Added
