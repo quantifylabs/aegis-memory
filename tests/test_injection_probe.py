@@ -26,11 +26,17 @@ from benchmarks.injection.probe.seed_picker import Seed  # noqa: E402
 # Stubs
 # --------------------------------------------------------------------------
 class StubSystem(sys_mod.System):
-    """Deterministic system: flags exactly the texts in ``caught``."""
+    """Deterministic system: flags exactly the texts in ``caught``.
 
-    def __init__(self, sid: str, caught: set[str]):
+    Texts in ``errors_on`` raise inside ``predict``; the base ``evaluate_batch``
+    converts that to a ``None`` prediction (per-item failure), which is how a
+    real Stage-4 timeout/429/parse-error surfaces.
+    """
+
+    def __init__(self, sid: str, caught: set[str], errors_on: set[str] | None = None):
         self.id = sid
         self._caught = caught
+        self._errors_on = errors_on or set()
 
     def available(self):
         return True, ""
@@ -39,6 +45,8 @@ class StubSystem(sys_mod.System):
         return None
 
     def predict(self, text: str) -> bool:
+        if text in self._errors_on:
+            raise RuntimeError("simulated per-item failure")
         return text in self._caught
 
 
@@ -171,3 +179,56 @@ def test_render_summary_contains_headline():
     assert "The hand-off (decision headline)" in md
     assert "Excluded: 1" in md
     assert "aegis_stages_1_3" in md
+
+
+# --------------------------------------------------------------------------
+# Regression: an errored Stage-4 item must NOT be counted as a catch
+# --------------------------------------------------------------------------
+def test_errored_item_not_counted_as_stage4_catch():
+    # Stage 3 misses c2 -> c2 is an evader. Stage-4 OpenAI ERRORS on c2 (no verdict).
+    # The hand-off must treat c2 as excluded (prediction None), not as caught.
+    cands = [_candidate("s1", "c1"), _candidate("s2", "c2")]
+    systems = [
+        StubSystem(config.STAGE3_SYSTEM, caught={"c1"}),                 # evaders: {c2}
+        StubSystem("aegis_stages_1_4_openai", caught=set(), errors_on={"c2"}),
+        StubSystem("aegis_stages_1_4_anthropic", caught={"c2"}),          # genuinely catches c2
+        StubSystem("llm_guard", caught=set()),
+    ]
+    per_system = run_probe.evaluate_candidates(cands, systems)
+
+    s4o = per_system["aegis_stages_1_4_openai"]
+    assert s4o["n_errors"] == 1
+    assert s4o["predictions"]["s2::v0"] is None     # errored -> None, not True
+    assert s4o["n"] == 1                             # only c1 successfully evaluated
+
+    handoff = run_probe.compute_handoff(cands, per_system)
+    assert handoff["stage3_evader_count"] == 1
+    # OpenAI erred on the sole evader: 0 caught, NOT 1 (the old fn-set bug counted it caught).
+    o = handoff["by_stage4"]["aegis_stages_1_4_openai"]
+    assert (o["caught"], o["total"]) == (0, 1)
+    assert o["fraction"] == 0.0
+    # Anthropic genuinely caught it.
+    a = handoff["by_stage4"]["aegis_stages_1_4_anthropic"]
+    assert (a["caught"], a["total"]) == (1, 1)
+
+
+# --------------------------------------------------------------------------
+# Regression: seed pool filters to malicious labels (mixed-label deepset)
+# --------------------------------------------------------------------------
+def test_stage3_true_pool_filters_to_malicious_labels(monkeypatch):
+    from benchmarks.injection import datasets as ds_mod
+    from benchmarks.injection.probe import seed_picker
+
+    # A mixed-label dataset where Stage 3 flags BOTH rows (a benign false positive).
+    fake = ds_mod.Dataset(
+        name="fake", kind="malicious_direct", status="ok",
+        items=[("malicious injection payload", True), ("perfectly benign row", False)],
+    )
+    monkeypatch.setitem(ds_mod.LOADERS, "fake", lambda limit=None: fake)
+
+    class _Stage3FlagsEverything:
+        def predict(self, text: str) -> bool:
+            return True  # incl. the benign row (the over-flag the guard must drop)
+
+    pool = seed_picker._stage3_true_pool("fake", _Stage3FlagsEverything())
+    assert pool == ["malicious injection payload"], "benign FP must not enter the seed pool"
