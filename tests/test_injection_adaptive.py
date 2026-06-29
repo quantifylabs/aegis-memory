@@ -25,6 +25,7 @@ from benchmarks.injection.adaptive import (  # noqa: E402
     attack_oracle as a2,
     attack_rule_evasion as a1,
     run_adaptive,
+    seeds as seeds_mod,
 )
 from benchmarks.injection.adaptive.seeds import Seed  # noqa: E402
 
@@ -119,6 +120,46 @@ def test_attack1_intent_lost_excluded_but_reported():
     assert a1.to_corpus(samples, "white_box").n == 0
 
 
+def test_attack1_grey_box_commits_first_intent_preserving_variant():
+    class TwoVariantMutator:
+        def variants(self, text: str, n: int, tag: str) -> list[str]:
+            return ["MAL still blocked", "clean would evade"]
+
+    class CountingStage3(FlagOnSubstr):
+        def __init__(self):
+            super().__init__("aegis_stages_1_3", needles=["MAL"])
+            self.calls = []
+
+        def predict(self, text: str) -> bool:
+            self.calls.append(text)
+            return super().predict(text)
+
+    stage3 = CountingStage3()
+    samples = a1.run_attack([_seed("deepset#0")], stage3, TwoVariantMutator(),
+                            StubJudge(), tier="grey_box", blind=True, population=2)
+
+    assert len(samples) == 1
+    assert samples[0].evasive_text == "MAL still blocked"
+    assert not samples[0].evaded
+    assert samples[0].intent_preserved
+    assert stage3.calls == ["MAL still blocked"]
+
+
+def test_attack1_grey_box_filters_intent_before_single_commit():
+    class TwoVariantMutator:
+        def variants(self, text: str, n: int, tag: str) -> list[str]:
+            return ["lost intent clean", "MAL preserved"]
+
+    stage3 = FlagOnSubstr("aegis_stages_1_3", needles=["MAL"])
+    samples = a1.run_attack([_seed("deepset#0")], stage3, TwoVariantMutator(),
+                            StubJudge(no_marker="lost intent"), tier="grey_box",
+                            blind=True, population=2)
+
+    assert samples[0].evasive_text == "MAL preserved"
+    assert not samples[0].evaded
+    assert samples[0].intent_preserved
+
+
 # --------------------------------------------------------------------------
 # evaluate_corpus: evasion == 1 - recall, errors excluded both sides
 # --------------------------------------------------------------------------
@@ -150,6 +191,53 @@ def test_evaluate_corpus_excludes_errored_from_denominator():
 def test_evaluate_corpus_empty():
     res = run_adaptive.evaluate_corpus(_corpus([]), [FlagOnSubstr("sys", [])])
     assert res["sys"]["status"] == "empty_corpus"
+
+
+def test_pick_seeds_two_pass_tops_up_from_leftover_source(monkeypatch):
+    candidates = [
+        ("small", "s0"),
+        ("big", "b0"),
+        ("big", "b1"),
+        ("big", "b2"),
+        ("big", "b3"),
+    ]
+
+    monkeypatch.setattr(seeds_mod.config, "SEED_SOURCE_DATASETS", ["small", "big"])
+    monkeypatch.setattr(seeds_mod, "_stratified_candidates", lambda rng: candidates)
+
+    picked = seeds_mod.pick_seeds(4, FlagOnSubstr("oracle", needles=["s", "b"]))
+
+    assert len(picked) == 4
+    assert [s.source_dataset for s in picked].count("small") == 1
+    assert [s.source_dataset for s in picked].count("big") == 3
+
+
+def test_pick_seeds_two_pass_respects_max_probe(monkeypatch):
+    candidates = [
+        ("small", "s0"),
+        ("big", "b0"),
+        ("big", "b1"),
+        ("big", "b2"),
+        ("big", "b3"),
+    ]
+
+    class CountingOracle(FlagOnSubstr):
+        def __init__(self):
+            super().__init__("oracle", needles=["s", "b"])
+            self.calls = 0
+
+        def predict(self, text: str) -> bool:
+            self.calls += 1
+            return super().predict(text)
+
+    monkeypatch.setattr(seeds_mod.config, "SEED_SOURCE_DATASETS", ["small", "big"])
+    monkeypatch.setattr(seeds_mod, "_stratified_candidates", lambda rng: candidates)
+    oracle = CountingOracle()
+
+    picked = seeds_mod.pick_seeds(4, oracle, max_probe=3)
+
+    assert len(picked) == 3
+    assert oracle.calls == 3
 
 
 # --------------------------------------------------------------------------

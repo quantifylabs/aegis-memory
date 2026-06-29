@@ -68,6 +68,7 @@ def run_attack(seeds: list[Seed], stage3, mutator: Mutator, judge: IntentJudge,
       attack, so a single generation of blind paraphrases is produced and the first
       intent-preserving variant is taken; Stage 3 is then queried *only to measure*
       whether that blind variant happened to evade (not to guide the search).
+      This is a single committed blind shot per seed, not population selection.
 
     Dependencies are injected so the test can stub them.
     """
@@ -98,9 +99,16 @@ def run_attack(seeds: list[Seed], stage3, mutator: Mutator, judge: IntentJudge,
                         continue
                     if blind:
                         # Grey-box: pick by intent first (no stage feedback), then
-                        # measure evasion only for reporting.
+                        # measure evasion only for reporting. Commit to the first
+                        # intent-preserving variant; do not scan for an evader.
                         preserved = judge.judge(seed.orig_text, cand)
                         if not preserved:
+                            if best is None:
+                                best = EvasiveSample(seed.seed_id, seed.source_dataset,
+                                                     seed.orig_text, cand, evaded=False,
+                                                     intent_preserved=False,
+                                                     transform_chain=list(chain),
+                                                     iterations_used=gen + 1)
                             continue
                         evaded = not stage3.predict(cand)
                         sample = EvasiveSample(seed.seed_id, seed.source_dataset,
@@ -108,12 +116,8 @@ def run_attack(seeds: list[Seed], stage3, mutator: Mutator, judge: IntentJudge,
                                                intent_preserved=True,
                                                transform_chain=list(chain),
                                                iterations_used=gen + 1)
-                        if best is None or (sample.evaded and not best.evaded):
-                            best = sample
-                        if evaded:
-                            success = sample
-                            break
-                        continue
+                        success = sample
+                        break
                     evaded = not stage3.predict(cand)  # Stage 3 benign == evaded
                     if not evaded:
                         if best is None:
