@@ -123,25 +123,48 @@ def pick_seeds(target: int, oracle, max_probe: int | None = None) -> list[Seed]:
     picked: list[Seed] = []
     per_source: dict[str, int] = {n: 0 for n in config.SEED_SOURCE_DATASETS}
     probes = 0
-    for name, text in candidates:
-        if len(picked) >= target:
-            break
+
+    def _try_pick(name: str, text: str) -> bool:
+        """Probe one candidate and append it if flagged.
+
+        Returns ``False`` when the shared probe budget is exhausted before the
+        oracle call. Both passes use this helper so paid Stage-4 seeding observes
+        a single ``max_probe`` cap across balancing and top-up.
+        """
+        nonlocal probes
         if max_probe is not None and probes >= max_probe:
-            break
-        # Honour the per-source quota on the first pass; a later top-up pass would
-        # over-query the paid oracle, so instead allow overflow once the *other*
-        # source is exhausted (tracked implicitly: we just stop at ``target``).
-        if per_source[name] >= quotas[name] and len(picked) < target:
-            # Only skip if some other source still has quota headroom available.
-            if any(per_source[o] < quotas[o] for o in config.SEED_SOURCE_DATASETS if o != name):
-                continue
+            return False
         probes += 1
         try:
             flagged = oracle.predict(text)
         except Exception:  # noqa: BLE001 — a flaky probe call just skips this candidate
-            continue
+            return True
         if flagged:
             picked.append(Seed(seed_id=f"{name}#{len(picked)}", source_dataset=name,
                                orig_index=len(picked), orig_text=text))
             per_source[name] += 1
+        return True
+
+    seen: set[int] = set()
+
+    # Pass 1: fill each source up to its balanced quota (or available flagged pool).
+    for idx, (name, text) in enumerate(candidates):
+        if len(picked) >= target:
+            break
+        if per_source[name] >= quotas[name]:
+            continue
+        if not _try_pick(name, text):
+            break
+        seen.add(idx)
+
+    # Pass 2: if one source ran thin, top up from any remaining flagged candidates
+    # without per-source quotas, while still respecting the same max_probe cap.
+    if len(picked) < target and (max_probe is None or probes < max_probe):
+        for idx, (name, text) in enumerate(candidates):
+            if len(picked) >= target:
+                break
+            if idx in seen:
+                continue
+            if not _try_pick(name, text):
+                break
     return picked[:target]

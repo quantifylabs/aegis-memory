@@ -205,15 +205,15 @@ def run_attack3(tier, stage3, judge, eval_systems, n) -> tuple[dict, object, lis
 # --------------------------------------------------------------------------
 # Output helpers
 # --------------------------------------------------------------------------
-def _write_corpus(corpus, samples) -> None:
-    CORPORA_DIR.mkdir(parents=True, exist_ok=True)
+def _write_corpus(corpus, samples, corpora_dir: Path = CORPORA_DIR) -> None:
+    corpora_dir.mkdir(parents=True, exist_ok=True)
     payload = {
         "name": corpus.name, "kind": corpus.kind, "n": corpus.n,
         "source": corpus.source, "notes": corpus.notes,
         "items": [t for t, _ in corpus.items],
         "samples": [s.to_dict() for s in samples],
     }
-    (CORPORA_DIR / f"{corpus.name}.json").write_text(json.dumps(payload, indent=2),
+    (corpora_dir / f"{corpus.name}.json").write_text(json.dumps(payload, indent=2),
                                                      encoding="utf-8")
 
 
@@ -235,6 +235,7 @@ def main(argv: list[str] | None = None) -> int:
 
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+    corpora_dir = out_dir / "corpora"
     env_status = rb_mod._load_dotenv()
 
     n = args.limit if args.limit is not None else config.N_PER_ATTACK_PER_TIER
@@ -301,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
         print("[attack1] rule-evasion vs Stage 3")
         b1, c1, s1 = run_attack1(tier, stage3, mutator, judge, eval_systems, n, cache)
         results["attack1"][tier] = b1
-        _write_corpus(c1, s1); corpora_written.append(c1.name)
+        _write_corpus(c1, s1, corpora_dir); corpora_written.append(c1.name)
         cache.flush()
         ic = b1["intent"]
         print(f"          seeds={b1['n_seeds']} evaders={ic['n_evaded_target']} "
@@ -318,7 +319,7 @@ def main(argv: list[str] | None = None) -> int:
         results["attack2"][tier] = b2_list
         for blk, corp in zip(b2_list, c2_list):
             samples = _s2map_get(_s2map, tier, blk["target"])
-            _write_corpus(corp, samples); corpora_written.append(corp.name)
+            _write_corpus(corp, samples, corpora_dir); corpora_written.append(corp.name)
             print(f"          target={blk['target']} via {blk['search_oracle']} "
                   f"evasions={blk['evasion_corpus_n']}/{blk['n_seeds']} "
                   f"budget_curve={blk['budget_curve']}")
@@ -328,7 +329,7 @@ def main(argv: list[str] | None = None) -> int:
         print("[attack3] composition / payload-splitting (illustrative)")
         b3, c3, s3cases = run_attack3(tier, stage3, judge, eval_systems, n3)
         results["attack3"][tier] = b3
-        _write_corpus(c3, s3cases); corpora_written.append(c3.name)
+        _write_corpus(c3, s3cases, corpora_dir); corpora_written.append(c3.name)
         print(f"          {b3['summary']}")
         cache.flush()
 
@@ -364,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     out_json = out_dir / "adaptive_results.json"
     out_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(f"\n[write] {out_json}")
-    print(f"[write] {len(corpora_written)} corpora under {CORPORA_DIR}")
+    print(f"[write] {len(corpora_written)} corpora under {corpora_dir}")
     print(f"[cache] hits={cache.hits} misses={cache.misses}  "
           f"(misses ~= billed LLM calls this run)")
     return 0
