@@ -341,7 +341,10 @@ def _writes_shared_scope(call: ast.Call) -> bool:
         for n in ast.walk(node):
             if isinstance(n, ast.Constant) and isinstance(n.value, str):
                 v = n.value.lower()
-                if "shared" in v or "global" in v or v in ("public", "all-agents", "everyone"):
+                # ``shared``/``global`` substrings (agent-shared, global-store), plus a few exact
+                # whole-scope tokens — including ``all`` (``scope="all"`` / namespace ``("all",)``).
+                # ``all`` is exact-match only (``v == "all"``), so it never trips on ``install``/``all done``.
+                if "shared" in v or "global" in v or v in ("public", "all", "all-agents", "everyone"):
                     return True
         return False
 
