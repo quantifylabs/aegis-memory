@@ -155,6 +155,33 @@ def test_guard_emits_visible_hook_output_on_risky_write():
     assert RISKY_FIXTURE.name in ctx
 
 
+def test_guard_is_graceful_and_loop_bounded_when_package_unimportable(tmp_path):
+    """codex P2: the `python || python3` hook fallback can't tell "interpreter lacks the package"
+    (guard exits 0 by design) from "guard ran fine", so the guard re-execs itself under the other
+    interpreter when `aegis_memory` won't import. This must stay a silent, exit-0 no-op and must not
+    loop forever when NO interpreter has the package. Simulate "no package" by shadowing
+    `aegis_memory` with a module that raises on import, then confirm the guard degrades cleanly."""
+    poison = tmp_path / "poison"
+    poison.mkdir()
+    (poison / "aegis_memory.py").write_text("raise ImportError('shadowed for test')\n", encoding="utf-8")
+    target = tmp_path / "agent.py"
+    target.write_text("x = 1\n", encoding="utf-8")
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(poison)  # shadow the real package so import fails under every interpreter
+    proc = subprocess.run(
+        [sys.executable, str(GUARD_PY)],
+        input=json.dumps({"tool_input": {"file_path": str(target)}}),
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        env=env,
+        timeout=120,  # if the re-exec looped, this would hang and fail the test
+    )
+    assert proc.returncode == 0
+    assert proc.stdout.strip() == ""  # no package anywhere -> silent no-op, never disrupts a session
+
+
 def test_guard_is_silent_no_op_on_non_python_file(tmp_path):
     benign = tmp_path / "notes.txt"
     benign.write_text("nothing to scan here", encoding="utf-8")

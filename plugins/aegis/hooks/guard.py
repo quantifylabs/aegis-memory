@@ -5,12 +5,19 @@ keyless Aegis analyzer over it to spot unsafe agent-memory write sinks / untrust
 content storage (OWASP ASI06). On a risky write it emits a non-blocking warning as
 documented PostToolUse hook JSON on *stdout* (hookSpecificOutput.additionalContext,
 which Claude Code only parses on exit 0) — it never blocks an edit and always exits 0.
-If Python or the aegis-memory package isn't importable, it is a silent no-op so it can
-never disrupt a session.
+If the aegis-memory package isn't importable, it is a silent no-op so it can never
+disrupt a session.
 
 This is the cross-platform replacement for the older guard.sh: it depends only on a
 Python interpreter (already the hard requirement for the analyzer), not on a POSIX
 shell, so it runs identically on Windows, macOS and Linux.
+
+Interpreter selection is handled *here*, not by the shell: the hook command tries
+``python`` then ``python3`` only to launch SOME interpreter, but the ``||`` fallback can't
+tell "python lacks the package" (the guard exits 0 by design) from "python ran fine". So
+when ``aegis_memory`` can't be imported under the current interpreter, the guard re-execs
+itself under the other interpreter (``python3``/``python``) that may have the package,
+forwarding the original payload. A loop guard (``AEGIS_GUARD_REEXEC``) bounds it to one hop.
 """
 
 from __future__ import annotations
@@ -22,10 +29,44 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
+# Read the hook payload once. We keep the raw text so a re-exec can forward it to the child
+# interpreter (the parent has already consumed the real stdin, so the child can't read it itself).
+try:
+    _PAYLOAD = sys.stdin.read()
+except Exception:
+    _PAYLOAD = ""
+
+
+def _reexec_under_other_interpreter() -> None:
+    """``aegis_memory`` isn't importable here — try the same script under another interpreter that
+    might have it (the ``python`` vs ``python3`` split). Bounded to a single hop via
+    ``AEGIS_GUARD_REEXEC`` and fully defensive: any failure leaves a silent no-op."""
+    if os.environ.get("AEGIS_GUARD_REEXEC") == "1":
+        return
+    import shutil
+    import subprocess
+
+    current = os.path.realpath(sys.executable) if sys.executable else ""
+    for name in ("python3", "python"):
+        exe = shutil.which(name)
+        if not exe or os.path.realpath(exe) == current:
+            continue
+        try:
+            subprocess.run(
+                [exe, os.path.abspath(__file__)],
+                input=_PAYLOAD,
+                text=True,
+                env={**os.environ, "AEGIS_GUARD_REEXEC": "1"},
+                timeout=60,
+            )
+            return  # the child produced any warning on stdout; we're done
+        except Exception:
+            continue
+
 
 def main() -> None:
     try:
-        payload = json.load(sys.stdin)
+        payload = json.loads(_PAYLOAD)
     except Exception:
         return
 
@@ -37,7 +78,9 @@ def main() -> None:
     try:
         from aegis_memory.inspect.analyzer import analyze_project
     except Exception:
-        return  # aegis-memory not importable in this env -> no-op
+        # aegis-memory not importable under THIS interpreter -> try the other one before giving up.
+        _reexec_under_other_interpreter()
+        return
 
     target = os.path.basename(path)
     parent = os.path.dirname(os.path.abspath(path)) or "."

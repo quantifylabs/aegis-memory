@@ -1,15 +1,16 @@
 {
   "name": "aegis",
+  "displayName": "Aegis",
   "version": "0.1.0",
   "description": "Secure your agent's memory — detect OWASP ASI06 memory & context poisoning. Runs locally, no API key, your code never leaves your machine.",
   "author": {
     "name": "Arulnidhi Karunanidhi",
+    "email": "arulnidhi@quantifylabs.ai",
     "url": "https://github.com/arulnidhii"
   },
   "homepage": "https://github.com/quantifylabs/aegis-memory",
   "repository": "https://github.com/quantifylabs/aegis-memory",
   "license": "Apache-2.0",
-  "icon": "./icon.svg",
   "keywords": [
     "security",
     "owasp",

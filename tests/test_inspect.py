@@ -327,6 +327,18 @@ def test_empty_shared_with_agents_is_not_overbroad(tmp_path):
     assert any(f.category == "overbroad_shared_access" for f in analyze_project(dn)), "non-empty list must flag"
 
 
+def test_scope_all_is_overbroad(tmp_path):
+    """codex P2: an exact ``scope="all"`` (or a LangGraph namespace ``("all",)``) targets every agent
+    and must flag overbroad-shared-access; an unrelated literal like ``key="install"`` must not."""
+    scope_all = "def run(client, ticket):\n    client.add(ticket['body'], scope='all')\n"
+    ns_all = "def run(store, ticket):\n    store.put(('all',), 'k', {'text': ticket['body']})\n"
+    benign = "def run(store, ticket):\n    store.put(('user',), 'k', {'text': ticket['body']}, scope='install')\n"
+    for name, src, want in (("scope_all", scope_all, True), ("ns_all", ns_all, True), ("benign", benign, False)):
+        d = tmp_path / name; d.mkdir(); (d / "a.py").write_text(src, encoding="utf-8")
+        got = any(f.category == "overbroad_shared_access" for f in analyze_project(d))
+        assert got is want, f"{name}: expected overbroad={want}, got {got}"
+
+
 def test_injected_tool_arg_is_not_the_untrusted_leaf():
     """The framework-injected params (``store``/``user_id`` via InjectedToolArg) are not model-supplied,
     so they must not be what trips the finding — the escalation comes from ``content``/``context``/
