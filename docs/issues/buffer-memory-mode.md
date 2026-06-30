@@ -1,5 +1,7 @@
 # `aegis inspect` — opt-in buffer-memory mode (`--include-buffers`)
 
+> **Tracked in [#77](https://github.com/quantifylabs/aegis-memory/issues/77).** This file is the detailed spec; follow the issue for status.
+
 **Status:** proposed / not implemented. Tracked out of Batch B (constructor-binding receiver
 resolution). **Default stays PUNT** — `append` and plain local containers are out of scope by design.
 

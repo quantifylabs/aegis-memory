@@ -1,5 +1,7 @@
 # `aegis inspect` — follow-up issues (out of scope for `fix/static-analyzer-taint`)
 
+> **Tracked in:** taint depth [#78](https://github.com/quantifylabs/aegis-memory/issues/78) · findings UX [#79](https://github.com/quantifylabs/aegis-memory/issues/79) · risk score [#80](https://github.com/quantifylabs/aegis-memory/issues/80) · onboarding/PATH [#81](https://github.com/quantifylabs/aegis-memory/issues/81) · CI/output (SARIF/allowlist/exit codes/SBOM) [#82](https://github.com/quantifylabs/aegis-memory/issues/82). This file is the detailed spec; follow the issues for status.
+
 These were surfaced by the two cold-reviewer audits of `/aegis:inspect` but deliberately left out of
 the static-analyzer correctness fix (receiver+method sinks + bounded cross-file taint). Track and
 schedule separately.

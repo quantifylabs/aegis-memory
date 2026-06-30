@@ -1,5 +1,7 @@
 # `aegis inspect` — analyzer second wave (deferred, not forgotten)
 
+> **Tracked in [#76](https://github.com/quantifylabs/aegis-memory/issues/76)** (async writes + AutoGen/LlamaIndex/Letta/Zep + TS/JS); `append`/buffer is [#77](https://github.com/quantifylabs/aegis-memory/issues/77). This file is the detailed spec; follow the issues for status.
+
 The closing analyzer item (`fix/inspect-langgraph-state-source`, "Fix 1") completed the
 LangGraph node-`state` / field source resolution. With it merged, the analyzer is
 *done enough* for launch. The items below are **explicitly deferred** — tracked here so
