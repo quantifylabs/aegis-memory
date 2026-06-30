@@ -256,10 +256,11 @@ def _child_exprs(node: ast.expr) -> list[ast.expr]:
         return [node.left, node.right]
     if isinstance(node, ast.Call):
         return list(node.args) + [kw.value for kw in node.keywords]
-    # Attribute read (``result.user_preferences``) — follow the receiver, so a field read off a
-    # variable assigned from an untrusted source (``result = llm.invoke(...)``) stays untrusted.
-    # Subscript already propagates via ``_untrusted_label``; this closes the same gap for attributes.
-    if isinstance(node, ast.Attribute):
+    # Field read off a variable — follow the receiver so a value assigned from an untrusted source
+    # (``result = llm.invoke(...)``) stays untrusted whether the field is read by attribute
+    # (``result.user_preferences``) or subscript (``result["user_preferences"]`` — chains return
+    # dict-shaped data too). We follow only the receiver (``node.value``), never the index/slice.
+    if isinstance(node, (ast.Attribute, ast.Subscript)):
         return [node.value]
     return []
 

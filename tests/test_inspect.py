@@ -539,6 +539,26 @@ def test_langgraph_field_off_llm_invoke_resolves_with_node_identity(tmp_path):
     assert "verdict.content.user_preferences" not in flow.fix, flow.fix
 
 
+def test_langgraph_field_off_llm_invoke_subscript_form(tmp_path):
+    """Symmetry (codex follow-up): chains return dict-shaped data, so a subscript field read off the
+    same untrusted ``.invoke()`` egress (``result['user_preferences']``) must resolve untrusted just
+    like the attribute form — and the fix swaps the whole subscript node for ``verdict.content``,
+    never the corrupt ``verdict.content['user_preferences']``."""
+    src = (
+        "from langgraph.graph import StateGraph\n"
+        "def update_memory(store, namespace, messages):\n"
+        "    result = client.invoke(messages)\n"
+        "    store.put(namespace, 'user_preferences', result['user_preferences'])\n"
+    )
+    d = tmp_path / "lg_invoke_sub"; d.mkdir()
+    (d / "node.py").write_text(src, encoding="utf-8")
+    flow = next(f for f in analyze_project(d) if f.category.endswith("_to_memory"))
+    assert flow.trust == "untrusted" and flow.severity == "critical"
+    assert "guard.write(result['user_preferences']" in flow.fix, flow.fix
+    assert "store.put(namespace, 'user_preferences', verdict.content)" in flow.fix, flow.fix
+    assert "verdict.content['user_preferences']" not in flow.fix, flow.fix
+
+
 def test_batcha_input_builtin_is_untrusted(tmp_path):
     """Fix 1: builtin ``input(...)`` is an untrusted source (generic CLI agents)."""
     src = (
