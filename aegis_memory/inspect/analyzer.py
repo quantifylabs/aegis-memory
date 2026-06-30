@@ -9,6 +9,9 @@ hints. No rule keys off any demo filename or string.
 from __future__ import annotations
 
 import ast
+import io
+import re
+import tokenize
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -16,6 +19,11 @@ from typing import cast
 
 from . import bindings, fixgen, interproc, notebooks, sinks, taint
 from .findings import Category, Finding, Sink
+
+# Inline suppression: ``# aegis: ignore`` on (or directly above) a sink call drops its findings, so a
+# reviewed/accepted sink can be silenced without churn. An optional reason may follow (``# aegis:
+# ignore - trusted internal seed``). Matched on real COMMENT tokens, never inside a string literal.
+_SUPPRESS_RE = re.compile(r"#\s*aegis:\s*ignore\b", re.IGNORECASE)
 
 # Directories we never descend into.
 _SKIP_DIRS = {
@@ -77,18 +85,22 @@ def analyze_project(root: str | Path, framework: str | None = None) -> list[Find
     the bounded interprocedural resolver follows the value across function/file boundaries."""
     root = Path(root).resolve()
     modules: list[tuple[str, ast.Module]] = []
+    # rel -> (all ``# aegis: ignore`` lines, standalone-marker lines)
+    suppressed: dict[str, tuple[set[int], set[int]]] = {}
     for path in _iter_source_files(root):
         if path.suffix == ".ipynb":
             tree = notebooks.load_notebook(path)
             if tree is None:
                 continue
+            rel = _rel(path, root)
         else:
             try:
                 source = path.read_text(encoding="utf-8")
                 tree = ast.parse(source, filename=str(path))
             except (SyntaxError, UnicodeDecodeError):
                 continue
-        rel = _rel(path, root)
+            rel = _rel(path, root)
+            suppressed[rel] = _suppressed_lines(source)
         _annotate_parents(tree)
         modules.append((rel, tree))
 
@@ -98,7 +110,7 @@ def analyze_project(root: str | Path, framework: str | None = None) -> list[Find
     receiver_bindings = bindings.ReceiverBindings.build(modules)
 
     sites: list[_SinkSite] = []
-    read_flows: list[tuple[str, int]] = []
+    read_flows: list[tuple[str, int, str, str]] = []
     for rel, tree in modules:
         sites.extend(_scan_module(tree, rel, receiver_bindings))
         read_flows.extend(_scan_read_paths(tree, rel))
@@ -112,8 +124,61 @@ def analyze_project(root: str | Path, framework: str | None = None) -> list[Find
             s.taint = res.taint
             s.flow_path = res.flow_path
 
+    # Inline suppression (``# aegis: ignore``): drop sinks and read-flows the author has accepted.
+    sites = [s for s in sites if not _site_suppressed(s, suppressed)]
+    read_flows = [rf for rf in read_flows if not _line_suppressed(rf[0], rf[1], suppressed)]
+
     findings = _build_findings(sites, read_flows, framework)
     return findings
+
+
+def _suppressed_lines(source: str) -> tuple[set[int], set[int]]:
+    """Find ``# aegis: ignore`` markers. Returns ``(all_marker_lines, standalone_marker_lines)``.
+
+    Matched on real COMMENT tokens so the marker is never honoured inside a string literal. A
+    *standalone* marker (a comment alone on its line) applies to the statement directly below it; an
+    *inline* marker (trailing code) applies only to that statement — this split keeps an inline marker
+    on one sink from leaking onto the next line's sink. Falls back to a line scan if the source can't
+    be tokenized (e.g. a fragment), staying best-effort rather than failing the whole analysis."""
+    all_marks: set[int] = set()
+    standalone: set[int] = set()
+
+    def _record(lineno: int, line_text: str) -> None:
+        all_marks.add(lineno)
+        if line_text.lstrip().startswith("#"):
+            standalone.add(lineno)
+
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+            if tok.type == tokenize.COMMENT and _SUPPRESS_RE.search(tok.string):
+                _record(tok.start[0], tok.line)
+    except (tokenize.TokenError, IndentationError, SyntaxError, ValueError):
+        for i, line in enumerate(source.splitlines(), start=1):
+            if _SUPPRESS_RE.search(line):
+                _record(i, line)
+    return all_marks, standalone
+
+
+def _line_suppressed(rel: str, line: int, suppressed: dict[str, tuple[set[int], set[int]]]) -> bool:
+    """A finding anchored to ``line`` is suppressed by an inline/any marker on that line, or by a
+    *standalone* marker on the line directly above it."""
+    marks = suppressed.get(rel)
+    if not marks:
+        return False
+    all_marks, standalone = marks
+    return line in all_marks or (line - 1) in standalone
+
+
+def _site_suppressed(s: _SinkSite, suppressed: dict[str, tuple[set[int], set[int]]]) -> bool:
+    """A sink is suppressed by an ``# aegis: ignore`` anywhere within its (possibly multi-line) call
+    span, or by a *standalone* marker on the line directly above the call."""
+    marks = suppressed.get(s.file)
+    if not marks:
+        return False
+    all_marks, standalone = marks
+    start = getattr(s.call, "lineno", s.line)
+    end = getattr(s.call, "end_lineno", start) or start
+    return any(start <= n <= end for n in all_marks) or (start - 1) in standalone
 
 
 # --- module scan -------------------------------------------------------------------
@@ -266,24 +331,90 @@ def _write_key(call: ast.Call) -> str | None:
 
 
 def _writes_shared_scope(call: ast.Call) -> bool:
-    """Heuristic: does this write target a shared/global namespace?"""
-    for node in ast.walk(call):
-        if isinstance(node, ast.Constant) and isinstance(node.value, str):
-            v = node.value.lower()
-            if v in ("shared", "global", "public", "all") or "shared" in v or "global" in v:
-                return True
+    """Does this write target a shared/global namespace? **Tied to the scope/namespace argument**,
+    never to an arbitrary string constant anywhere in the call. The old version matched any literal
+    containing ``shared``/``global``, so a benign ``key="shared_calendar"`` or ``value="all done"``
+    minted a spurious overbroad-shared-access finding. We look only where scope is actually declared:
+    a ``scope=``/``shared_with_agents=`` keyword, or the namespace argument of a ``put``/``aput``."""
+
+    def _is_shared_literal(node: ast.expr) -> bool:
+        for n in ast.walk(node):
+            if isinstance(n, ast.Constant) and isinstance(n.value, str):
+                v = n.value.lower()
+                if "shared" in v or "global" in v or v in ("public", "all-agents", "everyone"):
+                    return True
+        return False
+
+    def _is_empty_or_none(node: ast.expr) -> bool:
+        # An empty literal collection (``[]``/``()``/``{}``) or ``None`` — not a shared write. A
+        # non-literal (a variable / call) is treated as possibly-shared and left to flag conservatively.
+        if isinstance(node, ast.Constant) and node.value is None:
+            return True
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return not node.elts
+        if isinstance(node, ast.Dict):
+            return not node.keys
+        return False
+
+    for kw in call.keywords:
+        # A *non-empty* shared-with list is a shared write. An explicit ``shared_with_agents=[]``
+        # (or ``=None``) means the memory is NOT shared, so it must not flag overbroad access.
+        if kw.arg == "shared_with_agents" and not _is_empty_or_none(kw.value):
+            return True
+        # scope="agent-shared" / scope="global" — the declared write scope.
+        if kw.arg in ("scope", "namespace") and _is_shared_literal(kw.value):
+            return True
+    # LangGraph ``store.put(namespace, key, value)`` — the namespace is the 1st positional.
+    fn = call.func
+    if isinstance(fn, ast.Attribute) and fn.attr in ("put", "aput") and call.args:
+        if _is_shared_literal(call.args[0]):
+            return True
     return False
 
 
 # --- read-path / provenance heuristic ----------------------------------------------
 
 
-def _scan_read_paths(tree: ast.Module, rel: str) -> list[tuple[str, int]]:
-    """Find memory reads that feed a prompt without provenance, scoped to the read's
-    nearest enclosing function (deduped by location)."""
+def _read_framework(recv: str) -> str:
+    """Map a memory-read receiver name to its framework label, so a provenance finding reflects the
+    real store (a Chroma/mem0 read isn't mislabeled as a LangGraph ``store.get``). Vector-store
+    receivers win first; checkpointer/saver/``*store*`` are LangGraph; anything else is custom."""
+    if any(h in recv for h in ("index", "collection", "vectorstore")):
+        return "vectordb"
+    if any(h in recv for h in ("checkpointer", "saver")) or "store" in recv:
+        return "langgraph"
+    return "custom"
+
+
+def _identifier_tokens(func: ast.AST) -> str:
+    """Lowercased identifier/attribute/argument names in a function — NOT string-literal contents.
+
+    The provenance heuristic must key off code structure, not text: the old ``ast.dump(func)`` folded
+    in every string constant, so a docstring or a literal containing ``source`` falsely satisfied the
+    provenance check (a false negative), and a literal containing ``prompt`` falsely tripped it. We
+    look only at identifiers a programmer actually named (``Name``/``Attribute``/``arg``/keyword/def)."""
+    parts: list[str] = []
+    for node in ast.walk(func):
+        if isinstance(node, ast.Name):
+            parts.append(node.id)
+        elif isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+        elif isinstance(node, ast.arg):
+            parts.append(node.arg)
+        elif isinstance(node, ast.keyword) and node.arg:
+            parts.append(node.arg)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            parts.append(node.name)
+    return " ".join(parts).lower()
+
+
+def _scan_read_paths(tree: ast.Module, rel: str) -> list[tuple[str, int, str, str]]:
+    """Find memory reads that feed a prompt without provenance, scoped to the read's nearest
+    enclosing function (deduped by location). Returns ``(file, line, framework, call)`` so the
+    finding names the real store rather than a hardcoded LangGraph ``store.get``."""
     seen: set[tuple[str, int]] = set()
-    out: list[tuple[str, int]] = []
-    dump_cache: dict[int, str] = {}
+    out: list[tuple[str, int, str, str]] = []
+    tok_cache: dict[int, str] = {}
     for call in ast.walk(tree):
         if not isinstance(call, ast.Call):
             continue
@@ -296,14 +427,16 @@ def _scan_read_paths(tree: ast.Module, rel: str) -> list[tuple[str, int]]:
         func = _enclosing_function(call)
         if func is None:
             continue
-        body_src = dump_cache.get(id(func)) or ast.dump(func).lower()
-        dump_cache[id(func)] = body_src
-        prompt_used = any(t in body_src for t in _PROMPT_TOKENS)
-        has_provenance = any(t in body_src for t in _PROVENANCE_TOKENS)
+        tokens = tok_cache.get(id(func))
+        if tokens is None:
+            tokens = _identifier_tokens(func)
+            tok_cache[id(func)] = tokens
+        prompt_used = any(t in tokens for t in _PROMPT_TOKENS)
+        has_provenance = any(t in tokens for t in _PROVENANCE_TOKENS)
         loc = (rel, getattr(call, "lineno", 0))
         if prompt_used and not has_provenance and loc not in seen:
             seen.add(loc)
-            out.append(loc)
+            out.append((rel, getattr(call, "lineno", 0), _read_framework(recv), f"{recv}.{fn.attr}"))
     return out
 
 
@@ -311,7 +444,7 @@ def _scan_read_paths(tree: ast.Module, rel: str) -> list[tuple[str, int]]:
 
 
 def _build_findings(
-    sites: list[_SinkSite], read_flows: list[tuple[str, int]], framework: str | None
+    sites: list[_SinkSite], read_flows: list[tuple[str, int, str, str]], framework: str | None
 ) -> list[Finding]:
     raw: list[Finding] = []
 
@@ -425,14 +558,14 @@ def _build_findings(
                 )
             )
 
-    for rel, line in read_flows:
+    for rel, line, fw, call_label in read_flows:
         raw.append(
             Finding(
                 id="",
                 severity="low",
                 confidence="AMBIGUOUS",
                 category=Category.MISSING_PROVENANCE.value,
-                sink=Sink(file=rel, line=line, framework="langgraph", call="store.get"),
+                sink=Sink(file=rel, line=line, framework=fw, call=call_label),
                 source="unknown",
                 trust="unknown",
                 title="Memory re-enters a prompt without provenance metadata",

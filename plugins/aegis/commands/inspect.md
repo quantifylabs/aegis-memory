@@ -10,6 +10,17 @@ Run a local, keyless Aegis inspection of the current project and report the resu
    aegis inspect .
    ```
 
+   If `aegis` is not on `PATH` (a fresh install whose scripts dir isn't exported),
+   fall back to the module form — it is equivalent:
+
+   ```bash
+   python -m aegis_memory.cli inspect .
+   ```
+
+   If *that* also fails with `No module named aegis_memory`, the package isn't
+   installed in this environment — tell the user to run `pip install aegis-memory`
+   first, and stop. Do not fabricate findings.
+
    This needs **no API key and no server** — it analyzes the code statically and
    writes artifacts to `aegis-out/` (including `agent_memory_map.html` and
    `INSPECTION_REPORT.md`).

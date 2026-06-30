@@ -6,6 +6,20 @@
     "name": "Arulnidhi Karunanidhi",
     "url": "https://github.com/arulnidhii"
   },
+  "homepage": "https://github.com/quantifylabs/aegis-memory",
   "repository": "https://github.com/quantifylabs/aegis-memory",
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "icon": "./icon.svg",
+  "keywords": [
+    "security",
+    "owasp",
+    "asi06",
+    "agent-security",
+    "memory",
+    "context-poisoning",
+    "static-analysis",
+    "mcp",
+    "langgraph",
+    "llm"
+  ]
 }

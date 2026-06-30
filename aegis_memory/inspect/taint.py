@@ -41,22 +41,28 @@ _UNTRUSTED_NAME_HINTS = (
 # Attribute names that read untrusted data off an object (e.g. resp.text, req.json).
 _UNTRUSTED_ATTR_HINTS = ("text", "json", "content", "body", "data", "read")
 
-# Callables whose return value is untrusted (network / file / tool egress).
-_UNTRUSTED_CALL_HINTS = (
-    "get",
-    "post",
+# Callables whose return value is untrusted (network / file / tool / LLM egress). Split into two
+# tiers so a plain ``dict.get(...)`` / ``config.get(...)`` / ``model.run(...)`` isn't mistaken for
+# network egress (the corpus surfaced ``reflection.get("insight")`` flagged purely on the verb):
+#   * STRONG — distinctive egress verbs unlikely to be an innocent local method; fire on any receiver.
+#   * WEAK   — common verbs that are usually local; fire ONLY on a known network/IO/tool receiver.
+_UNTRUSTED_CALL_METHODS_STRONG = (
     "fetch",
-    "read",
     "read_text",
-    "load",
     "invoke",
-    "run",
-    "call",
     "complete",
     # Streamlit user-input widgets — the value typed by an end user is untrusted.
     "chat_input",
     "text_input",
     "text_area",
+)
+_UNTRUSTED_CALL_METHODS_WEAK = (
+    "get",
+    "post",
+    "read",
+    "load",
+    "run",
+    "call",
 )
 _UNTRUSTED_CALL_RECEIVERS = (
     "requests",
@@ -92,21 +98,24 @@ class FunctionScope:
 
     func: ast.FunctionDef | ast.AsyncFunctionDef
     param_names: set[str] = field(default_factory=set)
-    # Parameter names that are untrusted-by-default for this function shape: a CrewAI
-    # ``BaseTool._run`` carries scraped/fetched content, and a LangGraph node's ``state``
-    # carries incoming (email/tool) content. Specific shapes only — never a blanket rule.
-    untrusted_params: set[str] = field(default_factory=set)
+    # Parameter name -> source kind ("untrusted_input" | "tool_output") for params that are
+    # untrusted-by-default for this function shape: a LangGraph node's ``state`` (incoming
+    # email/tool content), a CrewAI ``BaseTool._run`` arg (scraped/fetched output), and a
+    # LangChain/LangGraph tool function's model-supplied args. Specific shapes only — never blanket.
+    untrusted_params: dict[str, str] = field(default_factory=dict)
     # name -> the value expression last assigned to it (best effort, top-level body)
     assignments: dict[str, ast.expr] = field(default_factory=dict)
     # variable names that flowed through a sanitizer call somewhere in the scope
     sanitized_names: set[str] = field(default_factory=set)
     # receiver names wrapped by ``guard.protect(...)`` — a write *through* one is screened (sink-tied)
     protected_receivers: set[str] = field(default_factory=set)
-    # True if a scanner/sanitizer call appears anywhere in this scope (screening present). NB: the
-    # guard idiom (``guard.write``/``guard.protect``) deliberately does NOT set this blanket flag —
-    # it screens sink-tied (via sanitized_names / protected_receivers) so a discarded verdict or a
-    # write to a *different* unprotected store is never green-lit. See _build_findings/build_scope.
-    has_sanitizer_call: bool = False
+    # variable names passed *into* a generic scanner/sanitizer call in this scope (``scanner.scan(x)``
+    # -> {"x"}). A write is screened by such a scan only if its untrusted leaf shares one of these
+    # names — the gate-then-write idiom (scan the value, write it if allowed). This is sink-tied: a
+    # ``scan(other)`` of an unrelated value never screens a raw write of ``request.body``. The guard
+    # idiom (``guard.write``/``guard.protect``) is deliberately NOT collected here — it screens via
+    # sanitized_names / protected_receivers, so discarding its verdict and writing raw is never green.
+    scanned_value_names: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -144,8 +153,12 @@ def build_scope(func: ast.FunctionDef | ast.AsyncFunctionDef) -> FunctionScope:
                 for tgt in node.targets:
                     if isinstance(tgt, ast.Name):
                         scope.protected_receivers.add(tgt.id)
-        elif isinstance(node, ast.Call) and _is_sanitizer_call(node):
-            scope.has_sanitizer_call = True
+        # A generic scanner/sanitizer call anywhere in scope (``scanner.scan(summary)``) — record the
+        # variable names it screened, so a later write of one of those values counts as screened. The
+        # guard idiom is excluded by ``_is_sanitizer_call`` (it returns sanitized content to use).
+        if isinstance(node, ast.Call) and _is_sanitizer_call(node):
+            for arg in (*node.args, *(kw.value for kw in node.keywords)):
+                scope.scanned_value_names |= _expr_names(arg)
     return scope
 
 
@@ -159,9 +172,10 @@ def analyze(write_value: ast.expr | None, scope: FunctionScope) -> TaintResult:
     follows a single variable hop into its in-scope assignment. The strongest evidence wins.
     """
     if write_value is None:
-        return TaintResult("unknown", "unknown", "AMBIGUOUS", scope.has_sanitizer_call)
+        # Value couldn't be resolved — we cannot claim it was screened.
+        return TaintResult("unknown", "unknown", "AMBIGUOUS", False)
 
-    screened = scope.has_sanitizer_call or bool(_expr_names(write_value) & scope.sanitized_names)
+    screened = _value_screened(write_value, scope)
     best = _classify(write_value, scope, depth=0)
     if best is None:
         return TaintResult("unknown", "unknown", "AMBIGUOUS", screened)
@@ -273,41 +287,116 @@ def _all_args(func: ast.FunctionDef | ast.AsyncFunctionDef) -> list[ast.arg]:
     return [*a.posonlyargs, *a.args, *([a.vararg] if a.vararg else []), *a.kwonlyargs]
 
 
-def _untrusted_params(func: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
-    """Parameter names untrusted-by-default for two specific, high-signal function shapes.
+def _untrusted_params(func: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, str]:
+    """Parameter name -> source kind for three specific, high-signal function shapes.
 
-    * **CrewAI tool ``_run``/``_arun``** — a method on a class that subclasses a ``*Tool`` base;
-      its parameters carry the scraped/fetched content the tool exists to retrieve.
     * **LangGraph node** — a function with a parameter named exactly ``state`` (the node signature)
-      **in a module that imports ``langgraph``**; ``state`` then carries the incoming email/tool
-      content the graph is processing. The import gate keeps an ordinary internal
+      **in a module that imports ``langgraph``**; ``state`` carries the incoming email/tool content
+      the graph is processing (``untrusted_input``). The import gate keeps an ordinary internal
       ``def persist(state): ...`` in a non-LangGraph app from being treated as untrusted.
+    * **CrewAI tool ``_run``/``_arun``** — a method on a class that subclasses a ``*Tool`` base; its
+      parameters carry the scraped/fetched content the tool exists to retrieve (``tool_output``).
+    * **LangChain/LangGraph tool function** — a function the model calls with model-supplied
+      arguments (``@tool``-decorated, or carrying an ``Injected*`` runtime param). Its non-injected
+      params are model/user-derived (``untrusted_input``); the injected params (state/store/config/
+      runtime) are framework-populated and excluded. This is the canonical ``upsert_memory(content,
+      …)`` shape that writes a tool arg straight into long-term memory.
 
     Deliberately narrow: this only re-scores *already-detected* sinks, never adds sink sites."""
-    out: set[str] = set()
+    out: dict[str, str] = {}
     params = [a.arg for a in _all_args(func)]
     # LangGraph node — exact ``state`` parameter, gated on a langgraph import in the module.
-    if "state" in params and _module_imports_langgraph(func):
-        out.add("state")
+    if "state" in params and _module_imports(func, ("langgraph",)):
+        out["state"] = "untrusted_input"
     # CrewAI tool _run — method whose enclosing class subclasses something named ``*Tool``.
     if func.name in ("_run", "_arun") and _enclosing_is_tool_subclass(func):
-        out.update(p for p in params if p not in ("self", "cls"))
+        for p in params:
+            if p not in ("self", "cls"):
+                out.setdefault(p, "tool_output")
+    # LangChain/LangGraph tool function — model-supplied args are untrusted; injected args are not.
+    if _is_langchain_tool(func):
+        for a in _all_args(func):
+            if a.arg in ("self", "cls") or _is_injected_param(a):
+                continue
+            out.setdefault(a.arg, "untrusted_input")
     return out
 
 
-def _module_imports_langgraph(func: ast.AST) -> bool:
-    """True if the module enclosing ``func`` imports ``langgraph`` — the framework gate for the
-    LangGraph-node ``state`` heuristic. Uses the parent pointers the analyzer annotates; an
-    un-annotated (hand-parsed) tree simply yields False."""
+# Annotation markers for framework-injected (non-model) tool params — these are populated at runtime
+# and hidden from the model, so they are NOT the untrusted, model-supplied arguments.
+_INJECTED_MARKERS = (
+    "injectedtoolarg",
+    "injectedstate",
+    "injectedstore",
+    "injectedtoolcallid",
+    "runnableconfig",
+    "toolruntime",
+)
+
+
+def _is_injected_param(arg: ast.arg) -> bool:
+    """True if ``arg``'s annotation references a LangChain/LangGraph injected marker (e.g.
+    ``Annotated[str, InjectedToolArg]`` / ``state: Annotated[dict, InjectedState]``). Walks the whole
+    annotation so the marker is found whether it sits bare or inside an ``Annotated[...]``."""
+    ann = arg.annotation
+    if ann is None:
+        return False
+    for node in ast.walk(ann):
+        name = _attr_or_name(node) if isinstance(node, (ast.Name, ast.Attribute)) else None
+        if name and name.lower() in _INJECTED_MARKERS:
+            return True
+    return False
+
+
+def _is_langchain_tool(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """True if ``func`` is a LangChain/LangGraph tool — a function the model calls with model-supplied
+    arguments. Gated on a langchain/langgraph import, then recognised by either an explicit ``@tool``
+    decorator (``@tool`` / ``@tool("name")`` / ``langchain_core.tools.tool`` / an aliased
+    ``from ...tools import tool as lc_tool`` -> ``@lc_tool``) or the presence of an ``Injected*``
+    runtime param (a near-certain signal the function is exposed to the model as a tool). The import
+    gate keeps a plain ``def run(query): ...`` in an unrelated module from qualifying."""
+    if not _module_imports(func, ("langchain", "langchain_core", "langgraph")):
+        return False
+    aliases = _tool_decorator_aliases(func)
+    for dec in func.decorator_list:
+        target = dec.func if isinstance(dec, ast.Call) else dec
+        name = _attr_or_name(target)
+        if name and (name.lower() == "tool" or name in aliases):
+            return True
+    return any(_is_injected_param(a) for a in _all_args(func))
+
+
+def _tool_decorator_aliases(func: ast.AST) -> set[str]:
+    """Local names bound to the LangChain/LangGraph ``tool`` decorator in the enclosing module,
+    including import aliases (``from langchain_core.tools import tool as lc_tool`` -> ``{"lc_tool"}``).
+    Without this an aliased ``@lc_tool`` would not match the bare ``tool`` name and the tool's
+    model-supplied args would be left unknown (downgrading a real tool-arg→memory flow to low)."""
+    mod = _root_module(func)
+    if mod is None:
+        return set()
+    out: set[str] = set()
+    for node in ast.walk(mod):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.split(".")[0] in ("langchain", "langchain_core", "langgraph"):
+                for a in node.names:
+                    if a.name == "tool":
+                        out.add(a.asname or a.name)
+    return out
+
+
+def _module_imports(func: ast.AST, roots: tuple[str, ...]) -> bool:
+    """True if the module enclosing ``func`` imports any of ``roots`` (top-level package name) — the
+    framework gate for the shape heuristics (LangGraph ``state``, LangChain/LangGraph tool args). Uses
+    the parent pointers the analyzer annotates; an un-annotated (hand-parsed) tree simply yields False."""
     mod = _root_module(func)
     if mod is None:
         return False
     for node in ast.walk(mod):
         if isinstance(node, ast.Import):
-            if any(a.name.split(".")[0] == "langgraph" for a in node.names):
+            if any(a.name.split(".")[0] in roots for a in node.names):
                 return True
         elif isinstance(node, ast.ImportFrom) and node.module:
-            if node.module.split(".")[0] == "langgraph":
+            if node.module.split(".")[0] in roots:
                 return True
     return False
 
@@ -354,9 +443,9 @@ def _untrusted_label(node: ast.expr, scope: FunctionScope) -> tuple[str, str] | 
     if isinstance(node, ast.Name):
         n = node.id.lower()
         if node.id in scope.untrusted_params:
-            # LangGraph ``state`` carries incoming (email/user) content; a CrewAI tool ``_run``
-            # parameter carries scraped/fetched tool output.
-            kind = "untrusted_input" if node.id == "state" else "tool_output"
+            # Source kind is recorded per-param by the shape that marked it (LangGraph ``state`` and
+            # LangChain tool args -> untrusted_input; CrewAI ``_run`` args -> tool_output).
+            kind = scope.untrusted_params.get(node.id, "untrusted_input")
             return (kind, f"untrusted param '{node.id}'")
         if any(h in n for h in _UNTRUSTED_NAME_HINTS):
             kind = "tool_output" if ("tool" in n or "observation" in n) else "untrusted_input"
@@ -374,10 +463,18 @@ def _untrusted_label(node: ast.expr, scope: FunctionScope) -> tuple[str, str] | 
     # Call like requests.get(...).text, open(p).read(), tool.invoke(...).
     if isinstance(node, ast.Call):
         fn = node.func
-        if isinstance(fn, ast.Attribute) and fn.attr.lower() in _UNTRUSTED_CALL_HINTS:
-            recv = _root_name(fn.value)
-            kind = "tool_output" if (recv and ("tool" in recv or "client" in recv)) else "untrusted_input"
-            return (kind, f"call '{fn.attr}()'")
+        if isinstance(fn, ast.Attribute):
+            m = fn.attr.lower()
+            # Tokens across the whole receiver (``self.client.get`` -> {self, client}) so a network
+            # receiver is recognised however it is referenced — not just the dotted root.
+            recv_tokens = _receiver_tokens(fn.value)
+            on_egress_receiver = bool(recv_tokens & set(_UNTRUSTED_CALL_RECEIVERS))
+            # STRONG verb fires anywhere; WEAK verb only on a known network/IO/tool receiver.
+            if m in _UNTRUSTED_CALL_METHODS_STRONG or (
+                m in _UNTRUSTED_CALL_METHODS_WEAK and on_egress_receiver
+            ):
+                kind = "tool_output" if ({"tool", "client"} & recv_tokens) else "untrusted_input"
+                return (kind, f"call '{fn.attr}()'")
         if isinstance(fn, ast.Name) and fn.id.lower() in _UNTRUSTED_CALL_RECEIVERS:
             return ("untrusted_input", f"call '{fn.id}()'")
         # f-strings / concatenations: inspect the parts.
@@ -454,6 +551,38 @@ def _root_name(node: ast.expr) -> str | None:
 
 def _expr_names(node: ast.expr) -> set[str]:
     return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+
+
+def _value_screened(write_value: ast.expr, scope: FunctionScope) -> bool:
+    """Is the written value's untrusted data actually screened? **Sink-tied, never blanket.**
+
+    Screening is tied to the *untrusted leaf of this write*, not to any sanitizer call that happens
+    to appear elsewhere in the function. This is what keeps an unrelated ``scanner.scan(other)`` —
+    or a *discarded* ``guard.write(req.json)`` whose verdict is never used — from green-lighting a
+    raw untrusted write in the same scope (the worst error class: a false "screened").
+
+    A write counts as screened when its untrusted leaf is:
+      * read from a variable assigned by a sanitizer / ``guard.write`` (``v = guard.write(x); put(
+        v.content)``; ``clean = sanitize(x); put(clean)``) — via ``scope.sanitized_names``; or
+      * a value a generic scanner screened in this scope (``scan(summary); put({"text": summary})``)
+        — its name overlaps ``scope.scanned_value_names``; or
+      * enclosed by a sanitizer / ``guard.write`` call *within the written value itself*
+        (inline ``put(sanitize(x))``).
+    """
+    leaf = untrusted_leaf(write_value, scope)
+    names = _expr_names(leaf) if leaf is not None else _expr_names(write_value)
+    # Leaf read from a guard verdict / assigned-from-sanitizer variable, or a value a scanner in this
+    # scope screened. Both are sink-tied to a variable this write's untrusted leaf actually uses.
+    if names & (scope.sanitized_names | scope.scanned_value_names):
+        return True
+    # Inline sanitizer / guard.write wrapping *this* leaf within the written value.
+    if leaf is not None:
+        for node in ast.walk(write_value):
+            if (_is_sanitizer_call(node) or _is_guard_write_call(node)) and any(
+                sub is leaf for sub in ast.walk(node)
+            ):
+                return True
+    return False
 
 
 __all__ = ["FunctionScope", "TaintResult", "analyze", "build_scope", "untrusted_leaf"]

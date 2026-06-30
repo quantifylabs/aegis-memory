@@ -38,7 +38,7 @@ _FuncDef = ast.FunctionDef | ast.AsyncFunctionDef
 # ---- Known-library constructors (exact class name -> binding), import-gated -----------------
 # Generic class names (``Memory``/``App``) collide across libraries, so a known-library binding is
 # honored only when the module that constructs it imports that library (mirrors the langgraph gate
-# in ``taint._module_imports_langgraph``). Methods are sourced from the catalog; the table just
+# in ``taint._module_imports``). Methods are sourced from the catalog; the table just
 # authorizes them on a *bound* receiver.
 #   class name -> (library, required import root, write methods, sink category)
 _KNOWN_CONSTRUCTORS: dict[str, tuple[str, str, frozenset[str], str]] = {

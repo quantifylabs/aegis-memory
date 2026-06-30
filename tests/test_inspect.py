@@ -22,6 +22,7 @@ NAMECOLLIDE_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_n
 STREAMLIT_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_streamlit"
 NOTEBOOK_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_notebook"
 BINDING_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_binding"
+LCTOOL_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "inspect_langchain_tool"
 DEMO_DIR = REPO_ROOT / "examples" / "aegis-memory-firewall"
 AGENT_DIR = DEMO_DIR / "agent"
 
@@ -220,6 +221,228 @@ def test_discarded_verdict_does_not_screen_a_raw_write(tmp_path):
     assert flows and all(not f.screened and f.severity == "critical" for f in flows), flows
 
 
+def test_unrelated_scan_does_not_screen_a_raw_write(tmp_path):
+    """Sink-tied screening (regression): a ``scanner.scan(other)`` of an UNRELATED value must not
+    green-light a raw untrusted write in the same function. The old blanket scope flag downgraded
+    every write whenever any scan appeared anywhere — a false "screened", the worst error class for
+    a memory scanner. Screening is now tied to the written value's own untrusted leaf."""
+    src = (
+        "import httpx\n"
+        "def run(store, scanner, url, other):\n"
+        "    raw = httpx.get(url).text\n"
+        "    scanner.scan(other)                       # scans an UNRELATED value\n"
+        "    store.put(('ns',), 'k', {'text': raw})    # writes the raw, never-scanned value\n"
+    )
+    d = tmp_path / "unrelated"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(not f.screened and f.severity == "critical" for f in flows), flows
+
+
+def test_scan_of_written_value_screens_it(tmp_path):
+    """The legitimate gate-then-write idiom: scanning the SAME value that is written (``scan(summary)``
+    then ``put(summary)``) is screened — the scan covers the written value. This is the precision
+    counterpart to the unrelated-scan case above."""
+    src = (
+        "def run(store, scanner, ticket):\n"
+        "    summary = ticket['body']\n"
+        "    verdict = scanner.scan(summary)\n"
+        "    if verdict.allowed:\n"
+        "        store.put(('ns',), 'k', {'text': summary})\n"
+    )
+    d = tmp_path / "gated"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(f.screened for f in flows), flows
+
+
+def test_plain_dict_get_is_not_an_untrusted_source(tmp_path):
+    """Corpus regression: a bare ``.get()``/``.run()`` on a non-network receiver (``config.get(...)``,
+    ``reflection.get("insight")``) must NOT read as untrusted network egress. Writing such an internal
+    value to memory stays low/unknown — only known network/IO/tool receivers (``httpx.get``) qualify."""
+    src = (
+        "def run(store, config):\n"
+        "    setting = config.get('threshold', 10)\n"
+        "    store.put(('a',), 'k', {'text': setting})\n"
+    )
+    d = tmp_path / "dictget"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows == [], f"plain dict.get() must not mint an untrusted flow, got {[f.title for f in flows]}"
+
+
+def test_network_get_is_still_an_untrusted_source(tmp_path):
+    """The precision counterpart: a `.get()` on a real network receiver (`httpx`/`session`/`self.client`)
+    IS untrusted egress and must still escalate a write of its result."""
+    src = (
+        "import httpx\n"
+        "def run(store, url):\n"
+        "    data = httpx.get(url).text\n"
+        "    store.put(('a',), 'k', {'text': data})\n"
+    )
+    d = tmp_path / "netget"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(f.severity == "critical" for f in flows), flows
+
+
+def test_langchain_tool_arg_to_memory_is_critical():
+    """A LangChain/LangGraph tool's model-supplied argument written to memory is an untrusted flow:
+    both the ``@tool``-decorated function and the ``InjectedToolArg`` function (the memory-agent
+    shape) escalate to critical, source ``untrusted_input``. The async ``aput`` sink is covered."""
+    findings = analyze_project(LCTOOL_FIXTURES)
+    flows = [f for f in findings if f.sink.file.endswith("tools.py") and f.category.endswith("_to_memory")]
+    assert flows, "expected tool-arg→memory flow findings"
+    assert all(f.severity == "critical" and f.source == "untrusted_input" for f in flows), \
+        [(f.sink.call, f.severity, f.source) for f in flows]
+    calls = {f.sink.call for f in flows}
+    assert "store.put" in calls and "store.aput" in calls  # @tool sync + InjectedToolArg async
+
+
+def test_aliased_tool_decorator_is_recognized(tmp_path):
+    """codex P2: an aliased ``from langchain_core.tools import tool as lc_tool`` -> ``@lc_tool`` must
+    still be recognised as a tool, so its model-supplied arg writing to memory escalates to critical."""
+    src = (
+        "from langchain_core.tools import tool as lc_tool\n"
+        "@lc_tool\n"
+        "def remember(fact, store):\n"
+        "    store.put(('memories',), key='k', value={'content': fact})\n"
+        "    return 'ok'\n"
+    )
+    d = tmp_path / "alias"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(f.severity == "critical" and f.source == "untrusted_input" for f in flows), \
+        [(f.sink.call, f.severity) for f in flows]
+
+
+def test_empty_shared_with_agents_is_not_overbroad(tmp_path):
+    """codex P2: ``shared_with_agents=[]`` means the memory is NOT shared — it must not mint an
+    overbroad-shared-access finding (only a non-empty list / shared scope does)."""
+    empty = "def run(client, ticket):\n    client.add(ticket['body'], scope='agent-private', shared_with_agents=[])\n"
+    nonempty = "def run(client, ticket):\n    client.add(ticket['body'], scope='agent-private', shared_with_agents=['a2'])\n"
+    de = tmp_path / "empty"; de.mkdir(); (de / "a.py").write_text(empty, encoding="utf-8")
+    dn = tmp_path / "nonempty"; dn.mkdir(); (dn / "a.py").write_text(nonempty, encoding="utf-8")
+    assert not any(f.category == "overbroad_shared_access" for f in analyze_project(de)), "empty list must not flag"
+    assert any(f.category == "overbroad_shared_access" for f in analyze_project(dn)), "non-empty list must flag"
+
+
+def test_injected_tool_arg_is_not_the_untrusted_leaf():
+    """The framework-injected params (``store``/``user_id`` via InjectedToolArg) are not model-supplied,
+    so they must not be what trips the finding — the escalation comes from ``content``/``context``/
+    ``fact``, the model-supplied args."""
+    findings = analyze_project(LCTOOL_FIXTURES)
+    flows = [f for f in findings if f.sink.file.endswith("tools.py") and f.category.endswith("_to_memory")]
+    # The fix should screen a model-supplied arg, never the injected store/user_id receiver.
+    assert flows and all("guard.write" in f.fix for f in flows), [f.fix for f in flows]
+
+
+def test_non_tool_helper_with_same_params_stays_low():
+    """True negative: a plain helper with a ``content`` param but no ``@tool`` decorator and no
+    ``Injected*`` param is NOT a model-facing tool — even in a langchain-importing module — so it must
+    not escalate to a critical untrusted flow."""
+    findings = analyze_project(LCTOOL_FIXTURES)
+    nt = [f for f in findings if f.sink.file.endswith("not_a_tool.py")]
+    assert nt, "expected a structural sink finding for the non-tool helper"
+    assert all(f.severity != "critical" and f.trust != "untrusted" for f in nt), \
+        [(f.sink.call, f.severity, f.trust) for f in nt]
+
+
+def test_inline_suppression_silences_a_sink(tmp_path):
+    """``# aegis: ignore`` on a sink call drops its findings (accepted-sink allowlist), while an
+    identical unmarked sink in the same file is still reported — proving the suppression is anchored
+    to the marked call, not the whole file."""
+    src = (
+        "import httpx\n"
+        "def run(store, url):\n"
+        "    raw = httpx.get(url).text\n"
+        "    store.put(('a',), 'k1', {'text': raw})  # aegis: ignore - reviewed, trusted feed\n"
+        "    store.put(('a',), 'k2', {'text': raw})\n"
+    )
+    d = tmp_path / "supp"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert len(flows) == 1, [f.sink.line for f in flows]
+    assert flows[0].sink.line == 5  # only the UNmarked write survives
+
+
+def test_suppression_marker_above_the_line_also_silences(tmp_path):
+    """A marker on its own line directly above a multi-line sink call suppresses it too."""
+    src = (
+        "import httpx\n"
+        "def run(store, url):\n"
+        "    raw = httpx.get(url).text\n"
+        "    # aegis: ignore\n"
+        "    store.put(\n"
+        "        ('a',), 'k', {'text': raw},\n"
+        "    )\n"
+    )
+    d = tmp_path / "suppabove"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    assert [f for f in analyze_project(d) if f.category.endswith("_to_memory")] == []
+
+
+def test_suppression_marker_inside_a_string_is_not_honored(tmp_path):
+    """The marker must be a real comment: an ``# aegis: ignore`` inside a string literal must NOT
+    suppress a genuine unsafe write (no accidental silencing via data)."""
+    src = (
+        "import httpx\n"
+        "def run(store, url):\n"
+        "    raw = httpx.get(url).text\n"
+        "    note = '# aegis: ignore'\n"
+        "    store.put(('a',), 'k', {'text': raw, 'note': note})\n"
+    )
+    d = tmp_path / "suppstr"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(not f.screened for f in flows)
+
+
+def test_benign_key_literal_is_not_an_overbroad_shared_write(tmp_path):
+    """2b regression: ``_writes_shared_scope`` must key off the scope/namespace argument, not any
+    string literal. A private write whose *key* merely contains 'shared' (``key="shared_calendar"``)
+    must NOT mint an overbroad-shared-access finding."""
+    src = (
+        "def run(store, ticket):\n"
+        "    store.put(('user', 'private'), 'shared_calendar', {'text': ticket['body']},"
+        " scope='agent-private')\n"
+    )
+    d = tmp_path / "benignkey"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    findings = analyze_project(d)
+    assert not any(f.category == "overbroad_shared_access" for f in findings), \
+        [f.title for f in findings if f.category == "overbroad_shared_access"]
+
+
+def test_explicit_shared_scope_is_flagged(tmp_path):
+    """The precision counterpart: a write that actually declares ``scope='agent-shared'`` IS an
+    overbroad-shared-access site."""
+    src = (
+        "def run(store, ticket):\n"
+        "    store.put(('a',), 'k', {'text': ticket['body']}, scope='agent-shared')\n"
+    )
+    d = tmp_path / "sharedscope"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    findings = analyze_project(d)
+    assert any(f.category == "overbroad_shared_access" for f in findings)
+
+
+def test_provenance_finding_names_the_real_store(tmp_path):
+    """2b regression: a missing-provenance finding must name the real receiver/framework, not a
+    hardcoded LangGraph ``store.get``. A vector-store read feeding a prompt is labeled vectordb."""
+    src = (
+        "def answer(vectorstore, llm, q):\n"
+        "    docs = vectorstore.search(q)\n"
+        "    return llm.invoke(f'context: {docs}')\n"
+    )
+    d = tmp_path / "prov"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    prov = [f for f in analyze_project(d) if f.category == "missing_provenance"]
+    assert prov, "expected a missing-provenance finding"
+    assert all(f.sink.framework == "vectordb" for f in prov), [f.sink.framework for f in prov]
+    assert all("vectorstore" in f.sink.call for f in prov), [f.sink.call for f in prov]
+
+
 def test_applied_guard_write_is_not_itself_a_sink(tmp_path):
     """codex P2: the recommended fix contains ``guard.write(value, trust_level=..., scope=...)`` —
     that screening call must NOT be re-flagged as a memory-write sink (nor an overbroad-shared
@@ -353,6 +576,7 @@ def test_inspection_writes_all_artifacts(tmp_path):
     for name in (
         "INSPECTION_REPORT.md",
         "findings.json",
+        "findings.sarif",
         "unsafe_memory_flows.json",
         "suggested_policies.yml",
         "agent_memory_map.html",
@@ -367,6 +591,31 @@ def test_inspection_writes_all_artifacts(tmp_path):
     # Responsive, and the header renders the real computed "after" score (not the 29 fallback).
     assert "viewport" in html
     assert f' after">{result.score["score"]}<' in html
+
+
+def test_sarif_artifact_is_well_formed_and_maps_findings(tmp_path):
+    """The SARIF view (GitHub code-scanning / CI ingest) is a faithful 2.1.0 document built from the
+    canonical findings: one result per finding, anchored to the sink file:line, with severity mapped
+    to a SARIF level and OWASP ASI06 carried on tagged flows."""
+    out = tmp_path / "out"
+    result = run_inspection(DEMO_DIR, out_dir=out, write=True)
+    doc = json.loads((out / "findings.sarif").read_text(encoding="utf-8"))
+    assert doc["version"] == "2.1.0"
+    run = doc["runs"][0]
+    assert run["tool"]["driver"]["name"] == "Aegis"
+    results = run["results"]
+    assert len(results) == len(result.findings)  # one result per finding
+    levels = {r["level"] for r in results}
+    assert levels <= {"error", "warning", "note"}
+    for r in results:
+        loc = r["locations"][0]["physicalLocation"]
+        assert loc["artifactLocation"]["uri"]
+        assert loc["region"]["startLine"] >= 1
+        assert r["ruleId"].startswith("aegis/")
+    # A critical untrusted flow from the demo must map to an error-level result tagged ASI06.
+    assert any(
+        r["level"] == "error" and r["properties"].get("owasp") == "ASI06" for r in results
+    )
 
 
 def test_real_before_score_renders_through_html_not_fallback(tmp_path):

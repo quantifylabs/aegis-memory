@@ -1,28 +1,20 @@
-#!/bin/sh
-# Aegis write-path guard (v0.1) — PostToolUse hook for Edit/Write/MultiEdit.
-#
-# Reads the hook payload (JSON on stdin), finds the edited file, and runs the local,
-# keyless Aegis analyzer over it to spot unsafe agent-memory write sinks / untrusted-
-# content storage (OWASP ASI06). On a risky write it emits a non-blocking warning as
-# documented PostToolUse hook JSON on *stdout* (hookSpecificOutput.additionalContext,
-# which Claude Code only parses on exit 0) — it never blocks an edit and always exits 0.
-# (stderr is only surfaced to Claude on exit 2, so it would be silent here.) If Python or
-# the aegis-memory package isn't importable, it is a silent no-op so it can never disrupt
-# a session.
+"""Aegis write-path guard (v0.1) — PostToolUse hook for Edit/Write/MultiEdit.
 
-# Resolve a Python interpreter; no-op if none is available.
-PY="$(command -v python3 || command -v python || true)"
-[ -z "$PY" ] && exit 0
+Reads the hook payload (JSON on stdin), finds the edited file, and runs the local,
+keyless Aegis analyzer over it to spot unsafe agent-memory write sinks / untrusted-
+content storage (OWASP ASI06). On a risky write it emits a non-blocking warning as
+documented PostToolUse hook JSON on *stdout* (hookSpecificOutput.additionalContext,
+which Claude Code only parses on exit 0) — it never blocks an edit and always exits 0.
+If Python or the aegis-memory package isn't importable, it is a silent no-op so it can
+never disrupt a session.
 
-# Capture the payload to a temp file. We can't read it from Python's stdin because the
-# heredoc below occupies stdin; instead we pass the temp path as an argument.
-TMP="$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/aegis_hook_$$.json")"
-cat > "$TMP" 2>/dev/null || { rm -f "$TMP"; exit 0; }
+This is the cross-platform replacement for the older guard.sh: it depends only on a
+Python interpreter (already the hard requirement for the analyzer), not on a POSIX
+shell, so it runs identically on Windows, macOS and Linux.
+"""
 
-# Scan the edited file and, on a risky write, print documented PostToolUse hook JSON to
-# stdout (so Claude actually sees it on exit 0). The Python is fully defensive: any failure
-# leaves no output and exits 0.
-"$PY" - "$TMP" <<'PY'
+from __future__ import annotations
+
 import json
 import os
 import sys
@@ -33,8 +25,7 @@ warnings.filterwarnings("ignore")
 
 def main() -> None:
     try:
-        with open(sys.argv[1], encoding="utf-8") as fh:
-            payload = json.load(fh)
+        payload = json.load(sys.stdin)
     except Exception:
         return
 
@@ -100,7 +91,5 @@ try:
     main()
 except Exception:
     pass
-PY
 
-rm -f "$TMP" 2>/dev/null
-exit 0
+sys.exit(0)

@@ -16,6 +16,7 @@ from pathlib import Path
 import yaml
 
 from . import analyzer, cases, htmlmap, policies, replay
+from . import sarif as sarif_mod
 from . import score as scoring
 from .findings import Finding, derive_unsafe_memory_flows
 
@@ -144,6 +145,7 @@ def _build_artifacts(result: InspectionResult, project_name: str) -> dict[str, s
         before = raw if raw != after else None
     return {
         "findings.json": json.dumps(findings_json, indent=2) + "\n",
+        "findings.sarif": json.dumps(_sarif_doc(result), indent=2) + "\n",
         "unsafe_memory_flows.json": json.dumps(flows_json, indent=2) + "\n",
         "suggested_policies.yml": yaml.safe_dump(
             policies.suggest_policies(findings), sort_keys=False
@@ -155,6 +157,15 @@ def _build_artifacts(result: InspectionResult, project_name: str) -> dict[str, s
         ),
         "replay_attacks/memory_poisoning_demo.md": replay.render_markdown(replay_result),
     }
+
+
+def _sarif_doc(result: InspectionResult) -> dict:
+    """SARIF view of this run's findings (GitHub code-scanning / CI ingest)."""
+    try:
+        from aegis_memory import __version__ as _v
+    except Exception:
+        _v = "0"
+    return sarif_mod.to_sarif(result.findings, run_id=result.run_id, tool_version=_v)
 
 
 def _render_report(
