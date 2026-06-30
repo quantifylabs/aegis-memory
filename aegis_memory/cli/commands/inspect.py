@@ -34,7 +34,12 @@ def inspect(
         False, "--ingest-verdicts", help="Fold aegis-out/cases/verdicts.json back into the report"
     ),
 ):
-    """Inspect an agent project for unsafe memory flows. Writes aegis-out/."""
+    """Inspect an agent project for unsafe memory flows. Writes aegis-out/.
+
+    Suppress an accepted sink with an inline ``# aegis: ignore`` comment on (or directly above) the
+    write call. Findings are also written as SARIF (``aegis-out/findings.sarif``) for GitHub code
+    scanning / CI annotation.
+    """
     from aegis_memory.inspect import (
         emit_cases as _emit_cases,
     )
@@ -105,6 +110,7 @@ def inspect(
             f"critical={counts['critical']} high={counts['high']} "
             f"medium={counts['medium']} low={counts['low']} max_risk={max_risk}"
         )
+        console.print(f"sarif={result.out_root / 'findings.sarif'}")
         if score > max_risk:
             console.print(f"[red]RISK BREACH[/red]: score {score} > max-risk {max_risk}")
             raise typer.Exit(code=1)
@@ -131,7 +137,8 @@ def inspect(
     )
     console.print(
         f"\nReport: [cyan]{result.out_root / 'INSPECTION_REPORT.md'}[/cyan]\n"
-        f"Map:    [cyan]{result.out_root / 'agent_memory_map.html'}[/cyan]"
+        f"Map:    [cyan]{result.out_root / 'agent_memory_map.html'}[/cyan]\n"
+        f"SARIF:  [cyan]{result.out_root / 'findings.sarif'}[/cyan] [dim](upload to GitHub code scanning)[/dim]"
     )
 
 

@@ -10,6 +10,15 @@ permissions:
   contents: read
 
 jobs:
+  plugin-manifests:
+    # Validate the Claude Code plugin / marketplace manifests so a malformed manifest or a dangling
+    # path (icon, plugin source, bundled MCP/hook files) is caught before publish — fast, no services.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - name: Validate plugin & marketplace manifests
+        run: python scripts/validate_plugin_manifests.py
+
   test:
     runs-on: ubuntu-latest
     services:

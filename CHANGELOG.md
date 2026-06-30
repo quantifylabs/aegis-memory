@@ -9,7 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`aegis inspect` — LangChain/LangGraph tool-arg source shape.** A tool function's model-supplied
+  arguments (a `@tool`-decorated function, or one carrying an `Injected*` runtime param) are now
+  treated as untrusted-by-default, mirroring the existing CrewAI `_run` / LangGraph `state` shapes
+  (`taint.py` `_is_langchain_tool`). The framework-injected params (`InjectedToolArg`/`InjectedState`/
+  `InjectedStore`/`ToolRuntime`/`RunnableConfig`) are excluded. This escalates the canonical
+  `upsert_memory(content, …) → store.aput(...)` pattern (e.g. `langchain-ai/memory-agent`) to critical.
+- **`aegis inspect` — coverage policy + acceptance corpus.** Added `docs/issues/inspect-coverage-policy.md`:
+  a finite source×sink taxonomy, a fixed acceptance corpus (`NirDiamant/Agent_Memory_Techniques`, 30
+  notebooks) with a dated, measured baseline (precision 2/2 on flow findings, no critical false
+  positives), and a written stop rule so coverage work terminates instead of chasing every repo.
+- **`aegis inspect` pre-publish hardening (Claude Code plugin).**
+  - **SARIF output** — every run now writes `aegis-out/findings.sarif` (SARIF 2.1.0,
+    `aegis_memory/inspect/sarif.py`) so findings drop into GitHub code scanning / CI annotations.
+  - **Inline suppression** — an `# aegis: ignore` comment on (or directly above) a sink call drops
+    its findings, matched on real comment tokens (never inside a string literal).
+  - **Cross-platform guard hook** — the PostToolUse write-path guard is now a Python script
+    (`plugins/aegis/hooks/guard.py`, replacing the POSIX-`sh` `guard.sh`), so it runs identically on
+    Windows/macOS/Linux without a shell dependency.
+  - **PATH-independent CLI** — added `python -m aegis_memory.cli` (`aegis_memory/cli/__main__.py`);
+    `/aegis:inspect` falls back to it when the `aegis` console script isn't on `PATH`.
+  - **Plugin/marketplace metadata + CI validation** — plugin `keywords`/`homepage`/`icon`, and a
+    `scripts/validate_plugin_manifests.py` CI gate that catches malformed manifests / dangling paths
+    before publish.
+
 - **Adaptive attack harness for the injection benchmark** (`benchmarks/injection/adaptive/`). Three adaptive attacks that actively try to *evade* the content-security pipeline rather than scoring it on a fixed corpus: (1) **rule-evasion** — AutoDAN-style iterated paraphrase against the free, deterministic Stage 3, headlined by the **Stage-3 → Stage-4 hand-off** (of the Stage-3 evaders produced, what fraction Stage 4 still catches); (2) **classifier-oracle** — a DataSentinel-style detector-evasion loop against the Stage-4 LLM classifier that records *queries-to-evade* and an evasion-vs-budget curve, direct-searching the Aegis Stage-4 systems and *transferring* found samples to baselines; (3) **composition / payload-splitting** — an illustrative, smaller-by-design study of sub-threshold fragments whose assembled text carries intent. Reuses the existing `Dataset` / `System` / `ResponseCache` / `metrics` machinery and the `probe` primitives rather than forking them: **evasion = 1 − recall** comes from the same `bootstrap_cis` (n=1000, seed=42) as the static benchmark. A mandatory cheap-model **intent-preservation judge** (distinct from any Stage-4 classifier) excludes intent-lost candidates from the evasion numerator and reports them rather than silently dropping them. Results are written to a **separate** `adaptive/results/adaptive_results.json` with provenance-rich corpora; the static `results/results.json` is never touched. Network-free regression tests in `tests/test_injection_adaptive.py`. The harness is **smoke-validated end-to-end**; full pre-registered adaptive numbers (N=250/tier, budget=30) are pending a separate, approved billed sweep.
+
+### Fixed
+
+- **`aegis inspect` — bare `.get()`/`.run()` no longer read as network egress.** The call-egress source
+  hints are split into *strong* verbs (`fetch`/`read_text`/`invoke`/`complete`/Streamlit widgets — fire
+  on any receiver) and *weak* verbs (`get`/`post`/`read`/`load`/`run`/`call` — fire only on a known
+  network/IO/tool receiver, matched across the full receiver token set). A plain `config.get(...)` /
+  `reflection.get("insight")` / `dict.get(...)` is no longer mistaken for untrusted input. Surfaced by
+  the acceptance-corpus run; regressions in `test_plain_dict_get_is_not_an_untrusted_source` and
+  `test_network_get_is_still_an_untrusted_source`.
+- **`aegis inspect` detection honesty.** Screening is now strictly **sink-tied**: a `scanner.scan(...)`
+  of an *unrelated* value no longer marks every write in the function `screened` (the old blanket
+  `has_sanitizer_call` scope flag, a false-"screened" — the worst error class for a memory scanner).
+  Also tightened two substring heuristics: `_writes_shared_scope` keys off the scope/namespace
+  argument (not any string literal, so `key="shared_calendar"` no longer mints an overbroad-shared
+  finding), and the provenance read-path check matches identifier tokens instead of dumped AST text
+  and now names the real store/framework instead of a hardcoded LangGraph `store.get`.
 
 ## [2.6.0] - 2026-06-25
 

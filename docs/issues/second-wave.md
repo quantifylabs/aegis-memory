@@ -7,10 +7,21 @@ LangGraph node-`state` / field source resolution. With it merged, the analyzer i
 *done enough* for launch. The items below are **explicitly deferred** — tracked here so
 they aren't silently dropped. Do not start them as part of the closing fix.
 
+> **Coverage policy:** the supported source×sink taxonomy, the acceptance corpus, and the
+> fix-vs-defer stop rule now live in `docs/issues/inspect-coverage-policy.md`. Use that as the gate;
+> this list is the deferred-detail spec.
+
+## Landed since
+- **LangChain/LangGraph tool-arg source shape** — a tool function's model-supplied args are now
+  untrusted-by-default (`taint.py` `_is_langchain_tool`); injected runtime params are excluded.
+- **`.get()`/weak-verb egress precision** — bare `dict.get()`/`config.get()` no longer read as network
+  input (strong vs. weak call-verb split). See the coverage policy's baseline notes.
+
 ## Deferred sink / source detection
 - **`append` / buffer-mode writes** — punted by decision (list/deque buffer poisoning).
   See also `docs/issues/buffer-memory-mode.md`.
-- **Async writes** — `aput`, `aadd_texts`, and other `a*` coroutine sink variants.
+- **Async writes** — `aadd_texts` and other `a*` vector-store coroutine variants (note: LangGraph
+  `aput` *is* covered on the sink side).
 - **More frameworks as first-class** — AutoGen, LlamaIndex, Letta, Zep (currently only
   generic/name-hint coverage, not tailored shapes).
 - **TS / JS** — the analyzer walks Python (`.py` + notebook code cells) only.

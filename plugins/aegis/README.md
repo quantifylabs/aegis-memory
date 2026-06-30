@@ -17,8 +17,10 @@ The plugin ships three components, all keyless and local by default:
 
 1. **`/aegis:inspect`** — a slash command that runs `aegis inspect .` and
    summarizes the **memory map**, a **risk score (0–100)**, and **findings**
-   mapped to OWASP ASI06. Writes an interactive `agent_memory_map.html` and an
-   `INSPECTION_REPORT.md` to `aegis-out/`.
+   mapped to OWASP ASI06. Writes an interactive `agent_memory_map.html`, an
+   `INSPECTION_REPORT.md`, and a **`findings.sarif`** (for GitHub code scanning /
+   CI annotations) to `aegis-out/`. Silence an accepted sink with an inline
+   `# aegis: ignore` comment; gate CI with `aegis inspect . --ci --max-risk N`.
 2. **Write-path guard hook** — a `PostToolUse` hook on `Edit`/`Write`/`MultiEdit`
    that warns (never blocks, in v0.1) when an edit touches an unsafe memory-write
    sink, and suggests `/aegis:inspect`.
@@ -38,8 +40,16 @@ The plugin ships three components, all keyless and local by default:
 
 > **Requirement:** the MCP server runs `python -m aegis_memory.mcp_server`, so the
 > `aegis-memory` package must be importable in the environment Claude Code
-> launches (`pip install aegis-memory`). The `/aegis:inspect` command likewise
-> uses the `aegis` CLI from that install.
+> launches (`pip install aegis-memory`). The `/aegis:inspect` command likewise uses
+> the `aegis` CLI from that install — and falls back to `python -m aegis_memory.cli`
+> if the script isn't on `PATH`.
+>
+> Installing into a **virtualenv** (and launching Claude Code from it) is the most
+> reliable setup: a venv always provides a `python` executable, which is what the
+> bundled `.mcp.json` invokes. On a system where only `python3` exists (some bare
+> Linux/macOS installs), either use a venv or edit the MCP `command` in
+> `.mcp.json` from `python` to `python3`. The write-path guard hook needs no such
+> change — it already tries `python` then `python3`.
 
 ## Modes
 

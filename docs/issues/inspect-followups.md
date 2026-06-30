@@ -27,10 +27,24 @@ schedule separately.
   so step 1 doesn't block a first run.
 
 ## Static analyzer — next increments
-- **SARIF output** so findings drop into code-scanning / CI annotations.
-- **Suppression / allowlist** (`# aegis: ignore`, a config allowlist) for accepted sinks.
-- **CI exit codes** (non-zero on new critical flows) for gating.
+- ✅ **SARIF output** so findings drop into code-scanning / CI annotations — shipped:
+  `aegis-out/findings.sarif` (`aegis_memory/inspect/sarif.py`), written on every run.
+- ✅ **Suppression / allowlist** — shipped: an inline `# aegis: ignore` on (or directly above) a
+  sink call drops its findings (`analyzer.py` `_suppressed_lines`/`_site_suppressed`). A config-file
+  allowlist is still open.
+- **CI exit codes** (non-zero on new critical flows) for gating. (`--ci --max-risk` exists today;
+  a *new-flow* gate vs. a baseline is the remaining piece.)
 - **Signed, no-egress attestation + SBOM** for the local/keyless run, to back the "local & keyless" claim.
+
+## Detection honesty (fixed)
+- ✅ **Blanket sanitizer flag → sink-tied.** A `scanner.scan(...)` of an *unrelated* value no longer
+  marks every write in the function `screened` (the old `has_sanitizer_call` scope flag). Screening
+  is now tied to the written value's own untrusted leaf (`taint.py` `_value_screened` /
+  `scanned_value_names`). Regression: `test_unrelated_scan_does_not_screen_a_raw_write`.
+- ✅ **Substring heuristics tightened.** `_writes_shared_scope` keys off the scope/namespace argument
+  (not any string literal); `_scan_read_paths` matches identifier tokens, not `ast.dump` text (so a
+  literal containing "source" no longer suppresses a provenance finding); the provenance finding now
+  names the real receiver/framework instead of a hardcoded LangGraph `store.get`.
 - **Taint engine depth.** The current interprocedural resolver is bounded and name-based
   (`aegis_memory/inspect/interproc.py`: `MAX_HOPS`, `MAX_FUNCS`, no type/alias resolution, no container
   aliasing). Candidate upgrades: import-alias resolution, basic type binding for receivers, and
