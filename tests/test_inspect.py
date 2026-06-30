@@ -299,6 +299,34 @@ def test_langchain_tool_arg_to_memory_is_critical():
     assert "store.put" in calls and "store.aput" in calls  # @tool sync + InjectedToolArg async
 
 
+def test_aliased_tool_decorator_is_recognized(tmp_path):
+    """codex P2: an aliased ``from langchain_core.tools import tool as lc_tool`` -> ``@lc_tool`` must
+    still be recognised as a tool, so its model-supplied arg writing to memory escalates to critical."""
+    src = (
+        "from langchain_core.tools import tool as lc_tool\n"
+        "@lc_tool\n"
+        "def remember(fact, store):\n"
+        "    store.put(('memories',), key='k', value={'content': fact})\n"
+        "    return 'ok'\n"
+    )
+    d = tmp_path / "alias"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(f.severity == "critical" and f.source == "untrusted_input" for f in flows), \
+        [(f.sink.call, f.severity) for f in flows]
+
+
+def test_empty_shared_with_agents_is_not_overbroad(tmp_path):
+    """codex P2: ``shared_with_agents=[]`` means the memory is NOT shared — it must not mint an
+    overbroad-shared-access finding (only a non-empty list / shared scope does)."""
+    empty = "def run(client, ticket):\n    client.add(ticket['body'], scope='agent-private', shared_with_agents=[])\n"
+    nonempty = "def run(client, ticket):\n    client.add(ticket['body'], scope='agent-private', shared_with_agents=['a2'])\n"
+    de = tmp_path / "empty"; de.mkdir(); (de / "a.py").write_text(empty, encoding="utf-8")
+    dn = tmp_path / "nonempty"; dn.mkdir(); (dn / "a.py").write_text(nonempty, encoding="utf-8")
+    assert not any(f.category == "overbroad_shared_access" for f in analyze_project(de)), "empty list must not flag"
+    assert any(f.category == "overbroad_shared_access" for f in analyze_project(dn)), "non-empty list must flag"
+
+
 def test_injected_tool_arg_is_not_the_untrusted_leaf():
     """The framework-injected params (``store``/``user_id`` via InjectedToolArg) are not model-supplied,
     so they must not be what trips the finding — the escalation comes from ``content``/``context``/

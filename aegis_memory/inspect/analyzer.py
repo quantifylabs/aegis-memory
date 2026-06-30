@@ -345,9 +345,21 @@ def _writes_shared_scope(call: ast.Call) -> bool:
                     return True
         return False
 
+    def _is_empty_or_none(node: ast.expr) -> bool:
+        # An empty literal collection (``[]``/``()``/``{}``) or ``None`` — not a shared write. A
+        # non-literal (a variable / call) is treated as possibly-shared and left to flag conservatively.
+        if isinstance(node, ast.Constant) and node.value is None:
+            return True
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return not node.elts
+        if isinstance(node, ast.Dict):
+            return not node.keys
+        return False
+
     for kw in call.keywords:
-        # An explicit shared-with list is, by definition, a shared write.
-        if kw.arg == "shared_with_agents":
+        # A *non-empty* shared-with list is a shared write. An explicit ``shared_with_agents=[]``
+        # (or ``=None``) means the memory is NOT shared, so it must not flag overbroad access.
+        if kw.arg == "shared_with_agents" and not _is_empty_or_none(kw.value):
             return True
         # scope="agent-shared" / scope="global" — the declared write scope.
         if kw.arg in ("scope", "namespace") and _is_shared_literal(kw.value):

@@ -351,16 +351,37 @@ def _is_injected_param(arg: ast.arg) -> bool:
 def _is_langchain_tool(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     """True if ``func`` is a LangChain/LangGraph tool — a function the model calls with model-supplied
     arguments. Gated on a langchain/langgraph import, then recognised by either an explicit ``@tool``
-    decorator (``@tool`` / ``@tool("name")`` / ``langchain_core.tools.tool``) or the presence of an
-    ``Injected*`` runtime param (a near-certain signal the function is exposed to the model as a tool).
-    The import gate keeps a plain ``def run(query): ...`` in an unrelated module from qualifying."""
+    decorator (``@tool`` / ``@tool("name")`` / ``langchain_core.tools.tool`` / an aliased
+    ``from ...tools import tool as lc_tool`` -> ``@lc_tool``) or the presence of an ``Injected*``
+    runtime param (a near-certain signal the function is exposed to the model as a tool). The import
+    gate keeps a plain ``def run(query): ...`` in an unrelated module from qualifying."""
     if not _module_imports(func, ("langchain", "langchain_core", "langgraph")):
         return False
+    aliases = _tool_decorator_aliases(func)
     for dec in func.decorator_list:
         target = dec.func if isinstance(dec, ast.Call) else dec
-        if (_attr_or_name(target) or "").lower() == "tool":
+        name = _attr_or_name(target)
+        if name and (name.lower() == "tool" or name in aliases):
             return True
     return any(_is_injected_param(a) for a in _all_args(func))
+
+
+def _tool_decorator_aliases(func: ast.AST) -> set[str]:
+    """Local names bound to the LangChain/LangGraph ``tool`` decorator in the enclosing module,
+    including import aliases (``from langchain_core.tools import tool as lc_tool`` -> ``{"lc_tool"}``).
+    Without this an aliased ``@lc_tool`` would not match the bare ``tool`` name and the tool's
+    model-supplied args would be left unknown (downgrading a real tool-arg→memory flow to low)."""
+    mod = _root_module(func)
+    if mod is None:
+        return set()
+    out: set[str] = set()
+    for node in ast.walk(mod):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.split(".")[0] in ("langchain", "langchain_core", "langgraph"):
+                for a in node.names:
+                    if a.name == "tool":
+                        out.add(a.asname or a.name)
+    return out
 
 
 def _module_imports(func: ast.AST, roots: tuple[str, ...]) -> bool:
