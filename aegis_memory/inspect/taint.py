@@ -231,6 +231,12 @@ def _leaf(node: ast.expr, scope: FunctionScope, depth: int) -> ast.expr | None:
         if assigned is not None and depth < 4 and _classify(assigned, scope, depth + 1) is not None:
             return node
         return None
+    # A field read off an untrusted value (``result.user_preferences`` from an LLM ``invoke``;
+    # ``state['email']['body']``) — screen the *whole* expression, not its inner receiver, so the
+    # generated fix swaps THIS node for ``verdict.content`` (node-identity contract). Without it,
+    # descent would return the inner ``result`` and produce a broken ``verdict.content.user_preferences``.
+    if isinstance(node, (ast.Attribute, ast.Subscript)) and _classify(node, scope, depth + 1) is not None:
+        return node
     # Structured/wrapper container: descend to the first untrusted leaf, preserving the container.
     for child in _child_exprs(node):
         found = _leaf(child, scope, depth + 1)
@@ -250,6 +256,12 @@ def _child_exprs(node: ast.expr) -> list[ast.expr]:
         return [node.left, node.right]
     if isinstance(node, ast.Call):
         return list(node.args) + [kw.value for kw in node.keywords]
+    # Field read off a variable — follow the receiver so a value assigned from an untrusted source
+    # (``result = llm.invoke(...)``) stays untrusted whether the field is read by attribute
+    # (``result.user_preferences``) or subscript (``result["user_preferences"]`` — chains return
+    # dict-shaped data too). We follow only the receiver (``node.value``), never the index/slice.
+    if isinstance(node, (ast.Attribute, ast.Subscript)):
+        return [node.value]
     return []
 
 

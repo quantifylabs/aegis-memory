@@ -501,6 +501,64 @@ def test_batcha_container_fix_preserves_shape(tmp_path):
     assert "'k', verdict.content)" not in fix
 
 
+def test_langgraph_state_email_field_is_untrusted_with_tailored_fix(tmp_path):
+    """Fix 1 (closing): a LangGraph node reads a nested email field off ``state``
+    (``state['email']['body']``) and writes it to the store. The field read resolves untrusted and
+    the generated fix screens the written value, swapping it for ``verdict.content`` in place."""
+    src = (
+        "from langgraph.graph import StateGraph\n"
+        "def respond(state, store):\n"
+        "    body = state['email']['body']\n"
+        "    store.put(('email_assistant',), 'user_preferences', body)\n"
+    )
+    d = tmp_path / "lg_email"; d.mkdir()
+    (d / "node.py").write_text(src, encoding="utf-8")
+    flow = next(f for f in analyze_project(d) if f.category.endswith("_to_memory"))
+    assert flow.trust == "untrusted" and flow.severity == "critical"
+    assert "'user_preferences', verdict.content)" in flow.fix, flow.fix
+
+
+def test_langgraph_field_off_llm_invoke_resolves_with_node_identity(tmp_path):
+    """Fix 1 (closing) — the real ``langgraph-long-memory`` shape: the written value is a field read
+    off a variable assigned from an LLM call (``result = client.invoke(...)`` ->
+    ``store.put(ns, key, result.user_preferences)``). Attribute access off the untrusted ``.invoke()``
+    egress must resolve untrusted, and the fix must swap the *whole* ``result.user_preferences``
+    expression for ``verdict.content`` (node identity) — never the broken ``verdict.content.user_preferences``."""
+    src = (
+        "from langgraph.graph import StateGraph\n"
+        "def update_memory(store, namespace, messages):\n"
+        "    result = client.invoke(messages)\n"
+        "    store.put(namespace, 'user_preferences', result.user_preferences)\n"
+    )
+    d = tmp_path / "lg_invoke"; d.mkdir()
+    (d / "node.py").write_text(src, encoding="utf-8")
+    flow = next(f for f in analyze_project(d) if f.category.endswith("_to_memory"))
+    assert flow.trust == "untrusted" and flow.severity == "critical"
+    assert "guard.write(result.user_preferences" in flow.fix, flow.fix
+    assert "store.put(namespace, 'user_preferences', verdict.content)" in flow.fix, flow.fix
+    assert "verdict.content.user_preferences" not in flow.fix, flow.fix
+
+
+def test_langgraph_field_off_llm_invoke_subscript_form(tmp_path):
+    """Symmetry (codex follow-up): chains return dict-shaped data, so a subscript field read off the
+    same untrusted ``.invoke()`` egress (``result['user_preferences']``) must resolve untrusted just
+    like the attribute form — and the fix swaps the whole subscript node for ``verdict.content``,
+    never the corrupt ``verdict.content['user_preferences']``."""
+    src = (
+        "from langgraph.graph import StateGraph\n"
+        "def update_memory(store, namespace, messages):\n"
+        "    result = client.invoke(messages)\n"
+        "    store.put(namespace, 'user_preferences', result['user_preferences'])\n"
+    )
+    d = tmp_path / "lg_invoke_sub"; d.mkdir()
+    (d / "node.py").write_text(src, encoding="utf-8")
+    flow = next(f for f in analyze_project(d) if f.category.endswith("_to_memory"))
+    assert flow.trust == "untrusted" and flow.severity == "critical"
+    assert "guard.write(result['user_preferences']" in flow.fix, flow.fix
+    assert "store.put(namespace, 'user_preferences', verdict.content)" in flow.fix, flow.fix
+    assert "verdict.content['user_preferences']" not in flow.fix, flow.fix
+
+
 def test_batcha_input_builtin_is_untrusted(tmp_path):
     """Fix 1: builtin ``input(...)`` is an untrusted source (generic CLI agents)."""
     src = (
