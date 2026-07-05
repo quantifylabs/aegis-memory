@@ -339,6 +339,80 @@ class AegisClient:
         resp = self.client.delete(f"/memories/{memory_id}")
         return resp.status_code == 204
 
+    def update_memory(
+        self,
+        memory_id: str,
+        *,
+        content: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        trust_level: Optional[str] = None,
+    ) -> Memory:
+        """
+        Update a memory's content, metadata, and/or trust level.
+
+        When ``content`` changes, the server re-scans it through the content
+        security pipeline, recomputes its embedding, and (if enabled) recomputes
+        its integrity hash. ``metadata`` is merged (shallow) into existing metadata.
+
+        Args:
+            memory_id: ID of the memory to update
+            content: New content (triggers re-scan / re-embed / re-hash)
+            metadata: Metadata keys to merge into the existing metadata
+            trust_level: New trust level
+
+        Returns:
+            The updated Memory
+        """
+        if self._local_backend:
+            raise NotImplementedError(
+                "update_memory() is not supported in local mode; use server mode."
+            )
+
+        body = {
+            "content": content,
+            "metadata": metadata,
+            "trust_level": trust_level,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = self.client.patch(f"/memories/{memory_id}", json=body)
+        resp.raise_for_status()
+        return self._parse_memory(resp.json())
+
+    def prune(
+        self,
+        *,
+        namespace: str = "default",
+        threshold: float = 0.1,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Prune (soft-deprecate) memories whose relevance score falls below
+        ``threshold`` via the temporal-decay archive sweep.
+
+        This is manual/CLI-triggered pruning — OSS has no hosted scheduled policy.
+
+        Args:
+            namespace: Namespace to sweep (default: "default")
+            threshold: Relevance-score cutoff, 0.0–1.0 (default: 0.1)
+            dry_run: Preview the count without modifying any rows
+
+        Returns:
+            Dict with ``archived`` count plus the echoed ``namespace``,
+            ``threshold`` and ``dry_run``.
+        """
+        if self._local_backend:
+            raise NotImplementedError(
+                "prune() is not supported in local mode; use server mode."
+            )
+
+        resp = self.client.post(
+            "/memories/decay/archive",
+            json={"namespace": namespace, "threshold": threshold, "dry_run": dry_run},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     def handoff(
         self,
         source_agent_id: str,

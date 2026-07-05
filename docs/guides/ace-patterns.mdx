@@ -273,6 +273,29 @@ for c in curation.consolidation_candidates:
     print(f"Similar: {c.content_a[:50]} <-> {c.content_b[:50]}")
 ```
 
+### Semantic consolidation (real merge)
+
+Beyond surfacing candidates, Aegis can **merge** embedding-similar memories via
+`POST /memories/ace/consolidate` (SDK: `client.consolidate_memories(...)`). This is a
+real merge, not prefix matching: the higher-effectiveness memory is kept, the other is
+soft-deprecated (`is_deprecated=True`, `superseded_by` set) and a
+`memories_consolidated` event is emitted.
+
+```python
+# Preview without changing anything
+plan = client.consolidate_memories(namespace="production", dry_run=True,
+                                   similarity_threshold=0.92)
+
+# Apply the merges
+result = client.consolidate_memories(namespace="production", dry_run=False)
+```
+
+<Note>
+The endpoint accepts a `use_llm` flag, but LLM-assisted merging is **not configured in
+the open-source distribution** — passing `use_llm=true` returns **HTTP 501**. The
+heuristic (non-LLM) consolidation above is fully supported.
+</Note>
+
 ## Performance Impact
 
 Based on the ACE paper's benchmarks:

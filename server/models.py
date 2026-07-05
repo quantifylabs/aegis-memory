@@ -141,6 +141,7 @@ class MemoryEventType(str, Enum):
     VOTED_HELPFUL = "voted_helpful"
     VOTED_HARMFUL = "voted_harmful"
     DEPRECATED = "deprecated"
+    UPDATED = "updated"
     DELTA_UPDATED = "delta_updated"
     REFLECTED = "reflected"
     RUN_STARTED = "run_started"

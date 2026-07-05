@@ -151,6 +151,31 @@ aegis get 7f3a8b2c1d4e -j                     # JSON output
 aegis get 7f3a8b2c1d4e --content-only         # Content only
 ```
 
+### `aegis update`
+
+Update a memory's content, metadata, and/or trust level. Changing content re-scans it
+through the security pipeline and recomputes its embedding (and integrity hash, if
+enabled). Metadata is **merged**, not replaced.
+
+```bash
+aegis update 7f3a8b2c1d4e "Corrected content"     # New content (arg)
+aegis update 7f3a8b2c1d4e -f ./fixed.txt          # New content from file
+echo "Piped content" | aegis update 7f3a8b2c1d4e  # New content from stdin
+aegis update 7f3a8b2c1d4e -m '{"reviewed": true}' # Merge metadata
+aegis update 7f3a8b2c1d4e --trust-level privileged
+```
+
+**Options:**
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--metadata` | `-m` | JSON metadata to merge |
+| `--trust-level` | | New trust level (`untrusted`, `unknown`, `internal`, `privileged`, `system`) |
+| `--file` | `-f` | Read new content from file |
+| `--json` | `-j` | JSON output |
+
+<Note>At least one of new content, `--metadata`, or `--trust-level` must be provided.</Note>
+
 ### `aegis delete`
 
 Delete a memory.
@@ -278,6 +303,73 @@ aegis import backup.jsonl                     # Import from file
 aegis import backup.jsonl -n staging          # Override namespace
 aegis import backup.jsonl --dry-run           # Validate only
 ```
+
+## Maintenance
+
+### `aegis prune`
+
+Archive stale memories via the temporal-decay sweep — soft-deprecates memories whose
+relevance score falls below the threshold. This is manual, CLI-triggered pruning; OSS
+has no hosted scheduled policy, so run it on your own schedule (e.g. a cron job).
+
+```bash
+aegis prune --dry-run                         # Preview count only
+aegis prune                                   # Archive in default namespace
+aegis prune -n research --threshold 0.2       # Higher cutoff in a namespace
+```
+
+**Options:**
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--namespace` | `-n` | Namespace to sweep |
+| `--threshold` | `-t` | Relevance-score cutoff, 0.0–1.0 (default: 0.1) |
+| `--dry-run` | | Preview count without modifying rows |
+| `--json` | `-j` | JSON output |
+
+## Security Analysis
+
+These commands are **standalone and server-free** — they run offline static analysis
+and a local scan, and need no running server or API key.
+
+### `aegis inspect`
+
+Inspect an agent project for unsafe memory flows. Writes results to `aegis-out/`
+(including `findings.sarif` for GitHub code scanning). Suppress an accepted sink with an
+inline `# aegis: ignore` comment.
+
+```bash
+aegis inspect .                               # Inspect current directory
+aegis inspect ./agent --framework langgraph   # Force a sink adapter
+aegis inspect . --ci --max-risk 60            # CI mode: non-zero exit on breach
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--framework` | Force a sink adapter (e.g. `langgraph`). Auto-detect by default. |
+| `--baseline` | Also inspect this path and use its risk score as the "before" |
+| `--ci` | CI mode: machine output + non-zero exit on breach |
+| `--max-risk` | CI risk-score threshold for a non-zero exit (default: 60) |
+| `--emit-cases` | Also write `aegis-out/cases/cases.json` |
+| `--ingest-verdicts` | Fold `aegis-out/cases/verdicts.json` back into the report |
+
+### `aegis replay`
+
+Replay a built-in attack against the project using the real scanner, showing the
+with/without-Aegis outcome.
+
+```bash
+aegis replay .                                # Replay memory-poisoning demo
+aegis replay . --attack memory-poisoning
+```
+
+**Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--attack` | Built-in attack to replay (currently `memory-poisoning`) |
 
 ## Environment Variables
 

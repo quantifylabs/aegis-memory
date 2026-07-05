@@ -350,3 +350,114 @@ def delete(
         return
 
     print_success("Memory deleted")
+
+
+@wrap_errors
+def update(
+    memory_id: str = typer.Argument(..., help="Memory ID to update"),
+    content: str | None = typer.Argument(None, help="New content (or use --file / pipe)"),
+    metadata: str | None = typer.Option(None, "--metadata", "-m", help="JSON metadata to merge"),
+    trust_level: str | None = typer.Option(None, "--trust-level", help="New trust level"),
+    file: Path | None = typer.Option(None, "--file", "-f", help="Read new content from file"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """
+    Update a memory's content, metadata, and/or trust level.
+
+    Changing content re-scans it through the security pipeline and recomputes its
+    embedding (and integrity hash, if enabled). Metadata is merged, not replaced.
+
+    Examples:
+        aegis update 7f3a8b2c1d4e "Corrected content"
+        aegis update 7f3a8b2c1d4e -m '{"reviewed": true}'
+        aegis update 7f3a8b2c1d4e --trust-level verified
+        aegis update 7f3a8b2c1d4e -f ./fixed.txt
+    """
+    client = require_client()
+
+    # Resolve new content from argument, file, or stdin (all optional).
+    new_content: str | None = None
+    if content:
+        new_content = content
+    elif file:
+        if not file.exists():
+            print_error(f"File not found: {file}")
+            raise typer.Exit(1)
+        new_content = file.read_text()
+    elif not sys.stdin.isatty():
+        piped = sys.stdin.read().strip()
+        new_content = piped or None
+
+    # Parse metadata
+    meta_dict = None
+    if metadata:
+        try:
+            meta_dict = json.loads(metadata)
+        except json.JSONDecodeError as e:
+            print_error(f"Invalid JSON metadata: {e}")
+            raise typer.Exit(1) from e
+
+    if new_content is None and meta_dict is None and trust_level is None:
+        print_error("Nothing to update. Provide new content, --metadata, or --trust-level.")
+        raise typer.Exit(1)
+
+    try:
+        memory = client.update_memory(
+            memory_id,
+            content=new_content,
+            metadata=meta_dict,
+            trust_level=trust_level,
+        )
+    except Exception as e:
+        handle_api_error(e, memory_id)
+
+    if json_output:
+        print_json({
+            "id": memory.id,
+            "content": memory.content,
+            "trust_level": memory.trust_level,
+            "metadata": memory.metadata,
+        })
+        return
+
+    print_success(f"Memory updated: {memory.id}")
+
+
+@wrap_errors
+def prune(
+    namespace: str | None = typer.Option(None, "--namespace", "-n", help="Namespace to sweep"),
+    threshold: float = typer.Option(0.1, "--threshold", "-t", help="Relevance-score cutoff (0.0-1.0)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview count without modifying rows"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+):
+    """
+    Prune stale memories via the temporal-decay archive sweep.
+
+    Soft-deprecates memories whose relevance score falls below the threshold.
+    This is manual, CLI-triggered pruning — there is no hosted scheduled policy.
+
+    Examples:
+        aegis prune --dry-run
+        aegis prune -n research --threshold 0.2
+    """
+    client = require_client()
+    resolved_namespace = namespace or get_default_namespace()
+
+    try:
+        result = client.prune(
+            namespace=resolved_namespace,
+            threshold=threshold,
+            dry_run=dry_run,
+        )
+    except Exception as e:
+        handle_api_error(e, "prune memories")
+
+    if json_output:
+        print_json(result)
+        return
+
+    archived = result.get("archived", 0)
+    if dry_run:
+        print_success(f"Dry run: {archived} memories would be archived in '{resolved_namespace}'")
+    else:
+        print_success(f"Archived {archived} memories in '{resolved_namespace}'")

@@ -1,0 +1,73 @@
+---
+title: 'Database Migrations'
+description: 'Applying and managing schema migrations with Alembic'
+---
+
+# Database Migrations
+
+Aegis Memory manages its PostgreSQL schema with [Alembic](https://alembic.sqlalchemy.org/).
+Migrations live in `alembic/versions/` and are configured by `alembic.ini`.
+
+<Note>
+Aegis requires PostgreSQL with the [`pgvector`](https://github.com/pgvector/pgvector)
+extension. The baseline migration enables `vector`; ensure the extension is available
+to your database role before upgrading.
+</Note>
+
+## Applying migrations
+
+Apply all pending migrations up to the latest revision:
+
+```bash
+alembic upgrade head
+```
+
+Alembic reads the database URL from your environment (the same Postgres settings the
+server uses — see the [Production Checklist](/deployment/production-checklist)). Run
+this once per deployment, before starting the API server, whenever you upgrade Aegis
+to a version that ships new migrations.
+
+## Inspecting state
+
+```bash
+alembic current        # revision currently applied to the database
+alembic history        # full revision graph
+alembic heads          # latest revision(s)
+```
+
+## Revision history
+
+Migrations are linear and applied in order. As of v2.6.x:
+
+| Revision | Summary |
+| --- | --- |
+| `0001_baseline` | Core `memories` table, indexes, `pgvector` extension |
+| `0002_memory_shared_agents` | Cross-agent sharing / ACL join table |
+| `0003_typed_memory` | Typed (episodic/semantic) memory columns |
+| `0004_ace_runs` | ACE run tracking |
+| `0005_interaction_events` | Interaction event log |
+| `0006_temporal_decay` | Access tracking for relevance decay |
+| `0007_content_security` | Integrity hash, content flags, trust level |
+
+## Downgrades
+
+```bash
+alembic downgrade -1   # step back one revision
+```
+
+<Warning>
+Downgrades can drop columns and therefore **lose data**. Take a backup first (see
+[Backup & Restore](/deployment/backup-restore)) and prefer rolling forward with a new
+migration over downgrading a production database.
+</Warning>
+
+## Creating a new migration
+
+When you change the models, autogenerate a revision and review it before committing:
+
+```bash
+alembic revision --autogenerate -m "describe the change"
+```
+
+Always inspect the generated script — autogenerate does not detect every change (for
+example, some index or server-default edits) and should be treated as a starting point.

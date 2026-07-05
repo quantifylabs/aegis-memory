@@ -511,6 +511,60 @@ class AsyncAegisClient:
         resp = await self.client.delete(f"/memories/{memory_id}")
         return resp.status_code == 204
 
+    async def update_memory(
+        self,
+        memory_id: str,
+        *,
+        content: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        trust_level: Optional[str] = None,
+    ) -> Memory:
+        """
+        Update a memory's content, metadata, and/or trust level.
+
+        When ``content`` changes, the server re-scans it through the content
+        security pipeline, recomputes its embedding, and (if enabled) recomputes
+        its integrity hash. ``metadata`` is merged (shallow) into existing metadata.
+        """
+        if self._local_backend:
+            raise NotImplementedError(
+                "update_memory() is not supported in local mode; use server mode."
+            )
+
+        body = {
+            "content": content,
+            "metadata": metadata,
+            "trust_level": trust_level,
+        }
+        body = {k: v for k, v in body.items() if v is not None}
+
+        resp = await self.client.patch(f"/memories/{memory_id}", json=body)
+        resp.raise_for_status()
+        return _parse_memory_data(resp.json())
+
+    async def prune(
+        self,
+        *,
+        namespace: str = "default",
+        threshold: float = 0.1,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Prune (soft-deprecate) memories below ``threshold`` via the temporal-decay
+        archive sweep. Manual/CLI-triggered — OSS has no hosted scheduled policy.
+        """
+        if self._local_backend:
+            raise NotImplementedError(
+                "prune() is not supported in local mode; use server mode."
+            )
+
+        resp = await self.client.post(
+            "/memories/decay/archive",
+            json={"namespace": namespace, "threshold": threshold, "dry_run": dry_run},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     async def handoff(
         self,
         source_agent_id: str,

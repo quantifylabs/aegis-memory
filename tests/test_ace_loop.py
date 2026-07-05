@@ -81,8 +81,8 @@ class TestAceRunModel:
 
     def test_event_type_total_count(self):
         from models import MemoryEventType
-        # 16 baseline + 4 Context Hub (v2.3.0) + 4 Memory Depth (v2.4.0)
-        assert len(MemoryEventType) == 24
+        # 16 baseline + 4 Context Hub (v2.3.0) + 4 Memory Depth (v2.4.0) + 1 UPDATED (v2.6.1)
+        assert len(MemoryEventType) == 25
 
 
 # ============================================================================

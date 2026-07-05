@@ -3,10 +3,12 @@ Aegis Memory Framework Integrations
 
 Integrations for popular AI/ML frameworks:
 - LangChain: aegis_memory.integrations.langchain
+- LangGraph: aegis_memory.integrations.langgraph
 - CrewAI: aegis_memory.integrations.crewai
 
 Install with extras:
     pip install aegis-memory[langchain]
+    pip install aegis-memory[langgraph]
     pip install aegis-memory[crewai]
     pip install aegis-memory[all]
 """
@@ -16,6 +18,9 @@ def __getattr__(name):
     if name == "langchain":
         from aegis_memory.integrations import langchain
         return langchain
+    elif name == "langgraph":
+        from aegis_memory.integrations import langgraph
+        return langgraph
     elif name == "crewai":
         from aegis_memory.integrations import crewai
         return crewai

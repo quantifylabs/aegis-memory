@@ -67,6 +67,7 @@ class OperationNames:
     MEMORY_QUERY = "memory_query"
     MEMORY_QUERY_CROSS_AGENT = "memory_query_cross_agent"
     MEMORY_DELETE = "memory_delete"
+    MEMORY_UPDATE = "memory_update"
     MEMORY_FIND_DUPLICATE = "memory_find_duplicate"
     MEMORY_SEMANTIC_SEARCH = "memory_semantic_search"
     MEMORY_GET_BY_ID = "memory_get_by_id"

@@ -1,0 +1,108 @@
+---
+title: 'LangGraph'
+description: 'Durable, security-scanned semantic memory for LangGraph state'
+---
+
+# LangGraph Integration
+
+`AegisLangGraphMemory` gives a LangGraph graph long-term, semantic memory backed by
+Aegis Memory. It provides the two primitives every stateful graph needs:
+
+- **retrieve** relevant memories into state *before* a node reasons, and
+- **remember** what a node produced *after* it runs.
+
+Because LangGraph state is just a `dict` / `TypedDict`, the adapter operates on plain
+state dicts and imports no `langgraph` package — it works with any graph shape and adds
+no hard dependency.
+
+<Note>
+**This is a memory helper, not a checkpointer.** `AegisLangGraphMemory` does **not**
+implement LangGraph's `BaseCheckpointSaver` and does not save or restore graph
+execution state / thread history. Use LangGraph's own checkpointer for execution
+persistence; use this adapter for durable, security-scanned semantic memory.
+</Note>
+
+## Installation
+
+```bash
+pip install "aegis-memory[langgraph]"
+```
+
+The adapter itself needs no LangGraph install; the extra is provided for convenience
+when you also want LangGraph in the same environment.
+
+## Basic Usage
+
+```python
+from aegis_memory import AegisClient
+from aegis_memory.integrations.langgraph import AegisLangGraphMemory
+
+memory = AegisLangGraphMemory(
+    client=AegisClient(api_key="your-aegis-key", base_url="http://localhost:8000"),
+    namespace="support-graph",
+)
+
+def agent_node(state: dict) -> dict:
+    # 1. Retrieve relevant memory into state before reasoning.
+    state = memory.load_into_state(state, state["question"], agent_id="assistant")
+    context = state["aegis_memories"]  # list[dict]: content, metadata, score, agent_id
+
+    # 2. ... call your model using `context` ...
+    state["answer"] = run_model(state["question"], context)
+
+    # 3. Persist what the node produced.
+    memory.remember(state["answer"], agent_id="assistant",
+                    metadata={"question": state["question"]})
+    return state
+```
+
+## API
+
+<CardGroup cols={2}>
+  <Card title="retrieve(query, ...)" icon="magnifying-glass">
+    Returns a list of memory dicts relevant to `query`. Pass `agent_id` for
+    cross-agent, scope-aware access control.
+  </Card>
+  <Card title="remember(content, ...)" icon="floppy-disk">
+    Stores new memory. Content is security-scanned, embedded and (optionally)
+    integrity-hashed by the server. Returns the memory ID.
+  </Card>
+  <Card title="load_into_state(state, query, ...)" icon="download">
+    Retrieves and writes results into `state[key]` (default `aegis_memories`),
+    returning the mutated state — ideal as a node's first line.
+  </Card>
+  <Card title="persist_from_state(state, content_key, ...)" icon="upload">
+    Persists a value already in `state` (e.g. a node's output). No-ops when the
+    key is missing or empty.
+  </Card>
+</CardGroup>
+
+## Async graphs
+
+For async LangGraph nodes, use `AsyncAegisClient` directly — it keeps API parity for
+add/query/vote/session/feature workflows while staying event-loop friendly:
+
+```python
+from aegis_memory import AsyncAegisClient
+
+async def graph_node(state):
+    async with AsyncAegisClient(api_key="your-aegis-key") as client:
+        memories = await client.query("plan context", agent_id="planner")
+        return {"memories": [m.content for m in memories]}
+```
+
+## Runnable example
+
+A complete, server-free example (local mode, no API key) lives at
+[`examples/langgraph_basic.py`](https://github.com/quantifylabs/aegis-memory/blob/main/examples/langgraph_basic.py).
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="ACE Patterns" icon="brain" href="/guides/ace-patterns">
+    Self-improvement patterns for multi-agent memory
+  </Card>
+  <Card title="Security" icon="shield" href="/guides/security">
+    How content is scanned before it enters memory
+  </Card>
+</CardGroup>
