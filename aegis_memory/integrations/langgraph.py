@@ -139,14 +139,29 @@ class AegisLangGraphMemory:
         Content is security-scanned, embedded and (optionally) integrity-hashed by
         the Aegis server before storage — nothing here bypasses those checks.
 
+        Scope: with an ``agent_id`` the memory defaults to ``default_scope``
+        (``agent-shared``) for multi-agent sharing. Without an ``agent_id`` (and no
+        explicit ``scope``) it defaults to ``"global"`` — the only scope the agentless
+        ``retrieve`` path can read — so the simple ``remember``/``retrieve`` round-trip
+        can see its own write.
+
         Returns:
             The stored memory ID (or the ID of an existing duplicate).
         """
+        if scope is not None:
+            effective_scope = scope
+        elif agent_id is None:
+            # Agent-scoped buckets aren't retrievable by the agentless retrieve()
+            # path (which only sees global), so agentless writes go to global.
+            effective_scope = "global"
+        else:
+            effective_scope = self.default_scope
+
         result = self.client.add(
             content=content,
             agent_id=agent_id,
             namespace=self.namespace,
-            scope=scope or self.default_scope,
+            scope=effective_scope,
             metadata={
                 "source": "langgraph",
                 **(metadata or {}),

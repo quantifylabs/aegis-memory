@@ -63,6 +63,18 @@ async def test_patch_merges_metadata(async_client):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not _HTTPX_OK, reason="httpx not installed")
+async def test_patch_metadata_only_is_validated(async_client):
+    # A metadata-only PATCH (no content change) must still run content-security's
+    # metadata validation — oversized metadata is rejected, same as on add.
+    mem_id = await _add(async_client, "A fact", agent_id="a1")
+
+    oversized = {f"k{i}": i for i in range(200)}  # > metadata_max_keys (default 50)
+    r = await async_client.patch(f"/memories/{mem_id}", json={"metadata": oversized})
+    assert r.status_code == 422, r.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(not _HTTPX_OK, reason="httpx not installed")
 async def test_patch_updates_trust_level(async_client):
     mem_id = await _add(async_client, "Some content", agent_id="a1")
 

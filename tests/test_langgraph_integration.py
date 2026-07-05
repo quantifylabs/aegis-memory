@@ -68,12 +68,23 @@ def test_remember_calls_add_with_source_tag(memory, client):
     assert kwargs["content"] == "a fact"
     assert kwargs["agent_id"] == "me"
     assert kwargs["namespace"] == "ns"
-    assert kwargs["scope"] == "agent-shared"  # default_scope
+    assert kwargs["scope"] == "agent-shared"  # default_scope when an agent is given
     assert kwargs["metadata"] == {"source": "langgraph", "k": "v"}
 
 
+def test_remember_agentless_defaults_to_global(memory, client):
+    # Agentless writes must land in a scope the agentless retrieve() path can read
+    # (only global), so the simple remember()/retrieve() round-trip works.
+    memory.remember("a fact")
+    assert client.add.call_args.kwargs["agent_id"] is None
+    assert client.add.call_args.kwargs["scope"] == "global"
+
+
 def test_remember_respects_scope_override(memory, client):
-    memory.remember("x", scope="global")
+    # An explicit scope always wins, even agentless.
+    memory.remember("x", scope="agent-private")
+    assert client.add.call_args.kwargs["scope"] == "agent-private"
+    memory.remember("y", agent_id="me", scope="global")
     assert client.add.call_args.kwargs["scope"] == "global"
 
 

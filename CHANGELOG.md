@@ -64,6 +64,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`PATCH /memories/{id}` review hardening** (Codex review on the release PR):
+  - Patched content is now scanned at the **more-screened of the caller's and the stored
+    memory's trust level** (caller-derived, mirroring the add path) instead of the stored
+    memory's — so a low-trust caller can't get a high-trust memory's more-lenient screening.
+  - **Metadata-only patches are now validated** — the content-security metadata limits
+    (depth/keys/value-length) run whenever content *or* metadata changes, matching add.
+- **LangGraph adapter — agentless writes are retrievable.** `remember()` with no `agent_id`
+  now defaults to `global` scope (the only scope the agentless `retrieve()` path can read),
+  so the simple `remember`/`retrieve` round-trip sees its own write. An `agent_id` still
+  gets `agent-shared`, and an explicit `scope` always wins.
 - **`aegis inspect` — bare `.get()`/`.run()` no longer read as network egress.** The call-egress source
   hints are split into *strong* verbs (`fetch`/`read_text`/`invoke`/`complete`/Streamlit widgets — fire
   on any receiver) and *weak* verbs (`get`/`post`/`read`/`load`/`run`/`call` — fire only on a known

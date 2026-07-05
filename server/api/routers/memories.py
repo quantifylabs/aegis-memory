@@ -440,21 +440,35 @@ async def update_memory(memory_id: str, body: MemoryUpdate, project_id: str = De
                 update_kwargs["metadata"] = merged_metadata
                 changed.append("metadata")
 
-            # Trust level change (explicit -> conservative default preserved).
-            resolved_trust = mem.trust_level or "internal"
+            # Caller-derived trust, exactly like the add path: a declared level is
+            # capped by the authenticated principal, falling back to the principal.
+            # The stored trust_level is only rewritten when explicitly requested.
+            caller_trust = resolve_trust_level(
+                body.trust_level, auth.trust_level,
+                enable_trust_levels=_settings.enable_trust_levels,
+            )
             if body.trust_level is not None:
-                resolved_trust = resolve_trust_level(
-                    body.trust_level, auth.trust_level,
-                    enable_trust_levels=_settings.enable_trust_levels,
-                )
-                update_kwargs["trust_level"] = resolved_trust
+                update_kwargs["trust_level"] = caller_trust
                 changed.append("trust_level")
 
-            # Content change: re-scan -> re-embed -> recompute integrity hash.
-            if body.content is not None and body.content != mem.content:
+            # Scan patched content at the *more-screened* (lower-rank) of the caller's
+            # trust and the stored memory's trust, so a low-trust caller can never get
+            # a high-trust memory's more-lenient screening. resolve_trust_level caps its
+            # first arg by the second, which is exactly min(stored, caller) here.
+            scan_trust = resolve_trust_level(
+                mem.trust_level or "internal", caller_trust,
+                enable_trust_levels=_settings.enable_trust_levels,
+            )
+
+            # Re-scan whenever content OR metadata changes: this validates the merged
+            # metadata (depth/keys/value-length) even on metadata-only patches, mirroring
+            # the single content+metadata scan the add path performs.
+            content_changed = body.content is not None and body.content != mem.content
+            if content_changed or body.metadata is not None:
+                effective_content = body.content if content_changed else mem.content
                 verdict = await _scanner.scan_async(
-                    body.content, merged_metadata,
-                    trust_level=resolved_trust,
+                    effective_content, merged_metadata,
+                    trust_level=scan_trust,
                     scope=mem.scope or "agent-private",
                 )
                 if not verdict.allowed:
@@ -462,15 +476,17 @@ async def update_memory(memory_id: str, body: MemoryUpdate, project_id: str = De
                     raise HTTPException(status_code=422, detail=f"Content rejected by security policy: {verdict.flags}")
                 if verdict.flags:
                     await _emit(db, project_id=project_id, memory_id=memory_id, namespace=mem.namespace, agent_id=mem.agent_id, event_type=MemoryEventType.SECURITY_FLAGGED.value, payload={"flags": verdict.flags, "source": "update"})
-                content_to_store = verdict.content
 
-                embed_service = get_embedding_service()
-                update_kwargs["content"] = content_to_store
-                update_kwargs["embedding"] = await embed_service.embed_single(content_to_store, db)
-                update_kwargs["content_flags"] = verdict.flags
-                if _settings.enable_integrity_check:
-                    update_kwargs["integrity_hash"] = compute_integrity_hash(content_to_store, mem.agent_id, project_id, _settings.get_integrity_key())
-                changed.append("content")
+                # Content-specific side effects only when the content actually changed.
+                if content_changed:
+                    content_to_store = verdict.content
+                    embed_service = get_embedding_service()
+                    update_kwargs["content"] = content_to_store
+                    update_kwargs["embedding"] = await embed_service.embed_single(content_to_store, db)
+                    update_kwargs["content_flags"] = verdict.flags
+                    if _settings.enable_integrity_check:
+                        update_kwargs["integrity_hash"] = compute_integrity_hash(content_to_store, mem.agent_id, project_id, _settings.get_integrity_key())
+                    changed.append("content")
 
             if not update_kwargs:
                 # Nothing to change — return current state unmodified.
