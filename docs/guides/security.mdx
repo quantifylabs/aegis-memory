@@ -133,11 +133,19 @@ All require `privileged` or `system` trust level.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/security/scan` | POST | Dry-run content scan without storing |
 | `/security/audit` | GET | Query security events with filters |
 | `/security/flagged` | GET | List flagged memories pending review |
 | `/security/verify/{id}` | POST | Verify HMAC integrity of a memory |
 | `/security/config` | GET | Current security configuration |
-| `/security/scan` | POST | Dry-run content scan without storing |
+
+<Note>
+These five endpoints — **scan, audit, flagged, verify, config** — are the complete
+security-admin surface in the open-source distribution. There is no approve / reject /
+remediate workflow and no review-queue UI: flagged memories are surfaced for inspection
+(`/security/flagged`), while enforcement happens automatically at write time via the
+content-policy actions above (`reject` / `redact` / `flag`).
+</Note>
 
 ## SDK Security Methods
 

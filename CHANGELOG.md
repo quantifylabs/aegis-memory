@@ -7,8 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-07-05
+
 ### Added
 
+- **LangGraph integration adapter.** `aegis_memory/integrations/langgraph.py` adds
+  `AegisLangGraphMemory` — a dependency-light (no hard `langgraph` import) helper that
+  gives LangGraph graphs durable, security-scanned semantic memory via `retrieve` /
+  `remember` and state helpers (`load_into_state` / `persist_from_state`). Because
+  LangGraph state is a plain dict, it works with any graph shape. Ships a runnable
+  server-free example (`examples/langgraph_basic.py`), first-class docs
+  (`docs/integrations/langgraph.mdx`), a `[langgraph]` extra, and network-free tests
+  (`tests/test_langgraph_integration.py`). **Not a checkpointer** — it does not
+  implement `BaseCheckpointSaver` or persist graph execution state.
+- **Memory update — `PATCH /memories/{memory_id}`.** Partial updates to content,
+  metadata (shallow-merged) and trust level. Changing content re-runs the content
+  security scan, recomputes the embedding, and recomputes the integrity hash (when
+  enabled); a `memories.updated` event is emitted and project scoping is preserved.
+  Adds `MemoryRepository.update`, `MemoryEventType.UPDATED`, SDK `update_memory()`
+  (sync + async), the `aegis update` CLI command, and tests
+  (`tests/test_memory_update.py`).
+- **`aegis prune` CLI + SDK `prune()`.** Manual, CLI-triggered pruning that wraps
+  `POST /memories/decay/archive` with `--namespace`, `--threshold`, `--dry-run`. OSS
+  pruning is manual (no hosted scheduled policy). Tests in `tests/test_prune.py`.
+- **Deployment docs.** New `docs/deployment/` group: `migrations.mdx` (Alembic),
+  `production-checklist.mdx`, and `backup-restore.mdx` (`pg_dump` + logical export).
+- **Consolidation tests.** `tests/test_consolidation.py` covers `dry_run=true`,
+  `dry_run=false` (real merge), and `use_llm=true → 501`.
+- **CLI reference expanded** (`docs/api-reference/cli.mdx`) with option-level docs for
+  `update`, `prune`, `inspect`, and `replay`.
 - **`aegis inspect` — LangChain/LangGraph tool-arg source shape.** A tool function's model-supplied
   arguments (a `@tool`-decorated function, or one carrying an `Injected*` runtime param) are now
   treated as untrusted-by-default, mirroring the existing CrewAI `_run` / LangGraph `state` shapes
@@ -51,6 +78,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   argument (not any string literal, so `key="shared_calendar"` no longer mints an overbroad-shared
   finding), and the provenance read-path check matches identifier tokens instead of dumped AST text
   and now names the real store/framework instead of a hardcoded LangGraph `store.get`.
+
+### Docs
+
+- **Corrected documentation honesty for the OSS surface.** Added first-class LangGraph
+  integration docs (resolving the previously dangling `/integrations/langgraph` link).
+  Documented that semantic consolidation performs a real merge and that `use_llm=true`
+  is not configured (returns HTTP 501). Documented that the security-admin surface is
+  exactly **scan / audit / flagged / verify / config** — no approve/reject/remediate
+  workflow or review-queue UI. Documented that memory pruning is manual/CLI-triggered.
+
+### Changed
+
+- Bumped version to **2.6.1**.
 
 ## [2.6.0] - 2026-06-25
 

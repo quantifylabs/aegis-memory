@@ -74,6 +74,20 @@ class MemoryCreate(BaseModel):
         return v
 
 
+class MemoryUpdate(BaseModel):
+    """Partial update for an existing memory. All fields optional."""
+    content: str | None = Field(default=None, min_length=1, max_length=100_000)
+    metadata: dict[str, Any] | None = None
+    trust_level: str | None = None
+
+    @field_validator("trust_level")
+    @classmethod
+    def validate_trust_level(cls, v):
+        if v is not None and v not in VALID_TRUST_LEVELS:
+            raise ValueError(f"trust_level must be one of: {sorted(VALID_TRUST_LEVELS)}")
+        return v
+
+
 class MemoryCreateBatch(BaseModel):
     items: list[MemoryCreate] = Field(..., min_length=1, max_length=100)
 
@@ -399,6 +413,78 @@ async def delete_memory(memory_id: str, project_id: str = Depends(check_rate_lim
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
     await _emit(db, project_id=project_id, memory_id=memory_id, namespace="default", event_type=MemoryEventType.DELETED.value, payload={"deleted_by": "api_caller"})
+
+
+@router.patch("/{memory_id}", response_model=MemoryOut)
+async def update_memory(memory_id: str, body: MemoryUpdate, project_id: str = Depends(check_rate_limit), auth: AuthContext = Depends(get_auth_context), db: AsyncSession = Depends(get_db)):
+    """
+    Partially update a memory (content / metadata / trust_level).
+
+    When content changes it is re-scanned by the content-security pipeline, its
+    embedding is recomputed, and (if enabled) its integrity hash is recomputed.
+    Project scoping is preserved — a memory in another project is never touched.
+    """
+    try:
+        with track_latency(OperationNames.MEMORY_UPDATE):
+            mem = await MemoryRepository.get_by_id(db, memory_id, project_id)
+            if not mem:
+                raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
+
+            changed: list[str] = []
+            update_kwargs: dict[str, Any] = {}
+
+            # Metadata merge (shallow) — applied to both storage and the re-scan context.
+            merged_metadata = dict(mem.metadata_json or {})
+            if body.metadata is not None:
+                merged_metadata.update(body.metadata)
+                update_kwargs["metadata"] = merged_metadata
+                changed.append("metadata")
+
+            # Trust level change (explicit -> conservative default preserved).
+            resolved_trust = mem.trust_level or "internal"
+            if body.trust_level is not None:
+                resolved_trust = resolve_trust_level(
+                    body.trust_level, auth.trust_level,
+                    enable_trust_levels=_settings.enable_trust_levels,
+                )
+                update_kwargs["trust_level"] = resolved_trust
+                changed.append("trust_level")
+
+            # Content change: re-scan -> re-embed -> recompute integrity hash.
+            if body.content is not None and body.content != mem.content:
+                verdict = await _scanner.scan_async(
+                    body.content, merged_metadata,
+                    trust_level=resolved_trust,
+                    scope=mem.scope or "agent-private",
+                )
+                if not verdict.allowed:
+                    await _emit(db, project_id=project_id, memory_id=memory_id, namespace=mem.namespace, agent_id=mem.agent_id, event_type=MemoryEventType.SECURITY_REJECTED.value, payload={"flags": verdict.flags, "detections": [d.detection_type.value for d in verdict.detections], "source": "update"})
+                    raise HTTPException(status_code=422, detail=f"Content rejected by security policy: {verdict.flags}")
+                if verdict.flags:
+                    await _emit(db, project_id=project_id, memory_id=memory_id, namespace=mem.namespace, agent_id=mem.agent_id, event_type=MemoryEventType.SECURITY_FLAGGED.value, payload={"flags": verdict.flags, "source": "update"})
+                content_to_store = verdict.content
+
+                embed_service = get_embedding_service()
+                update_kwargs["content"] = content_to_store
+                update_kwargs["embedding"] = await embed_service.embed_single(content_to_store, db)
+                update_kwargs["content_flags"] = verdict.flags
+                if _settings.enable_integrity_check:
+                    update_kwargs["integrity_hash"] = compute_integrity_hash(content_to_store, mem.agent_id, project_id, _settings.get_integrity_key())
+                changed.append("content")
+
+            if not update_kwargs:
+                # Nothing to change — return current state unmodified.
+                return _mem_to_out(mem)
+
+            mem = await MemoryRepository.update(db, mem, **update_kwargs)
+            await _emit(db, project_id=project_id, memory_id=mem.id, namespace=mem.namespace, agent_id=mem.agent_id, event_type=MemoryEventType.UPDATED.value, payload={"changed": changed, "source": "update"})
+            record_operation(OperationNames.MEMORY_UPDATE, "success")
+            return _mem_to_out(mem)
+    except HTTPException:
+        raise
+    except Exception:
+        record_operation(OperationNames.MEMORY_UPDATE, "error")
+        raise
 
 
 @router.post("/export")

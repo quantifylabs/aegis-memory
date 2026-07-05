@@ -1,0 +1,65 @@
+---
+title: 'Production Checklist'
+description: 'What to configure before running Aegis Memory in production'
+---
+
+# Production Checklist
+
+A checklist for self-hosting Aegis Memory. All settings are environment variables; see
+`.env.example` for the full annotated list.
+
+## Secrets & authentication
+
+- [ ] **`AEGIS_API_KEY`** — set a strong, unique API key. Clients authenticate with
+      `Authorization: Bearer <key>`.
+- [ ] **`AEGIS_INTEGRITY_KEY`** — set a dedicated HMAC signing key for memory integrity.
+      If unset it falls back to `AEGIS_API_KEY`; a separate key is recommended so
+      rotating one does not invalidate the other.
+- [ ] **`OPENAI_API_KEY`** — required for embeddings unless you run an alternate
+      embedding backend.
+- [ ] Store all secrets in your platform's secret manager, not in the image or repo.
+
+## Database
+
+- [ ] PostgreSQL with the **`pgvector`** extension available to the app role.
+- [ ] **`POSTGRES_PASSWORD`** set; database reachable from the API.
+- [ ] Run migrations before first start: `alembic upgrade head`
+      (see [Migrations](/deployment/migrations)).
+- [ ] Tune the connection pool for your load: `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`.
+
+## Content security
+
+- [ ] **`ENABLE_INTEGRITY_CHECK=true`** (default) — HMAC tamper detection on store/verify.
+- [ ] Review content policy actions (`reject | redact | flag | allow`):
+      `CONTENT_POLICY_PII`, `CONTENT_POLICY_SECRETS`, `CONTENT_POLICY_INJECTION`.
+- [ ] Set limits appropriate to your data: `CONTENT_MAX_LENGTH`, `METADATA_MAX_DEPTH`,
+      `METADATA_MAX_KEYS`.
+- [ ] Decide whether to enforce trust levels: **`ENABLE_TRUST_LEVELS`** (default `false`).
+
+## Rate limiting & quotas
+
+- [ ] Global limits: `RATE_LIMIT_PER_MINUTE`, `RATE_LIMIT_PER_HOUR`, `RATE_LIMIT_BURST`.
+- [ ] Per-agent limits: `PER_AGENT_RATE_LIMIT_PER_MINUTE`, `PER_AGENT_RATE_LIMIT_PER_HOUR`.
+- [ ] Per-agent memory cap: `AGENT_MEMORY_LIMIT` (default `10000`).
+- [ ] For multi-replica deployments, use Redis for distributed limiting: `REDIS_URL`.
+
+## Networking
+
+- [ ] **`CORS_ORIGINS`** — set explicit origins in production when sending
+      `Authorization`/cookies. Use `*` only for public, non-credential APIs.
+- [ ] Terminate TLS at your ingress/load balancer.
+
+## Operations
+
+- [ ] Configure backups and test a restore — see
+      [Backup & Restore](/deployment/backup-restore).
+- [ ] **Memory pruning is manual/CLI-triggered** in OSS (there is no hosted scheduled
+      policy). Run `aegis prune` on your own schedule (e.g. a cron job) to archive stale
+      memories via the temporal-decay sweep.
+- [ ] Wire up observability — see [Observability](/guides/observability).
+
+## Scope note
+
+The open-source distribution is self-hosted and does **not** include managed backup
+automation, a hosted dashboard, SSO/SAML/SCIM, org roles/billing, or external SIEM/
+warehouse exporters. Plan those into your own infrastructure as needed.

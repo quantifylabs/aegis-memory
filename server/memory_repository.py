@@ -502,6 +502,52 @@ class MemoryRepository:
             raise
 
     @staticmethod
+    async def update(
+        db: AsyncSession,
+        mem: Memory,
+        *,
+        content: str | None = None,
+        embedding: list[float] | None = None,
+        metadata: dict | None = None,
+        scope: str | None = None,
+        trust_level: str | None = None,
+        integrity_hash: str | None = None,
+        content_flags: list[str] | None = None,
+    ) -> Memory:
+        """
+        Apply a partial update to an already-loaded, project-scoped memory.
+
+        Only the fields supplied (non-None) are changed. When ``content`` changes,
+        the caller is responsible for passing a freshly recomputed ``embedding``,
+        ``integrity_hash`` (when enabled) and ``content_flags``; this method keeps
+        ``content_hash`` consistent with the new content. ``updated_at`` is bumped
+        automatically by the model's ``onupdate``.
+        """
+        try:
+            with track_latency(OperationNames.MEMORY_UPDATE):
+                if content is not None:
+                    mem.content = content
+                    mem.content_hash = content_hash(content)
+                if embedding is not None:
+                    mem.embedding = embedding
+                if metadata is not None:
+                    mem.metadata_json = metadata
+                if scope is not None:
+                    mem.scope = scope
+                if trust_level is not None:
+                    mem.trust_level = trust_level
+                if integrity_hash is not None:
+                    mem.integrity_hash = integrity_hash
+                if content_flags is not None:
+                    mem.content_flags = content_flags
+                await db.flush()
+            record_operation(OperationNames.MEMORY_UPDATE, "success")
+            return mem
+        except Exception:
+            record_operation(OperationNames.MEMORY_UPDATE, "error")
+            raise
+
+    @staticmethod
     async def cleanup_expired(db: AsyncSession, batch_size: int = 1000) -> int:
         """
         Delete expired memories.

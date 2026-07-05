@@ -83,7 +83,16 @@
       "pages": [
         "integrations/crewai",
         "integrations/langchain",
+        "integrations/langgraph",
         "integrations/mcp-clients"
+      ]
+    },
+    {
+      "group": "Deployment",
+      "pages": [
+        "deployment/migrations",
+        "deployment/production-checklist",
+        "deployment/backup-restore"
       ]
     },
     {

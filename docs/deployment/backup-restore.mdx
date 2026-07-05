@@ -1,0 +1,65 @@
+---
+title: 'Backup & Restore'
+description: 'Backing up and restoring Aegis Memory data'
+---
+
+# Backup & Restore
+
+Aegis Memory stores everything in PostgreSQL, so your database backup is your source of
+truth. Aegis also provides a logical export for portable, human-readable snapshots.
+
+<Note>
+The open-source distribution has **no managed or automated backup**. Backups are your
+responsibility — schedule them with your own tooling (cron, your cloud provider's
+managed backups, etc.).
+</Note>
+
+## Option 1 — Database backup (recommended)
+
+A full `pg_dump` captures memories, embeddings and all metadata exactly, and restores
+to a byte-identical state.
+
+```bash
+# Back up
+pg_dump "$DATABASE_URL" --format=custom --file=aegis_backup.dump
+
+# Restore into a fresh database
+pg_restore --dbname="$DATABASE_URL" --clean --if-exists aegis_backup.dump
+```
+
+After restoring to a new database, ensure the `pgvector` extension exists and run
+`alembic upgrade head` if the target is on a newer Aegis version (see
+[Migrations](/deployment/migrations)).
+
+## Option 2 — Logical export (portable snapshots)
+
+Use the export endpoint / CLI for a portable JSON or JSONL snapshot — useful for
+migrating between environments or archiving a namespace.
+
+```bash
+# CLI
+aegis export --namespace default --format jsonl > memories.jsonl
+aegis import memories.jsonl
+```
+
+```python
+# SDK
+client.export_json("memories.json")
+```
+
+The export endpoint is `POST /memories/export` (`format` = `jsonl` or `json`,
+optional `include_embeddings`). Re-embedding on import is automatic when embeddings are
+not included.
+
+<Warning>
+A logical export is not a substitute for a database backup for disaster recovery:
+depending on options it may omit embeddings (recomputed on import) and does not capture
+every server-side column. Use `pg_dump` for authoritative recovery and exports for
+portability.
+</Warning>
+
+## Verify your backups
+
+- [ ] Periodically restore a backup into a scratch database and start the API against it.
+- [ ] Confirm a sample query returns expected results.
+- [ ] Keep backups encrypted at rest and access-controlled.

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aegis-memory"
-version = "2.6.0"
+version = "2.6.1"
 description = "Secure context engineering layer for AI agents. Content security, integrity verification, trust hierarchy. Self-hosted, Apache 2.0."
 readme = "README.md"
 license = "Apache-2.0"
@@ -93,6 +93,9 @@ langchain = [
     "langchain>=0.3.0",
     "langchain-core>=0.3.0",
 ]
+langgraph = [
+    "langgraph>=0.2.0",
+]
 crewai = [
     "crewai>=0.86.0",
 ]
@@ -101,7 +104,7 @@ local = [
     "sentence-transformers>=3.0.0",
 ]
 all = [
-    "aegis-memory[server,dev,langchain,crewai,local]",
+    "aegis-memory[server,dev,langchain,langgraph,crewai,local]",
 ]
 
 [project.urls]
