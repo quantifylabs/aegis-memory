@@ -9,16 +9,17 @@
     .unt  { fill:#a84e33; font-size:9px; letter-spacing:.12em; }
     .ver  { fill:#555555; font-size:9px; letter-spacing:.12em; }
     .bad  { fill:#7c2b21; font-size:9px; letter-spacing:.08em; }
-    .flow { stroke-dasharray:640; stroke-dashoffset:0; }
-    .p1 { animation: draw 9s ease-out infinite; }
-    .p2 { animation: draw 9s ease-out .35s infinite; }
-    .p3 { animation: draw 9s ease-out 1.1s infinite; }
-    .stamp { opacity:1; animation: stamp 9s ease-out infinite; }
-    .s2 { animation-delay:.35s; } .s3 { animation-delay:.9s; } .s4 { animation-delay:1.3s; }
-    .scan { animation: scan 7s ease-in-out infinite; }
-    @keyframes draw  { 0%{stroke-dashoffset:640;} 26%{stroke-dashoffset:0;} 100%{stroke-dashoffset:0;} }
-    @keyframes stamp { 0%{opacity:0;} 10%{opacity:0;} 24%{opacity:1;} 100%{opacity:1;} }
-    @keyframes scan  { 0%{transform:translateY(0);opacity:0;} 15%{opacity:.5;} 50%{transform:translateY(150px);opacity:.5;} 85%{opacity:.5;} 100%{transform:translateY(0);opacity:0;} }
+    .rise { opacity:1; animation: rise 11s ease-out infinite backwards; }
+    .r1{animation-delay:.2s} .r2{animation-delay:.5s} .r3{animation-delay:2.1s} .r4{animation-delay:2.8s} .r5{animation-delay:2.2s}
+    .flow { fill:none; stroke-dasharray:520; stroke-dashoffset:0; }
+    .f1{animation:draw 11s ease-out 1.0s infinite backwards, appear 11s ease-out 1.0s infinite backwards}
+    .f2{animation:draw 11s ease-out 1.3s infinite backwards, appear 11s ease-out 1.3s infinite backwards}
+    .fclean{animation:draw 11s ease-out 1.9s infinite backwards, appear 11s ease-out 1.9s infinite backwards}
+    .fpois{animation:draw 11s ease-out 1.9s infinite backwards, appear 11s ease-out 1.9s infinite backwards}
+    .fread{animation:draw 11s ease-out 2.6s infinite backwards, appear 11s ease-out 2.6s infinite backwards}
+    @keyframes rise { 0%{opacity:0} 4%{opacity:1} 100%{opacity:1} }
+    @keyframes appear { 0%{opacity:0} 2%{opacity:1} 100%{opacity:1} }
+    @keyframes draw { 0%{stroke-dashoffset:520} 14%{stroke-dashoffset:0} 100%{stroke-dashoffset:0} }
     @media (prefers-reduced-motion: reduce) { * { animation:none !important; } }
   </style>
 
@@ -32,54 +33,51 @@
   <rect x="1" y="1" width="718" height="298" rx="8" fill="#faf9f7" stroke="#e5e2dc"/>
   <text x="28" y="34" class="kick">ASI06 · WRITE BOUNDARY</text>
 
-  <!-- boundary line + labels -->
+  <!-- boundary line + labels (static structure) -->
   <line x1="368" y1="56" x2="368" y2="244" stroke="#c45d3e" stroke-width="1.6"/>
   <text x="368" y="46" text-anchor="middle" class="kick">GUARD</text>
   <text x="300" y="74" text-anchor="middle" class="unt">UNTRUSTED</text>
   <text x="452" y="74" text-anchor="middle" class="ver">VERIFIED</text>
-  <!-- delta mark on the line -->
   <path d="M368 110 L379 130 L357 130 Z" fill="#faf9f7" stroke="#1a1a1a" stroke-width="1.5" stroke-linejoin="round"/>
-  <!-- scan tick sweeping the boundary -->
-  <line class="scan" x1="356" y1="64" x2="380" y2="64" stroke="#c45d3e" stroke-width="1.4" opacity="0"/>
 
   <!-- untrusted sources (left) -->
-  <g class="stamp">
+  <g class="rise r1">
     <rect x="34" y="84" width="168" height="48" rx="6" fill="none" stroke="#c45d3e" stroke-width="1.3"/>
     <text x="118" y="106" text-anchor="middle" class="lbl" fill="#c45d3e">External input</text>
     <text x="118" y="121" text-anchor="middle" class="unt">UNTRUSTED · ANY CHANNEL</text>
   </g>
-  <g class="stamp s2">
+  <g class="rise r2">
     <rect x="34" y="168" width="168" height="48" rx="6" fill="none" stroke="#c45d3e" stroke-width="1.3"/>
     <text x="118" y="190" text-anchor="middle" class="lbl" fill="#c45d3e">Other agents</text>
     <text x="118" y="205" text-anchor="middle" class="unt">UNTRUSTED · INTERNAL RELAY</text>
   </g>
 
   <!-- funnel: both sources converge on the one guard -->
-  <path class="flow p1" d="M202 108 C 280 108, 300 122, 352 124" fill="none" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
-  <path class="flow p2" d="M202 192 C 280 192, 305 132, 352 128" fill="none" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <path class="flow f1" d="M202 108 C 280 108, 300 122, 352 124" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <path class="flow f2" d="M202 192 C 280 192, 305 132, 352 128" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
 
   <!-- clean write crosses to shared memory -->
-  <path class="flow p3" d="M384 122 C 440 116, 470 104, 514 104" fill="none" stroke="#1a1a1a" stroke-width="1.4" marker-end="url(#ai)"/>
+  <path class="flow fclean" d="M384 122 C 440 116, 470 104, 514 104" stroke="#1a1a1a" stroke-width="1.4" marker-end="url(#ai)"/>
   <!-- poisoned write rejected at the line -->
-  <path class="flow p3" d="M362 134 C 340 170, 322 190, 314 206" fill="none" stroke="#c45d3e" stroke-width="1.6" marker-end="url(#ax)"/>
+  <path class="flow fpois" d="M362 134 C 340 170, 322 190, 314 206" stroke="#c45d3e" stroke-width="1.6" marker-end="url(#ax)"/>
 
   <!-- rejected node (untrusted side) -->
-  <g class="stamp s4">
+  <g class="rise r5">
     <rect x="204" y="210" width="176" height="44" rx="6" fill="none" stroke="#7c2b21" stroke-width="1.3"/>
     <text x="292" y="230" text-anchor="middle" class="lbl" fill="#7c2b21">poisoned write</text>
     <text x="292" y="245" text-anchor="middle" class="bad">REJECTED · NOT STORED</text>
   </g>
 
   <!-- verified side: shared memory + reader -->
-  <g class="stamp s3">
+  <g class="rise r3">
     <rect x="514" y="80" width="174" height="48" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
     <text x="601" y="101" text-anchor="middle" class="lbl">shared memory</text>
     <text x="601" y="116" text-anchor="middle" class="ver">CLEAN STATE ✓</text>
   </g>
-  <g class="stamp s4">
+  <g class="rise r4">
     <rect x="514" y="176" width="174" height="48" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
     <text x="601" y="197" text-anchor="middle" class="lbl">reader agent</text>
     <text x="601" y="213" text-anchor="middle" class="sub">prompt / decision</text>
   </g>
-  <path class="flow p3" d="M601 128 L601 172" fill="none" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <path class="flow fread" d="M601 128 L601 172" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
 </svg>
