@@ -1,0 +1,61 @@
+<svg viewBox="0 0 720 250" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ch-t ch-d">
+  <title id="ch-t">The Context Hub — four artifacts, one call</title>
+  <desc id="ch-d">Prompts, memory, skills, and subagents load through a single POST /context/load call, returning one integrity-verified, token-budgeted context bundle.</desc>
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "JetBrains Mono", monospace; }
+    .kick{fill:#c45d3e; letter-spacing:.14em; font-size:11px; font-weight:600}
+    .lbl{fill:#1a1a1a; font-size:13px} .sub{fill:#888888; font-size:10px; letter-spacing:.04em}
+    .ver{fill:#555555; font-size:10px; letter-spacing:.06em} .path{fill:#a84e33; font-size:10px}
+    .flow{stroke-dasharray:360; stroke-dashoffset:0}
+    .d1{animation:draw 9s ease-out .8s infinite} .d2{animation:draw 9s ease-out 1.0s infinite}
+    .d3{animation:draw 9s ease-out 1.2s infinite} .d4{animation:draw 9s ease-out 1.4s infinite}
+    .d5{animation:draw 9s ease-out 2.4s infinite}
+    .rise{opacity:1; animation:rise 9s ease-out infinite backwards}
+    .r1{animation-delay:.1s} .r2{animation-delay:.3s} .r3{animation-delay:.5s} .r4{animation-delay:.7s}
+    .rc{animation-delay:1.9s} .rb{animation-delay:2.9s}
+    @keyframes draw{0%{stroke-dashoffset:360}26%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
+    @keyframes rise{0%{opacity:0}6%{opacity:1}100%{opacity:1}}
+    @media (prefers-reduced-motion: reduce){*{animation:none !important}}
+  </style>
+  <defs>
+    <marker id="ai" markerWidth="8" markerHeight="8" refX="5.5" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#1a1a1a"/></marker>
+    <marker id="ar" markerWidth="8" markerHeight="8" refX="5.5" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#c45d3e"/></marker>
+  </defs>
+
+  <rect x="1" y="1" width="718" height="248" rx="8" fill="#faf9f7" stroke="#e5e2dc"/>
+  <text x="28" y="32" class="kick">CONTEXT HUB · FOUR ARTIFACTS · ONE CALL</text>
+
+  <!-- four artifact tiles -->
+  <g class="rise r1"><rect x="30" y="52" width="168" height="38" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
+    <text x="46" y="76" class="lbl">Prompts</text><text x="182" y="76" text-anchor="end" class="path">/prompts</text></g>
+  <g class="rise r2"><rect x="30" y="100" width="168" height="38" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
+    <text x="46" y="124" class="lbl">Memory</text><text x="182" y="124" text-anchor="end" class="path">/memories</text></g>
+  <g class="rise r3"><rect x="30" y="148" width="168" height="38" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
+    <text x="46" y="172" class="lbl">Skills</text><text x="182" y="172" text-anchor="end" class="path">/skills</text></g>
+  <g class="rise r4"><rect x="30" y="196" width="168" height="38" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
+    <text x="46" y="220" class="lbl">Subagents</text><text x="182" y="220" text-anchor="end" class="path">/subagents</text></g>
+
+  <!-- converging arrows into the call -->
+  <path class="flow d1" d="M198 71  C 250 71, 268 128, 322 132" fill="none" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <path class="flow d2" d="M198 119 C 250 119, 278 130, 322 133" fill="none" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <path class="flow d3" d="M198 167 C 250 167, 278 138, 322 135" fill="none" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <path class="flow d4" d="M198 215 C 250 215, 268 140, 322 137" fill="none" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+
+  <!-- the one call -->
+  <g class="rise rc">
+    <rect x="326" y="106" width="150" height="56" rx="6" fill="#faf9f7" stroke="#c45d3e" stroke-width="1.6"/>
+    <text x="401" y="130" text-anchor="middle" class="lbl" fill="#c45d3e">POST</text>
+    <text x="401" y="148" text-anchor="middle" class="sub">/context/load</text>
+  </g>
+
+  <!-- bundle out -->
+  <path class="flow d5" d="M476 134 L530 134" fill="none" stroke="#c45d3e" stroke-width="1.5" marker-end="url(#ar)"/>
+  <g class="rise rb">
+    <rect x="532" y="100" width="158" height="68" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
+    <text x="611" y="124" text-anchor="middle" class="lbl">context bundle</text>
+    <text x="611" y="141" text-anchor="middle" class="ver">integrity-verified ✓</text>
+    <text x="611" y="156" text-anchor="middle" class="sub">token-budgeted · 8000</text>
+  </g>
+
+  <text x="30" y="240" class="sub">Every artifact: HMAC-signed · content-scanned · trust-gated · audit-logged.</text>
+</svg>

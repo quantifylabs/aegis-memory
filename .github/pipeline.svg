@@ -1,0 +1,80 @@
+<svg viewBox="0 0 720 250" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="pl-t pl-d">
+  <title id="pl-t">The 4-stage content-security pipeline</title>
+  <desc id="pl-d">Every memory write runs four stages: input validation, sensitive-data scanning, regex injection detection, and an optional LLM classifier. A poisoned write is stopped at stage 3 and rejected; stage 4 is never reached.</desc>
+  <style>
+    text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "JetBrains Mono", monospace; }
+    .kick{fill:#c45d3e; letter-spacing:.14em; font-size:11px; font-weight:600}
+    .lbl{fill:#1a1a1a; font-size:13px} .sub{fill:#888888; font-size:10px; letter-spacing:.04em}
+    .dim{fill:#b9b4ac; font-size:13px} .dimsub{fill:#c3bdb4; font-size:10px; letter-spacing:.04em}
+    .ok{fill:#555555; font-size:10px; letter-spacing:.06em} .bad{fill:#7c2b21; font-size:9px; letter-spacing:.08em}
+    .spec{fill:#a84e33; font-size:11px}
+    .rise{opacity:1; animation:rise 10s ease-out infinite backwards}
+    .r1{animation-delay:.2s} .r2{animation-delay:.8s} .r3{animation-delay:1.4s} .r4{animation-delay:2.0s}
+    .rok1{animation-delay:1.2s} .rok2{animation-delay:1.8s} .rrej{animation-delay:3.0s}
+    .travel{animation:travel 10s ease-in-out infinite}
+    @keyframes rise{0%{opacity:0}5%{opacity:1}100%{opacity:1}}
+    @keyframes travel{0%{transform:translateX(0);opacity:0}6%{opacity:1}12%{transform:translateX(0)}
+      26%{transform:translateX(173px)}40%{transform:translateX(346px)}44%{opacity:1}
+      50%{transform:translateX(346px);opacity:1}58%{opacity:0}100%{transform:translateX(346px);opacity:0}}
+    @media (prefers-reduced-motion: reduce){*{animation:none !important}}
+  </style>
+  <defs>
+    <marker id="ai" markerWidth="8" markerHeight="8" refX="5.5" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#1a1a1a"/></marker>
+    <marker id="ax" markerWidth="8" markerHeight="8" refX="5.5" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#7c2b21"/></marker>
+  </defs>
+
+  <rect x="1" y="1" width="718" height="248" rx="8" fill="#faf9f7" stroke="#e5e2dc"/>
+  <text x="28" y="32" class="kick">CONTENT SECURITY · 4 STAGES · EVERY WRITE</text>
+
+  <!-- incoming specimen -->
+  <text x="30" y="60" class="spec">incoming write: "Ignore previous instructions…"  ·  UNTRUSTED</text>
+
+  <!-- connectors -->
+  <line x1="170" y1="118" x2="200" y2="118" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <line x1="343" y1="118" x2="373" y2="118" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <line x1="516" y1="118" x2="546" y2="118" stroke="#b9b4ac" stroke-width="1.3" stroke-dasharray="3 3"/>
+  <!-- blocked mark before stage 4 -->
+  <g class="rise rrej"><line x1="527" y1="112" x2="535" y2="124" stroke="#7c2b21" stroke-width="1.6"/><line x1="535" y1="112" x2="527" y2="124" stroke="#7c2b21" stroke-width="1.6"/></g>
+
+  <!-- stage 1 -->
+  <g class="rise r1">
+    <rect x="30" y="88" width="140" height="60" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
+    <text x="100" y="112" text-anchor="middle" class="lbl">1 · validate</text>
+    <text x="100" y="130" text-anchor="middle" class="sub">length · metadata</text>
+  </g>
+  <text x="100" y="170" text-anchor="middle" class="ok rise rok1">PASS ✓</text>
+
+  <!-- stage 2 -->
+  <g class="rise r2">
+    <rect x="203" y="88" width="140" height="60" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
+    <text x="273" y="112" text-anchor="middle" class="lbl">2 · sensitive data</text>
+    <text x="273" y="130" text-anchor="middle" class="sub">ssn · cards · api keys</text>
+  </g>
+  <text x="273" y="170" text-anchor="middle" class="ok rise rok2">PASS ✓</text>
+
+  <!-- stage 3 (rejects) -->
+  <g class="rise r3">
+    <rect x="376" y="88" width="140" height="60" rx="6" fill="#faf9f7" stroke="#c45d3e" stroke-width="1.6"/>
+    <text x="446" y="112" text-anchor="middle" class="lbl" fill="#c45d3e">3 · injection</text>
+    <text x="446" y="130" text-anchor="middle" class="sub">regex signatures</text>
+  </g>
+
+  <!-- stage 4 (not reached, dimmed) -->
+  <g class="rise r4">
+    <rect x="549" y="88" width="140" height="60" rx="6" fill="none" stroke="#e5e2dc" stroke-dasharray="4 4"/>
+    <text x="619" y="112" text-anchor="middle" class="dim">4 · LLM classifier</text>
+    <text x="619" y="130" text-anchor="middle" class="dimsub">optional · ~1s</text>
+  </g>
+  <text x="619" y="170" text-anchor="middle" class="sub rise r4">not reached</text>
+
+  <!-- reject verdict under stage 3 -->
+  <line x1="446" y1="148" x2="446" y2="182" stroke="#7c2b21" stroke-width="1.5" marker-end="url(#ax)"/>
+  <g class="rise rrej">
+    <rect x="392" y="186" width="108" height="30" rx="3" fill="#7c2b21"/>
+    <text x="446" y="205" text-anchor="middle" fill="#faf9f7" font-size="12" font-weight="600" letter-spacing=".08em">REJECT</text>
+    <text x="446" y="234" text-anchor="middle" class="bad">injection_override · 0.9</text>
+  </g>
+
+  <!-- travelling specimen dot -->
+  <circle class="travel" cx="100" cy="118" r="5" fill="#c45d3e" opacity="0"/>
+</svg>
