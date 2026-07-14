@@ -6,13 +6,6 @@
     .t{fill:#e6e6e6} .sec{fill:#b8b0a8} .mut{fill:#8a8078} .acc{fill:#d97a58}
     .crit{fill:#d1553f} .med{fill:#d97a58} .low{fill:#8a8078}
     .bar{fill:#8a8078; font-size:11px; letter-spacing:.04em}
-    .rise{opacity:1; animation:rise 12s ease-out infinite backwards}
-    .o1{animation-delay:.3s} .o2{animation-delay:1.2s} .o3{animation-delay:1.5s} .o4{animation-delay:1.9s}
-    .o5{animation-delay:2.2s} .o6{animation-delay:2.5s} .o7{animation-delay:2.8s}
-    .o8{animation-delay:3.2s} .o9{animation-delay:3.5s} .o10{animation-delay:3.9s}
-    .o11{animation-delay:4.2s} .o12{animation-delay:4.8s}
-    @keyframes rise { 0%{opacity:0} 3%{opacity:1} 100%{opacity:1} }
-    @media (prefers-reduced-motion: reduce){ *{animation:none !important} }
   </style>
 
   <!-- terminal plate -->
@@ -24,22 +17,22 @@
   <text x="736" y="24" class="bar" text-anchor="end">local · keyless · offline</text>
 
   <!-- command line -->
-  <text x="24" y="66" class="rise o1"><tspan class="acc">$</tspan><tspan class="t"> aegis inspect</tspan></text>
+  <text x="24" y="66"><tspan class="acc">$</tspan><tspan class="t"> aegis inspect</tspan></text>
 
   <!-- output -->
-  <text x="24" y="92"  class="rise o2 sec">Aegis Inspect — aegis-memory</text>
-  <text x="24" y="112" class="rise o3 mut">Wrote aegis-out/</text>
+  <text x="24" y="92"  class="sec">Aegis Inspect — aegis-memory</text>
+  <text x="24" y="112" class="mut">Wrote aegis-out/</text>
 
-  <text x="24" y="140" class="rise o4 sec">Top findings:</text>
-  <text x="36" y="160" class="rise o5"><tspan class="sec">AEG-001 </tspan><tspan class="crit">[critical/EXTRACTED]</tspan><tspan class="t"> untrusted input → memory</tspan></text>
-  <text x="36" y="178" class="rise o6"><tspan class="mut">via </tspan><tspan class="t">memory_ids.append</tspan></text>
-  <text x="36" y="196" class="rise o7 mut">benchmarks/query_workload.py:126</text>
+  <text x="24" y="140" class="sec">Top findings:</text>
+  <text x="36" y="160"><tspan class="sec">AEG-001 </tspan><tspan class="crit">[critical/EXTRACTED]</tspan><tspan class="t"> untrusted input → memory</tspan></text>
+  <text x="36" y="178"><tspan class="mut">via </tspan><tspan class="t">memory_ids.append</tspan></text>
+  <text x="36" y="196" class="mut">benchmarks/query_workload.py:126</text>
 
-  <text x="24" y="224" class="rise o8"><tspan class="sec">Memory Risk Score: </tspan><tspan class="acc">100/100</tspan><tspan class="mut"> (heuristic)</tspan></text>
-  <text x="24" y="244" class="rise o9"><tspan class="crit">Critical 16</tspan><tspan class="mut"> · High 0 · </tspan><tspan class="med">Medium 17</tspan><tspan class="mut"> · </tspan><tspan class="low">Low 34</tspan></text>
+  <text x="24" y="224"><tspan class="sec">Memory Risk Score: </tspan><tspan class="acc">100/100</tspan><tspan class="mut"> (heuristic)</tspan></text>
+  <text x="24" y="244"><tspan class="crit">Critical 16</tspan><tspan class="mut"> · High 0 · </tspan><tspan class="med">Medium 17</tspan><tspan class="mut"> · </tspan><tspan class="low">Low 34</tspan></text>
 
-  <text x="24" y="272" class="rise o10 mut">Report: aegis-out/INSPECTION_REPORT.md</text>
-  <text x="24" y="290" class="rise o11 mut">SARIF:  aegis-out/findings.sarif</text>
+  <text x="24" y="272" class="mut">Report: aegis-out/INSPECTION_REPORT.md</text>
+  <text x="24" y="290" class="mut">SARIF:  aegis-out/findings.sarif</text>
 
-  <text x="24" y="320" class="rise o12"><tspan class="acc">→ aegis_memory.guard</tspan><tspan class="sec"> gates every one of them.</tspan></text>
+  <text x="24" y="320"><tspan class="acc">→ aegis_memory.guard</tspan><tspan class="sec"> gates every one of them.</tspan></text>
 </svg>
