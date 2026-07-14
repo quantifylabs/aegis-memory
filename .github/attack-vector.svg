@@ -7,16 +7,6 @@
     .lbl{fill:#1a1a1a; font-size:13px} .sub{fill:#888888; font-size:10px; letter-spacing:.06em}
     .unt{fill:#a84e33; font-size:9px; letter-spacing:.12em} .bad{fill:#7c2b21; font-size:9px; letter-spacing:.08em}
     .spec{fill:#555555; font-size:11px}
-    .flow{fill:none; stroke-dasharray:520; stroke-dashoffset:0}
-    .d1{animation:draw 11s ease-out .9s infinite backwards, appear 11s ease-out .9s infinite backwards}
-    .d2{animation:draw 11s ease-out 1.9s infinite backwards, appear 11s ease-out 1.9s infinite backwards}
-    .d3{animation:draw 11s ease-out 2.7s infinite backwards, appear 11s ease-out 2.7s infinite backwards}
-    .rise{opacity:1; animation:rise 11s ease-out infinite backwards}
-    .r1{animation-delay:.3s} .r2{animation-delay:1.3s} .r3{animation-delay:2.3s} .r4{animation-delay:3.0s} .r5{animation-delay:.6s}
-    @keyframes draw{0%{stroke-dashoffset:520}18%{stroke-dashoffset:0}100%{stroke-dashoffset:0}}
-    @keyframes appear{0%{opacity:0}2%{opacity:1}100%{opacity:1}}
-    @keyframes rise{0%{opacity:0}4%{opacity:1}100%{opacity:1}}
-    @media (prefers-reduced-motion: reduce){*{animation:none !important}}
   </style>
   <defs>
     <marker id="ar" markerWidth="8" markerHeight="8" refX="5.5" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#c45d3e"/></marker>
@@ -28,7 +18,7 @@
   <text x="28" y="32" class="kick">ASI06 · MEMORY IS THE VECTOR</text>
 
   <!-- specimen callout from Agent A -->
-  <g class="rise r5">
+  <g>
     <path d="M104 104 L104 72 L250 72" fill="none" stroke="#888888" stroke-width="1"/>
     <circle cx="250" cy="72" r="3" fill="#c45d3e"/>
     <text x="262" y="68" class="spec">"Ignore previous instructions…"</text>
@@ -36,33 +26,33 @@
   </g>
 
   <!-- Agent A (untrusted writer) -->
-  <g class="rise r1">
+  <g>
     <rect x="34" y="104" width="150" height="54" rx="6" fill="none" stroke="#c45d3e" stroke-width="1.3"/>
     <text x="109" y="128" text-anchor="middle" class="lbl" fill="#c45d3e">Agent A</text>
     <text x="109" y="145" text-anchor="middle" class="unt">WRITES OUTPUT · UNTRUSTED</text>
   </g>
   <!-- poisoned write -->
-  <path class="flow d1" d="M184 131 L282 131" stroke="#c45d3e" stroke-width="1.6" marker-end="url(#ar)"/>
+  <path d="M184 131 L282 131" fill="none" stroke="#c45d3e" stroke-width="1.6" marker-end="url(#ar)"/>
 
   <!-- shared memory (the vector) -->
-  <g class="rise r2">
+  <g>
     <rect x="285" y="104" width="150" height="54" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
     <text x="360" y="128" text-anchor="middle" class="lbl">shared memory</text>
     <text x="360" y="145" text-anchor="middle" class="sub">SINK · PERSISTS</text>
   </g>
   <!-- read back -->
-  <path class="flow d2" d="M435 131 L534 131" stroke="#1a1a1a" stroke-width="1.4" marker-end="url(#ai)"/>
+  <path d="M435 131 L534 131" fill="none" stroke="#1a1a1a" stroke-width="1.4" marker-end="url(#ai)"/>
 
   <!-- Agent B (reader) -->
-  <g class="rise r3">
+  <g>
     <rect x="536" y="104" width="150" height="54" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
     <text x="611" y="128" text-anchor="middle" class="lbl">Agent B</text>
     <text x="611" y="145" text-anchor="middle" class="sub">READS AS INSTRUCTION</text>
   </g>
 
   <!-- consequential action -->
-  <path class="flow d3" d="M611 158 L611 190" stroke="#7c2b21" stroke-width="1.5" marker-end="url(#ax)"/>
-  <g class="rise r4">
+  <path d="M611 158 L611 190" fill="none" stroke="#7c2b21" stroke-width="1.5" marker-end="url(#ax)"/>
+  <g>
     <rect x="536" y="192" width="150" height="42" rx="6" fill="none" stroke="#7c2b21" stroke-width="1.3"/>
     <text x="611" y="212" text-anchor="middle" class="lbl" fill="#7c2b21">auto_refund($999)</text>
     <text x="611" y="226" text-anchor="middle" class="bad">CONSEQUENTIAL ACTION</text>

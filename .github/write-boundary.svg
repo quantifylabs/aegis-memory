@@ -9,22 +9,9 @@
     .unt  { fill:#a84e33; font-size:9px; letter-spacing:.12em; }
     .ver  { fill:#555555; font-size:9px; letter-spacing:.12em; }
     .bad  { fill:#7c2b21; font-size:9px; letter-spacing:.08em; }
-    .rise { opacity:1; animation: rise 11s ease-out infinite backwards; }
-    .r1{animation-delay:.2s} .r2{animation-delay:.5s} .r3{animation-delay:2.1s} .r4{animation-delay:2.8s} .r5{animation-delay:2.2s}
-    .flow { fill:none; stroke-dasharray:520; stroke-dashoffset:0; }
-    .f1{animation:draw 11s ease-out 1.0s infinite backwards, appear 11s ease-out 1.0s infinite backwards}
-    .f2{animation:draw 11s ease-out 1.3s infinite backwards, appear 11s ease-out 1.3s infinite backwards}
-    .fclean{animation:draw 11s ease-out 1.9s infinite backwards, appear 11s ease-out 1.9s infinite backwards}
-    .fpois{animation:draw 11s ease-out 1.9s infinite backwards, appear 11s ease-out 1.9s infinite backwards}
-    .fread{animation:draw 11s ease-out 2.6s infinite backwards, appear 11s ease-out 2.6s infinite backwards}
-    @keyframes rise { 0%{opacity:0} 4%{opacity:1} 100%{opacity:1} }
-    @keyframes appear { 0%{opacity:0} 2%{opacity:1} 100%{opacity:1} }
-    @keyframes draw { 0%{stroke-dashoffset:520} 14%{stroke-dashoffset:0} 100%{stroke-dashoffset:0} }
-    @media (prefers-reduced-motion: reduce) { * { animation:none !important; } }
   </style>
 
   <defs>
-    <marker id="ar" markerWidth="8" markerHeight="8" refX="5.5" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#c45d3e"/></marker>
     <marker id="ai" markerWidth="8" markerHeight="8" refX="5.5" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#1a1a1a"/></marker>
     <marker id="ax" markerWidth="8" markerHeight="8" refX="5.5" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#7c2b21"/></marker>
   </defs>
@@ -33,51 +20,51 @@
   <rect x="1" y="1" width="718" height="298" rx="8" fill="#faf9f7" stroke="#e5e2dc"/>
   <text x="28" y="34" class="kick">ASI06 · WRITE BOUNDARY</text>
 
-  <!-- boundary line + labels (static structure) -->
-  <line x1="368" y1="56" x2="368" y2="244" stroke="#c45d3e" stroke-width="1.6"/>
+  <!-- boundary line + labels -->
+  <line x1="368" y1="56" x2="368" y2="196" stroke="#c45d3e" stroke-width="1.6"/>
   <text x="368" y="46" text-anchor="middle" class="kick">GUARD</text>
   <text x="300" y="74" text-anchor="middle" class="unt">UNTRUSTED</text>
   <text x="452" y="74" text-anchor="middle" class="ver">VERIFIED</text>
   <path d="M368 110 L379 130 L357 130 Z" fill="#faf9f7" stroke="#1a1a1a" stroke-width="1.5" stroke-linejoin="round"/>
 
   <!-- untrusted sources (left) -->
-  <g class="rise r1">
+  <g>
     <rect x="34" y="84" width="168" height="48" rx="6" fill="none" stroke="#c45d3e" stroke-width="1.3"/>
     <text x="118" y="106" text-anchor="middle" class="lbl" fill="#c45d3e">External input</text>
     <text x="118" y="121" text-anchor="middle" class="unt">UNTRUSTED · ANY CHANNEL</text>
   </g>
-  <g class="rise r2">
+  <g>
     <rect x="34" y="168" width="168" height="48" rx="6" fill="none" stroke="#c45d3e" stroke-width="1.3"/>
     <text x="118" y="190" text-anchor="middle" class="lbl" fill="#c45d3e">Other agents</text>
     <text x="118" y="205" text-anchor="middle" class="unt">UNTRUSTED · INTERNAL RELAY</text>
   </g>
 
   <!-- funnel: both sources converge on the one guard -->
-  <path class="flow f1" d="M202 108 C 280 108, 300 122, 352 124" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
-  <path class="flow f2" d="M202 192 C 280 192, 305 132, 352 128" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <path d="M202 108 C 280 108, 300 122, 352 124" fill="none" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <path d="M202 192 C 280 192, 305 132, 352 128" fill="none" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
 
   <!-- clean write crosses to shared memory -->
-  <path class="flow fclean" d="M384 122 C 440 116, 470 104, 514 104" stroke="#1a1a1a" stroke-width="1.4" marker-end="url(#ai)"/>
+  <path d="M384 122 C 440 116, 470 104, 514 104" fill="none" stroke="#1a1a1a" stroke-width="1.4" marker-end="url(#ai)"/>
   <!-- poisoned write rejected at the line -->
-  <path class="flow fpois" d="M362 134 C 340 170, 322 190, 314 206" stroke="#c45d3e" stroke-width="1.6" marker-end="url(#ax)"/>
+  <path d="M362 134 C 344 166, 320 190, 296 206" fill="none" stroke="#c45d3e" stroke-width="1.6" marker-end="url(#ax)"/>
 
   <!-- rejected node (untrusted side) -->
-  <g class="rise r5">
-    <rect x="204" y="210" width="176" height="44" rx="6" fill="none" stroke="#7c2b21" stroke-width="1.3"/>
-    <text x="292" y="230" text-anchor="middle" class="lbl" fill="#7c2b21">poisoned write</text>
-    <text x="292" y="245" text-anchor="middle" class="bad">REJECTED · NOT STORED</text>
+  <g>
+    <rect x="188" y="210" width="172" height="44" rx="6" fill="none" stroke="#7c2b21" stroke-width="1.3"/>
+    <text x="274" y="230" text-anchor="middle" class="lbl" fill="#7c2b21">poisoned write</text>
+    <text x="274" y="245" text-anchor="middle" class="bad">REJECTED · NOT STORED</text>
   </g>
 
   <!-- verified side: shared memory + reader -->
-  <g class="rise r3">
+  <g>
     <rect x="514" y="80" width="174" height="48" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
     <text x="601" y="101" text-anchor="middle" class="lbl">shared memory</text>
     <text x="601" y="116" text-anchor="middle" class="ver">CLEAN STATE ✓</text>
   </g>
-  <g class="rise r4">
+  <g>
     <rect x="514" y="176" width="174" height="48" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
     <text x="601" y="197" text-anchor="middle" class="lbl">reader agent</text>
     <text x="601" y="213" text-anchor="middle" class="sub">prompt / decision</text>
   </g>
-  <path class="flow fread" d="M601 128 L601 172" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <path d="M601 128 L601 172" fill="none" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
 </svg>
