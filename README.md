@@ -1,6 +1,4 @@
-<h1 align="center">Aegis Memory</h1>
-
-<!-- TODO: replace the title above with the professional logo/banner once ready (was .github/banner.svg) -->
+<h1 align="center"><img src=".github/banner.svg" alt="Aegis Memory — secure memory and context for AI agents" width="460"></h1>
 
 <p align="center">
   <strong>Secure memory &amp; context for AI agents.</strong><br/>
@@ -29,6 +27,10 @@
   <a href="https://www.aegismemory.com/blog/">Blog</a> •
   <a href="https://docs.aegismemory.com/quickstart/installation">Quickstart</a> •
   <a href="https://docs.aegismemory.com/guides/security">Security Guide</a>
+</p>
+
+<p align="center">
+  <img src=".github/hero-inspect.svg" alt="Running `aegis inspect`: it scans your agent for unsafe memory writes, prints findings and a heuristic risk score, and points each finding at the aegis_memory.guard fix." width="760">
 </p>
 
 ---
@@ -103,6 +105,10 @@ Agents are getting compromised. Not theoretically — right now.
 
 > **Agent A's output is Agent B's instruction. Memory is the vector.**
 
+<p align="center">
+  <img src=".github/attack-vector.svg" alt="Agent A writes untrusted output into shared memory; Agent B reads it back as an instruction and acts on it — one poisoned write becomes another agent's command." width="720">
+</p>
+
 Every other memory layer trusts content by default. That is the vulnerability. Aegis screens it.
 
 ## Quickstart (2 minutes)
@@ -155,7 +161,7 @@ print(memories[0].content)
 ## Guard every write
 
 <p align="center">
-  <img src=".github/mas_write_boundary_chokepoint.svg" alt="Every source and every agent writes through one Aegis guard before reaching shared memory; clean writes persist, poisoned writes are rejected and never stored." width="700"/>
+  <img src=".github/write-boundary.svg" alt="Every source and every agent writes through one Aegis guard before reaching shared memory; clean writes persist, poisoned writes are rejected and never stored." width="720"/>
 </p>
 
 <p align="center">
@@ -235,6 +241,10 @@ recommendations natively. Six capabilities, none optional:
 5. **[ACE loop](https://docs.aegismemory.com/guides/ace-patterns)** — generation, reflection, curation. Agents that learn from their own mistakes and promote what works.
 6. **[Multi-agent coordination](https://docs.aegismemory.com/quickstart/installation)** — scoped access control, cross-agent query, structured handoffs. Memory sharing with boundaries.
 
+<p align="center">
+  <img src=".github/pipeline.svg" alt="The 4-stage content-security pipeline runs on every write: input validation, sensitive-data scan, regex injection detection, and an optional LLM classifier. A poisoned write is stopped at stage 3 and rejected before stage 4 runs." width="720">
+</p>
+
 <details>
 <summary><strong>How a write actually flows through the pipeline (diagram)</strong></summary>
 
@@ -259,6 +269,10 @@ flowchart TD
 
 *(v2.3.0+)* Aegis is the only OSS context hub. Four artifacts, one secure surface, one API call to
 load them all:
+
+<p align="center">
+  <img src=".github/context-hub.svg" alt="Prompts, memory, skills, and subagents load through a single POST /context/load call, returning one integrity-verified, token-budgeted context bundle." width="720">
+</p>
 
 | Artifact | What it is | Endpoint |
 |---|---|---|
@@ -344,6 +358,13 @@ Stanford/SambaNova's research, engineered for production. Your agent made the sa
 The ACE loop remembers the fix. Stale memories polluting retrieval? Curation auto-cleans your
 playbook.
 
+<p align="center">
+  <img src=".github/ace-loop.svg" alt="The ACE loop: get_playbook (generation) → complete_run auto-votes helpful on success or auto-reflects on failure (reflection) → curate promotes, flags, and consolidates (curation). The curated playbook feeds the next run." width="720">
+</p>
+
+<details>
+<summary><strong>The same loop as a flowchart</strong></summary>
+
 ```mermaid
 flowchart TD
     A[Start run] --> B[Query playbook / memories]
@@ -358,6 +379,8 @@ flowchart TD
     I --> J[Curate: promote, flag, suggest consolidation]
     J --> K[Future playbook retrieval]
 ```
+
+</details>
 
 <details>
 <summary><strong>Full ACE loop in code</strong></summary>
