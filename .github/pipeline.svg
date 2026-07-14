@@ -8,14 +8,11 @@
     .dim{fill:#b9b4ac; font-size:13px} .dimsub{fill:#c3bdb4; font-size:10px; letter-spacing:.04em}
     .ok{fill:#555555; font-size:10px; letter-spacing:.06em} .bad{fill:#7c2b21; font-size:9px; letter-spacing:.08em}
     .spec{fill:#a84e33; font-size:11px}
-    .rise{opacity:1; animation:rise 10s ease-out infinite backwards}
-    .r1{animation-delay:.2s} .r2{animation-delay:.8s} .r3{animation-delay:1.4s} .r4{animation-delay:2.0s}
-    .rok1{animation-delay:1.2s} .rok2{animation-delay:1.8s} .rrej{animation-delay:3.0s}
-    .travel{animation:travel 10s ease-in-out infinite}
-    @keyframes rise{0%{opacity:0}5%{opacity:1}100%{opacity:1}}
-    @keyframes travel{0%{transform:translateX(0);opacity:0}6%{opacity:1}12%{transform:translateX(0)}
-      26%{transform:translateX(173px)}40%{transform:translateX(346px)}44%{opacity:1}
-      50%{transform:translateX(346px);opacity:1}58%{opacity:0}100%{transform:translateX(346px);opacity:0}}
+    .rise{opacity:1; animation:rise 11s ease-out infinite backwards}
+    .r0{animation-delay:.1s} .r1{animation-delay:.4s} .r2{animation-delay:1.1s} .r3{animation-delay:1.8s} .r4{animation-delay:2.5s}
+    .rok1{animation-delay:.8s} .rok2{animation-delay:1.5s} .rrej{animation-delay:2.8s}
+    .lk1{animation-delay:1.1s} .lk2{animation-delay:1.8s} .lk3{animation-delay:2.5s}
+    @keyframes rise{0%{opacity:0}4%{opacity:1}100%{opacity:1}}
     @media (prefers-reduced-motion: reduce){*{animation:none !important}}
   </style>
   <defs>
@@ -27,12 +24,12 @@
   <text x="28" y="32" class="kick">CONTENT SECURITY · 4 STAGES · EVERY WRITE</text>
 
   <!-- incoming specimen -->
-  <text x="30" y="60" class="spec">incoming write: "Ignore previous instructions…"  ·  UNTRUSTED</text>
+  <text x="30" y="60" class="spec rise r0">incoming write: "Ignore previous instructions…"  ·  UNTRUSTED</text>
 
   <!-- connectors -->
-  <line x1="170" y1="118" x2="200" y2="118" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
-  <line x1="343" y1="118" x2="373" y2="118" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
-  <line x1="516" y1="118" x2="546" y2="118" stroke="#b9b4ac" stroke-width="1.3" stroke-dasharray="3 3"/>
+  <line class="rise lk1" x1="170" y1="118" x2="200" y2="118" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <line class="rise lk2" x1="343" y1="118" x2="373" y2="118" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <line class="rise lk3" x1="516" y1="118" x2="546" y2="118" stroke="#b9b4ac" stroke-width="1.3" stroke-dasharray="3 3"/>
   <!-- blocked mark before stage 4 -->
   <g class="rise rrej"><line x1="527" y1="112" x2="535" y2="124" stroke="#7c2b21" stroke-width="1.6"/><line x1="535" y1="112" x2="527" y2="124" stroke="#7c2b21" stroke-width="1.6"/></g>
 
@@ -68,13 +65,10 @@
   <text x="619" y="170" text-anchor="middle" class="sub rise r4">not reached</text>
 
   <!-- reject verdict under stage 3 -->
-  <line x1="446" y1="148" x2="446" y2="182" stroke="#7c2b21" stroke-width="1.5" marker-end="url(#ax)"/>
   <g class="rise rrej">
+    <line x1="446" y1="148" x2="446" y2="182" stroke="#7c2b21" stroke-width="1.5" marker-end="url(#ax)"/>
     <rect x="392" y="186" width="108" height="30" rx="3" fill="#7c2b21"/>
     <text x="446" y="205" text-anchor="middle" fill="#faf9f7" font-size="12" font-weight="600" letter-spacing=".08em">REJECT</text>
     <text x="446" y="234" text-anchor="middle" class="bad">injection_override · 0.9</text>
   </g>
-
-  <!-- travelling specimen dot -->
-  <circle class="travel" cx="100" cy="118" r="5" fill="#c45d3e" opacity="0"/>
 </svg>
