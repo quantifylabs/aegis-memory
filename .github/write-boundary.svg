@@ -1,14 +1,13 @@
-<svg viewBox="0 0 720 340" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="wb-t wb-d">
+<svg viewBox="0 0 720 250" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="wb-t wb-d">
   <title id="wb-t">The Aegis write boundary</title>
-  <desc id="wb-d">Two untrusted sources funnel into one flow that crosses the write boundary at the guard delta and lands in shared memory; a poisoned write is deflected at the line — rejected, never stored — and a reader agent consumes only clean state.</desc>
+  <desc id="wb-d">External input and other agents write through one guard. Clean writes continue into shared memory and on to the reader agent; a poisoned write drops to REJECT and is never stored.</desc>
   <style>
     text { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "JetBrains Mono", monospace; }
-    .kick { fill:#c45d3e; letter-spacing:.14em; font-size:11px; font-weight:600; }
-    .lbl  { fill:#1a1a1a; font-size:13px; }
-    .sub  { fill:#888888; font-size:10px; letter-spacing:.06em; }
-    .unt  { fill:#a84e33; font-size:9px; letter-spacing:.12em; }
-    .ver  { fill:#555555; font-size:9px; letter-spacing:.12em; }
-    .bad  { fill:#7c2b21; font-size:9px; letter-spacing:.08em; }
+    .kick{fill:#c45d3e; letter-spacing:.14em; font-size:11px; font-weight:600}
+    .lbl{fill:#1a1a1a; font-size:13px} .sub{fill:#888888; font-size:10px; letter-spacing:.04em}
+    .unt{fill:#a84e33; font-size:9px; letter-spacing:.1em}
+    .ver{fill:#555555; font-size:10px; letter-spacing:.06em}
+    .bad{fill:#7c2b21; font-size:9px; letter-spacing:.08em}
   </style>
 
   <defs>
@@ -16,56 +15,52 @@
     <marker id="ax" markerWidth="8" markerHeight="8" refX="5.5" refY="3.5" orient="auto"><path d="M0 0 L7 3.5 L0 7 Z" fill="#7c2b21"/></marker>
   </defs>
 
-  <!-- plate -->
-  <rect x="1" y="1" width="718" height="338" rx="8" fill="#faf9f7" stroke="#e5e2dc"/>
-  <text x="28" y="34" class="kick">ASI06 · WRITE BOUNDARY</text>
+  <rect x="1" y="1" width="718" height="248" rx="8" fill="#faf9f7" stroke="#e5e2dc"/>
+  <text x="28" y="32" class="kick">ASI06 · WRITE BOUNDARY · EVERY SOURCE, ONE GUARD</text>
 
-  <!-- untrusted sources (above the line) -->
+  <!-- untrusted sources (stacked, left column) -->
   <g>
-    <rect x="54" y="60" width="190" height="48" rx="6" fill="none" stroke="#c45d3e" stroke-width="1.3"/>
-    <text x="149" y="82" text-anchor="middle" class="lbl" fill="#c45d3e">External input</text>
-    <text x="149" y="97" text-anchor="middle" class="unt">UNTRUSTED · ANY CHANNEL</text>
+    <rect x="30" y="64" width="140" height="50" rx="6" fill="none" stroke="#c45d3e" stroke-width="1.3"/>
+    <text x="100" y="86" text-anchor="middle" class="lbl" fill="#c45d3e">External input</text>
+    <text x="100" y="102" text-anchor="middle" class="unt">UNTRUSTED · WEB/TOOL</text>
   </g>
   <g>
-    <rect x="476" y="60" width="190" height="48" rx="6" fill="none" stroke="#c45d3e" stroke-width="1.3"/>
-    <text x="571" y="82" text-anchor="middle" class="lbl" fill="#c45d3e">Other agents</text>
-    <text x="571" y="97" text-anchor="middle" class="unt">UNTRUSTED · INTERNAL RELAY</text>
+    <rect x="30" y="140" width="140" height="50" rx="6" fill="none" stroke="#c45d3e" stroke-width="1.3"/>
+    <text x="100" y="162" text-anchor="middle" class="lbl" fill="#c45d3e">Other agents</text>
+    <text x="100" y="178" text-anchor="middle" class="unt">UNTRUSTED · RELAY</text>
   </g>
 
-  <!-- both sources merge into one stem; the shared vertical run overlaps exactly, so one flow -->
-  <path d="M149 108 C 149 150, 360 130, 360 170 L360 242" fill="none" stroke="#1a1a1a" stroke-width="1.4" marker-end="url(#ai)"/>
-  <path d="M571 108 C 571 150, 360 130, 360 170 L360 242" fill="none" stroke="#1a1a1a" stroke-width="1.4"/>
+  <!-- into the guard -->
+  <line x1="170" y1="89" x2="199" y2="109" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
+  <line x1="170" y1="165" x2="199" y2="127" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
 
-  <!-- the delta gate: flat ink linework, drawn before the line so the boundary stays continuous -->
-  <path d="M360 198 L373 222 L347 222 Z" fill="#faf9f7" stroke="#1a1a1a" stroke-width="1.5" stroke-linejoin="round"/>
-
-  <!-- the boundary: one continuous hairline across the plate — terracotta lives here only -->
-  <line x1="34" y1="212" x2="686" y2="212" stroke="#c45d3e" stroke-width="1.6"/>
-  <text x="34" y="232" class="kick">GUARD</text>
-  <text x="686" y="202" text-anchor="end" class="unt">UNTRUSTED</text>
-  <text x="686" y="232" text-anchor="end" class="ver">VERIFIED</text>
-
-  <!-- poisoned write: deflected at the line, never crosses — oxblood verdict -->
-  <path d="M354 206 C 318 202, 284 196, 248 184" fill="none" stroke="#7c2b21" stroke-width="1.5" marker-end="url(#ax)"/>
-  <g><line x1="296" y1="195" x2="304" y2="203" stroke="#7c2b21" stroke-width="1.6"/><line x1="304" y1="195" x2="296" y2="203" stroke="#7c2b21" stroke-width="1.6"/></g>
+  <!-- the guard (the boundary itself): delta mark in lockup, left of the label -->
   <g>
-    <rect x="54" y="156" width="190" height="48" rx="6" fill="none" stroke="#7c2b21" stroke-width="1.3"/>
-    <text x="149" y="178" text-anchor="middle" class="lbl" fill="#7c2b21">poisoned write</text>
-    <text x="149" y="193" text-anchor="middle" class="bad">REJECTED · NOT STORED</text>
+    <rect x="203" y="88" width="140" height="60" rx="6" fill="#faf9f7" stroke="#c45d3e" stroke-width="1.6"/>
+    <path d="M221 101 L227 112 L215 112 Z" fill="none" stroke="#1a1a1a" stroke-width="1.4" stroke-linejoin="round"/>
+    <text x="235" y="112" class="lbl" fill="#c45d3e">guard.write()</text>
+    <text x="273" y="130" text-anchor="middle" class="sub">screens every write</text>
   </g>
 
-  <!-- verified side (below the line) -->
+  <!-- clean write continues -->
+  <line x1="343" y1="118" x2="373" y2="118" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
   <g>
-    <rect x="265" y="246" width="190" height="48" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
-    <text x="360" y="268" text-anchor="middle" class="lbl">shared memory</text>
-    <text x="360" y="283" text-anchor="middle" class="ver">CLEAN STATE ✓</text>
+    <rect x="376" y="88" width="140" height="60" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
+    <text x="446" y="112" text-anchor="middle" class="lbl">shared memory</text>
+    <text x="446" y="130" text-anchor="middle" class="ver">CLEAN STATE ✓</text>
   </g>
+  <line x1="516" y1="118" x2="546" y2="118" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
   <g>
-    <rect x="496" y="246" width="190" height="48" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
-    <text x="591" y="268" text-anchor="middle" class="lbl">reader agent</text>
-    <text x="591" y="283" text-anchor="middle" class="sub">prompt / decision</text>
+    <rect x="549" y="88" width="140" height="60" rx="6" fill="#f3f1ed" stroke="#e5e2dc"/>
+    <text x="619" y="112" text-anchor="middle" class="lbl">reader agent</text>
+    <text x="619" y="130" text-anchor="middle" class="sub">prompt / decision</text>
   </g>
-  <path d="M455 270 C 468 266, 482 266, 494 270" fill="none" stroke="#1a1a1a" stroke-width="1.3" marker-end="url(#ai)"/>
 
-  <text x="34" y="322" class="sub">clean writes cross at the delta · poisoned writes never do — aegis_memory.guard, offline, deterministic</text>
+  <!-- poisoned write drops to reject, never stored -->
+  <line x1="273" y1="148" x2="273" y2="180" stroke="#7c2b21" stroke-width="1.5" marker-end="url(#ax)"/>
+  <g>
+    <rect x="219" y="184" width="108" height="30" rx="3" fill="#7c2b21"/>
+    <text x="273" y="203" text-anchor="middle" fill="#faf9f7" font-size="12" font-weight="600" letter-spacing=".08em">REJECT</text>
+    <text x="273" y="232" text-anchor="middle" class="bad">poisoned write · never stored</text>
+  </g>
 </svg>
