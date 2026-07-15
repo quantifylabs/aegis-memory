@@ -1,4 +1,4 @@
-<h1 align="center"><img src=".github/banner.svg" alt="Aegis Memory — secure memory and context for AI agents" width="460"></h1>
+<h1 align="center"><a href="https://www.aegismemory.com/"><img src=".github/banner.svg" alt="Aegis Memory — secure memory and context for AI agents" width="440"></a></h1>
 
 <p align="center">
   <strong>Secure memory &amp; context for AI agents.</strong><br/>

@@ -6,19 +6,6 @@
     .t{fill:#e6e6e6} .sec{fill:#b8b0a8} .mut{fill:#8a8078} .acc{fill:#d97a58}
     .crit{fill:#d1553f} .med{fill:#d97a58} .low{fill:#8a8078}
     .bar{fill:#8a8078; font-size:11px; letter-spacing:.04em}
-    .rise{opacity:1; animation:rise 12s ease-out infinite backwards}
-    .o2{animation-delay:1.4s} .o3{animation-delay:1.7s} .o4{animation-delay:2.1s}
-    .o5{animation-delay:2.4s} .o6{animation-delay:2.7s} .o7{animation-delay:3.0s}
-    .o8{animation-delay:3.4s} .o9{animation-delay:3.7s} .o10{animation-delay:4.1s}
-    .o11{animation-delay:4.4s} .o12{animation-delay:5.0s}
-    .tw{transform:scaleX(1); transform-box:fill-box; transform-origin:left center; animation:type 12s ease-out infinite}
-    .curs{animation:blink 1s step-end infinite}
-    .scan{animation:scanline 12s ease-in-out infinite}
-    @keyframes rise { 0%{opacity:0} 4%{opacity:1} 100%{opacity:1} }
-    @keyframes type { 0%{transform:scaleX(0)} 6%{transform:scaleX(0)} 15%{transform:scaleX(1)} 100%{transform:scaleX(1)} }
-    @keyframes blink { 0%,50%{opacity:1} 51%,100%{opacity:0} }
-    @keyframes scanline { 0%{transform:translateY(0);opacity:0} 14%{opacity:.5} 44%{transform:translateY(232px);opacity:.5} 52%{opacity:0} 100%{transform:translateY(232px);opacity:0} }
-    @media (prefers-reduced-motion: reduce){ *{animation:none !important} .tw{transform:scaleX(1)} }
   </style>
 
   <!-- terminal plate -->
@@ -29,30 +16,23 @@
   <text x="40" y="24" class="bar">aegis inspect</text>
   <text x="736" y="24" class="bar" text-anchor="end">local · keyless · offline</text>
 
-  <!-- scan sweep over the body -->
-  <rect class="scan" x="12" y="60" width="736" height="2" fill="#c45d3e" opacity="0"/>
-
-  <!-- command line (typewriter) -->
-  <g clip-path="url(#typeclip)">
-    <text x="24" y="66"><tspan class="acc">$</tspan><tspan class="t"> aegis inspect</tspan></text>
-  </g>
-  <rect class="curs" x="140" y="55" width="7" height="13" fill="#d97a58"/>
-  <clipPath id="typeclip"><rect class="tw" x="24" y="52" width="200" height="18"/></clipPath>
+  <!-- command line -->
+  <text x="24" y="66"><tspan class="acc">$</tspan><tspan class="t"> aegis inspect</tspan></text>
 
   <!-- output -->
-  <text x="24" y="92"  class="rise o2 sec">Aegis Inspect — aegis-memory</text>
-  <text x="24" y="112" class="rise o3 mut">Wrote aegis-out/</text>
+  <text x="24" y="92"  class="sec">Aegis Inspect — aegis-memory</text>
+  <text x="24" y="112" class="mut">Wrote aegis-out/</text>
 
-  <text x="24" y="140" class="rise o4 sec">Top findings:</text>
-  <text x="36" y="160" class="rise o5"><tspan class="sec">AEG-001 </tspan><tspan class="crit">[critical/EXTRACTED]</tspan><tspan class="t"> untrusted input → memory</tspan></text>
-  <text x="36" y="178" class="rise o6"><tspan class="mut">via </tspan><tspan class="t">memory_ids.append</tspan></text>
-  <text x="36" y="196" class="rise o7 mut">benchmarks/query_workload.py:126</text>
+  <text x="24" y="140" class="sec">Top findings:</text>
+  <text x="36" y="160"><tspan class="sec">AEG-001 </tspan><tspan class="crit">[critical/EXTRACTED]</tspan><tspan class="t"> untrusted input → memory</tspan></text>
+  <text x="36" y="178"><tspan class="mut">via </tspan><tspan class="t">memory_ids.append</tspan></text>
+  <text x="36" y="196" class="mut">benchmarks/query_workload.py:126</text>
 
-  <text x="24" y="224" class="rise o8"><tspan class="sec">Memory Risk Score: </tspan><tspan class="acc">100/100</tspan><tspan class="mut"> (heuristic)</tspan></text>
-  <text x="24" y="244" class="rise o9"><tspan class="crit">Critical 16</tspan><tspan class="mut"> · </tspan><tspan class="mut">High 0</tspan><tspan class="mut"> · </tspan><tspan class="med">Medium 17</tspan><tspan class="mut"> · </tspan><tspan class="low">Low 34</tspan></text>
+  <text x="24" y="224"><tspan class="sec">Memory Risk Score: </tspan><tspan class="acc">100/100</tspan><tspan class="mut"> (heuristic)</tspan></text>
+  <text x="24" y="244"><tspan class="crit">Critical 16</tspan><tspan class="mut"> · High 0 · </tspan><tspan class="med">Medium 17</tspan><tspan class="mut"> · </tspan><tspan class="low">Low 34</tspan></text>
 
-  <text x="24" y="272" class="rise o10 mut">Report: aegis-out/INSPECTION_REPORT.md</text>
-  <text x="24" y="290" class="rise o11 mut">SARIF:  aegis-out/findings.sarif</text>
+  <text x="24" y="272" class="mut">Report: aegis-out/INSPECTION_REPORT.md</text>
+  <text x="24" y="290" class="mut">SARIF:  aegis-out/findings.sarif</text>
 
-  <text x="24" y="320" class="rise o12"><tspan class="acc">→ aegis_memory.guard</tspan><tspan class="sec"> gates every one of them.</tspan></text>
+  <text x="24" y="320"><tspan class="acc">→ aegis_memory.guard</tspan><tspan class="sec"> gates every one of them.</tspan></text>
 </svg>
