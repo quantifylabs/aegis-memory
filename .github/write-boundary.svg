@@ -46,13 +46,13 @@
   <!-- clean write crosses to shared memory -->
   <path d="M384 122 C 440 116, 470 104, 514 104" fill="none" stroke="#1a1a1a" stroke-width="1.4" marker-end="url(#ai)"/>
   <!-- poisoned write rejected at the line -->
-  <path d="M362 134 C 344 166, 320 190, 296 206" fill="none" stroke="#c45d3e" stroke-width="1.6" marker-end="url(#ax)"/>
+  <path d="M362 134 C 344 170, 320 200, 292 222" fill="none" stroke="#c45d3e" stroke-width="1.6" marker-end="url(#ax)"/>
 
   <!-- rejected node (untrusted side) -->
   <g>
-    <rect x="188" y="210" width="172" height="44" rx="6" fill="none" stroke="#7c2b21" stroke-width="1.3"/>
-    <text x="274" y="230" text-anchor="middle" class="lbl" fill="#7c2b21">poisoned write</text>
-    <text x="274" y="245" text-anchor="middle" class="bad">REJECTED · NOT STORED</text>
+    <rect x="188" y="226" width="172" height="44" rx="6" fill="none" stroke="#7c2b21" stroke-width="1.3"/>
+    <text x="274" y="246" text-anchor="middle" class="lbl" fill="#7c2b21">poisoned write</text>
+    <text x="274" y="261" text-anchor="middle" class="bad">REJECTED · NOT STORED</text>
   </g>
 
   <!-- verified side: shared memory + reader -->
