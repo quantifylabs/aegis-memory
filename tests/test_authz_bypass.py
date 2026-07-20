@@ -347,13 +347,18 @@ class TestHttpLayerBypass:
     """
 
     @staticmethod
-    def _client(bound_agent_id: str, canary: dict):
+    def _client(monkeypatch, bound_agent_id: str, canary: dict):
         """A test client for the memories router, authenticated as ``bound_agent_id``.
 
         Only the trust boundary itself is real. Auth is overridden to simulate a key already
         bound to an agent (issuing real keys is TokenVerifier's job, tested elsewhere); the DB
         and embedding service are stubbed because the authorization decision must happen before
         either is touched -- which is itself part of what this asserts.
+
+        The stubs go through ``monkeypatch`` rather than plain assignment: ``semantic_search`` is
+        patched on the *class*, so a permanent assignment leaks the canary into every later test
+        in the session -- ``test_context_hub`` then reaches this canary instead of the real
+        repository and fails with "retrieval reached". monkeypatch restores both on teardown.
         """
         from fastapi import FastAPI
         from fastapi.testclient import TestClient
@@ -388,19 +393,19 @@ class TestHttpLayerBypass:
             canary["requesting_agent_id"] = kwargs.get("requesting_agent_id")
             raise AssertionError("retrieval reached")
 
-        memories.get_embedding_service = lambda: _FakeEmbed()
-        MemoryRepository.semantic_search = staticmethod(_canary)
+        monkeypatch.setattr(memories, "get_embedding_service", lambda: _FakeEmbed())
+        monkeypatch.setattr(MemoryRepository, "semantic_search", staticmethod(_canary))
 
         return TestClient(app, raise_server_exceptions=False)
 
-    def test_spoofed_agent_id_is_rejected_over_http(self):
+    def test_spoofed_agent_id_is_rejected_over_http(self, monkeypatch):
         """The headline vulnerability, end to end.
 
         agent-2's key asks for agent-1's memories by naming agent-1 in the body. Against the
         pre-fix code this returned 200 with agent-1's private memories.
         """
         canary: dict = {}
-        client = self._client("agent-2", canary)
+        client = self._client(monkeypatch, "agent-2", canary)
 
         resp = client.post("/memories/query", json={"query": "secrets", "agent_id": "agent-1"})
 
@@ -413,28 +418,28 @@ class TestHttpLayerBypass:
             "already fetched by the time the request was denied"
         )
 
-    def test_own_agent_id_reaches_retrieval_with_the_bound_identity(self):
+    def test_own_agent_id_reaches_retrieval_with_the_bound_identity(self, monkeypatch):
         """Positive control.
 
         Without this, a route that denied *everything* would pass the test above. It also pins
         the identity handed to the ACL: the one from the key, never the one from the body.
         """
         canary: dict = {}
-        client = self._client("agent-1", canary)
+        client = self._client(monkeypatch, "agent-1", canary)
 
         client.post("/memories/query", json={"query": "notes", "agent_id": "agent-1"})
 
         assert canary.get("called"), "a legitimate self-query was blocked before retrieval"
         assert canary.get("requesting_agent_id") == "agent-1"
 
-    def test_omitted_agent_id_is_pinned_to_the_key_not_left_open(self):
+    def test_omitted_agent_id_is_pinned_to_the_key_not_left_open(self, monkeypatch):
         """Omitting agent_id must not widen the query to every agent.
 
         A bound key that sends no agent_id should still be scoped to its own identity; passing
         None here would hand the ACL a wildcard.
         """
         canary: dict = {}
-        client = self._client("agent-1", canary)
+        client = self._client(monkeypatch, "agent-1", canary)
 
         client.post("/memories/query", json={"query": "notes"})
 
