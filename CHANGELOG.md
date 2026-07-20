@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **`POST /memories/ace/delta` was an unguarded write path.** The first authorization pass covered
+  `memories.py` and `typed_memory.py`; this route was missed. Its `add` branch wrote `op.content`
+  straight to `MemoryRepository.add` with **no content-security scan, no `authorize_write`, and an
+  `agent_id` read from the request body** — so agent identity binding was bypassed there. It also
+  called `ScopeInference.infer_scope` without `content_trust_level`, disabling the cap that stops
+  content promoting itself by keyword, while defaulting reflections to `global` — the scope every
+  agent in the project reads. `update` and `deprecate` were project-scoped only, so any project key
+  could patch metadata on, or deprecate, another agent's memory. All three branches now go through
+  the same gates as `/memories/*`. Authorization denials are re-raised rather than being downgraded
+  into a per-item `{"success": false}` by the batch error handler. Found by `aegis inspect` once
+  its async blind spot was fixed — it had been reported all along, next to two false positives.
+
 - **Agent identity is now enforced on every memory route.** `enforce_agent_binding` was
   implemented, exported, and unit-tested, but called from zero routers; `/memories/*` derived the
   requesting agent from the `agent_id` in the request body. Any holder of a project API key could
