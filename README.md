@@ -553,20 +553,53 @@ continued benchmark hardening.
 ## Security benchmark
 
 Does the [4-stage content security pipeline](#security-capabilities) actually catch prompt
-injection? We measured it as a detector against five baselines (DeBERTa, LLM Guard, an LLM judge,
-and more) on labelled injection + benign corpora — with full confusion-matrix metrics, a per-stage
-ablation, and an honest error analysis. **The false-positive rate is reported next to recall
-everywhere** — a blocker that flags everything is useless.
+injection? We measured it as a detector against five baselines (DeBERTa, LLM Guard, Llama Prompt
+Guard 2, and two LLM judges) on labelled injection + benign corpora — full confusion matrices, a
+per-stage ablation, bootstrapped 95% CIs, and pinned dataset revisions. **The false-positive rate
+is reported next to recall everywhere** — a blocker that flags everything is useless.
 
-| Aegis configuration | Recall | FPR | Median latency |
-|-----------------------------------------|------:|-----:|---------------:|
-| Stages 1–3 (deterministic, no API call) | 0.14 | 0.00 | 46 µs |
-| Stages 1–4 (+ LLM classifier) | 0.67 | 0.00 | 1.2 s |
+Aegis's threat model is **indirect injection**: text written into memory that manipulates an agent
+when it is later retrieved. That is what the first table measures. Direct injection — a user
+pasting "ignore previous instructions" into a prompt — is a different problem, reported below.
 
-> `deepset/prompt-injections`, direct injection (N=662). The free deterministic core adds **zero**
-> false positives here and across 1,500 benign memory snippets (1 FP); the optional LLM stage
-> trades ~1s of latency for a 4.6× recall gain. Stage 2 (PII) contributes ~0 to injection recall
-> by design — it's a different threat category.
+**Indirect injection / memory poisoning** — `InjecAgent`, N=250
+
+| System | Recall [95% CI] | Median latency |
+|---------------------------------------------|-------------------:|---------------:|
+| `naive_regex` | 0.000 [0.00–0.00] | 27 µs |
+| Llama Prompt Guard 2 | 0.000 [0.00–0.00] | 300.7 ms |
+| LLM Guard | 0.656 [0.60–0.72] | 323.2 ms |
+| ProtectAI DeBERTa | 0.660 [0.60–0.72] | 338.3 ms |
+| **Aegis stages 1–3** (deterministic, no API call) | **0.620** [0.56–0.68] | **119 µs** |
+| **Aegis stages 1–4** (+ Claude classifier) | **0.832** [0.78–0.88] | 2.2 s |
+
+> The deterministic core matches DeBERTa within overlapping CIs at ~2,800× lower latency, with no
+> model download and no API call. Stage 4 is shown with Claude; the GPT-4o-mini variant scores
+> 0.744 [0.69–0.80]. FPR is undefined on this corpus — all 250 cases are malicious — so
+> over-defense is measured separately below.
+
+**One caveat we report rather than bury.** On indirect injection, Stage 2 (PII/secrets) flags
+**155/250** payloads and accounts for most of the deterministic core's recall here. That is not
+injection detection working — it is Stage 2 firing on the credentials and health records embedded
+in data-exfiltration payloads. The write is still blocked, and catching a data-stealing payload
+via a different stage is the point of a multi-category pipeline, but it is not a better injection
+regex. The genuine injection signal is the Stage 3 → Stage 4 delta in the full report.
+
+**Over-defense** — `NotInject`, N=339 benign sentences seeded with injection trigger words. Every
+sample is benign, so lower is better. This is where learned detectors tend to fall over.
+
+| System | FPR [95% CI] | Flagged |
+|--------------------------|------------------:|-----------:|
+| ProtectAI DeBERTa | 0.428 [0.37–0.48] | 145 / 339 |
+| LLM Guard | 0.428 [0.37–0.48] | 145 / 339 |
+| Llama Prompt Guard 2 | 0.065 [0.04–0.09] | 22 / 339 |
+| **Aegis stages 1–3** | **0.015** [0.00–0.03] | **5 / 339** |
+| **Aegis stages 1–4** | **0.035** [0.02–0.06] | 12 / 339 |
+
+**Direct injection** — `deepset/prompt-injections`, N=662. Not Aegis's threat model, kept visible
+because it is where the deterministic core is weakest: Stages 1–3 score **0.144** recall (matching
+`naive_regex`, since injection text rarely contains PII for Stage 2 to catch), rising to **0.741**
+with the Claude classifier. Both at 0.000 FPR.
 
 → **Full results, ablation, baselines, latency, and limitations:
 [`docs/security/benchmark.md`](docs/security/benchmark.md)** · reproduce with
