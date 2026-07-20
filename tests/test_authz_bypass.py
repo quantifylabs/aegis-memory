@@ -388,6 +388,53 @@ class TestRouteWiring:
             f"{route_name} does not depend on get_auth_context"
         )
 
+    def test_ace_delta_route_resolves_auth_context(self):
+        """``/memories/ace/delta`` writes memories and was missed by the first authorization pass.
+
+        It reached ``MemoryRepository.add`` with no content scan, no ``authorize_write``, and an
+        ``agent_id`` taken from the request body — and it defaults reflections to ``global``, the
+        scope every agent reads. Enumerated separately from the memories/typed lists above so that
+        adding another write router does not quietly inherit "covered" status.
+        """
+        from api.routers import ace_delta
+        routes = self._routes(ace_delta)
+        assert "apply_delta" in routes
+        assert self._depends_on_auth_context(routes["apply_delta"]), (
+            "apply_delta does not depend on get_auth_context, so it cannot verify agent identity"
+        )
+
+    def test_every_router_that_writes_memories_screens_and_authorizes(self):
+        """The generalization of the ace_delta bug: enforcement applied per-route, not per-sink.
+
+        Any router calling ``MemoryRepository.add`` is a write path into memory and needs the same
+        three gates. This enumerates them from the source rather than from a hand-maintained list,
+        so a NEW write router fails here on the day it is added instead of being found later by
+        the static analyzer.
+        """
+        import inspect
+        import pkgutil
+        import importlib
+        from api import routers as routers_pkg
+
+        offenders = []
+        for mod_info in pkgutil.iter_modules(routers_pkg.__path__):
+            mod = importlib.import_module(f"api.routers.{mod_info.name}")
+            try:
+                src = inspect.getsource(mod)
+            except OSError:
+                continue
+            if "MemoryRepository.add(" not in src:
+                continue
+            missing = [
+                gate for gate in ("effective_agent_id(", "authorize_write(", "scan_async(")
+                if gate not in src
+            ]
+            if missing:
+                offenders.append(f"{mod_info.name}.py missing {', '.join(m.rstrip('(') for m in missing)}")
+        assert not offenders, (
+            "these routers write to memory without the full gate set: " + "; ".join(offenders)
+        )
+
     def test_authz_helpers_are_actually_called_by_the_routers(self):
         """Guards against the exact original failure: implemented, exported, never invoked."""
         import inspect
