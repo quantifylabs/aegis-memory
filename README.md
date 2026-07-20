@@ -261,7 +261,7 @@ recommendations natively. Six capabilities, none optional:
 1. **[4-stage content security pipeline](https://docs.aegismemory.com/guides/security)** — input validation, sensitive-data scanning, prompt-injection detection, and an optional LLM-based injection classifier. On every memory write.
 2. **[HMAC-SHA256 integrity signing](https://docs.aegismemory.com/guides/security)** — tamper detection on store, verification on demand. You know if a memory was modified.
 3. **[OWASP 4-tier trust hierarchy](https://docs.aegismemory.com/guides/security)** — untrusted, internal, privileged, system. Agents get compromised; Aegis limits the blast radius.
-4. **[Cryptographic agent binding](https://docs.aegismemory.com/guides/security)** — every route resolves its project *and* its acting agent from the authenticated key. No more trusting a request body that says "I'm the admin agent."
+4. **[Cryptographic agent binding](https://docs.aegismemory.com/guides/security)** — every route resolves its project from the authenticated key, and for agent-bound keys its acting agent too. A bound key can't be talked into a request body that says "I'm the admin agent." Unbound project keys act for the whole application — see [Threat model](#threat-model).
 5. **[ACE loop](https://docs.aegismemory.com/guides/ace-patterns)** — generation, reflection, curation. Agents that learn from their own mistakes and promote what works.
 6. **[Multi-agent coordination](https://docs.aegismemory.com/quickstart/installation)** — scoped access control, cross-agent query, structured handoffs. Memory sharing with boundaries.
 
@@ -491,7 +491,7 @@ docs.[^comparison]
 | **Content security pipeline** | — | — | — | 4-stage (validation, PII, injection, LLM) |
 | **Memory integrity** | — | — | — | HMAC-SHA256 |
 | **Trust hierarchy** | — | — | — | 4-tier OWASP model |
-| **Agent identity binding** | — | — | — | Cryptographic API key |
+| **Agent identity binding** | — | — | — | Cryptographic API key (bound keys) |
 | **Per-agent rate limiting** | — | — | — | Sliding window |
 | **Security audit trail** | — | — | — | Immutable event log |
 | **Sensitive data protection** | — | — | — | Auto-detect + reject/redact/flag |
