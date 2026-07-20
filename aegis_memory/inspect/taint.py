@@ -489,7 +489,23 @@ def _untrusted_label(node: ast.expr, scope: FunctionScope) -> tuple[str, str] | 
     return None
 
 
+def _unwrap_await(node: ast.expr) -> ast.expr:
+    """``await f(x)`` -> ``f(x)``.
+
+    ``await`` changes when a call runs, never whether it screens. Without this, every recognizer
+    below silently fails on async code: ``verdict = await scanner.scan_async(x)`` parses as an
+    ``ast.Await`` wrapping the ``ast.Call``, the ``isinstance(node, ast.Call)`` guards return
+    False, and the verdict is never recorded as sanitized. Async is the dominant idiom for agent
+    servers, so the effect was that a correctly-screened async write still reported
+    "no injection screening detected" -- including on Aegis's own ``add_memory``.
+    """
+    while isinstance(node, ast.Await):
+        node = node.value
+    return node
+
+
 def _is_sanitizer_call(node: ast.expr) -> bool:
+    node = _unwrap_await(node)
     if not isinstance(node, ast.Call):
         return False
     fn = node.func
@@ -517,6 +533,7 @@ def _is_guard_protect_call(node: ast.expr) -> bool:
 
 
 def _is_guard_method_call(node: ast.expr, method: str) -> bool:
+    node = _unwrap_await(node)
     if not isinstance(node, ast.Call):
         return False
     fn = node.func
@@ -553,6 +570,24 @@ def _expr_names(node: ast.expr) -> set[str]:
     return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
 
 
+def _assigned_from_sanitized(node: ast.expr, scope: FunctionScope, depth: int = 0) -> bool:
+    """Does this expression read a variable assigned (transitively) from a sanitizer's output?
+
+    Follows ``ast.Name -> its assignment`` hops, bounded like ``_classify``, and reports True only
+    when a hop lands on a name in ``scope.sanitized_names``. Bounded depth also terminates the
+    ``a = a`` / mutual-assignment cases rather than recursing forever.
+    """
+    if depth > 4:
+        return False
+    for name_node in (n for n in ast.walk(node) if isinstance(n, ast.Name)):
+        if name_node.id in scope.sanitized_names:
+            return True
+        assigned = scope.assignments.get(name_node.id)
+        if assigned is not None and _assigned_from_sanitized(assigned, scope, depth + 1):
+            return True
+    return False
+
+
 def _value_screened(write_value: ast.expr, scope: FunctionScope) -> bool:
     """Is the written value's untrusted data actually screened? **Sink-tied, never blanket.**
 
@@ -574,6 +609,18 @@ def _value_screened(write_value: ast.expr, scope: FunctionScope) -> bool:
     # Leaf read from a guard verdict / assigned-from-sanitizer variable, or a value a scanner in this
     # scope screened. Both are sink-tied to a variable this write's untrusted leaf actually uses.
     if names & (scope.sanitized_names | scope.scanned_value_names):
+        return True
+    # The leaf may be a plain variable holding the screened value one hop back
+    # (``content_to_store = verdict.content; add(content=content_to_store)``) -- the shape almost
+    # every real handler uses, and the one Aegis's own add_memory uses.
+    #
+    # Deliberately narrower than the check above: this follows assignments only into
+    # ``sanitized_names`` (a value *returned by* a sanitizer or ``guard.write``, which is proven
+    # screened output), never into ``scanned_value_names`` (merely a name that appeared as a
+    # scanner *argument* somewhere in scope). Widening the loose heuristic across assignment hops
+    # is how an unrelated ``scan(other)`` would start green-lighting raw writes -- a false
+    # "screened", the worst error this analyzer can make.
+    if _assigned_from_sanitized(leaf if leaf is not None else write_value, scope):
         return True
     # Inline sanitizer / guard.write wrapping *this* leaf within the written value.
     if leaf is not None:

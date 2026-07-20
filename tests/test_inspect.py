@@ -256,6 +256,116 @@ def test_scan_of_written_value_screens_it(tmp_path):
     assert flows and all(f.screened for f in flows), flows
 
 
+def test_async_scanner_call_screens_the_write(tmp_path):
+    """``await scanner.scan_async(x)`` must screen exactly like the sync call.
+
+    ``await f(x)`` parses as an ``ast.Await`` wrapping the ``ast.Call``, and the recognizers
+    guarded on ``isinstance(node, ast.Call)`` — so every screening call in an async codebase was
+    invisible and correctly-gated writes reported "no injection screening detected". Async is the
+    dominant idiom for agent servers; Aegis's own ``add_memory`` was flagged critical by its own
+    analyzer because of this.
+    """
+    src = (
+        "async def run(store, scanner, ticket):\n"
+        "    summary = ticket['body']\n"
+        "    verdict = await scanner.scan_async(summary)\n"
+        "    if verdict.allowed:\n"
+        "        store.put(('ns',), 'k', {'text': verdict.content})\n"
+    )
+    d = tmp_path / "async_scan"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(f.screened for f in flows), flows
+
+
+def test_async_guard_write_screens_the_write(tmp_path):
+    """The same blind spot applied to ``await guard.write(...)``, the fix the tool itself suggests.
+
+    Worth its own case: if the analyzer cannot see its own recommended fix once that fix is
+    written in async style, the inspect -> fix -> rescan loop never closes for async users.
+    """
+    src = (
+        "from aegis_memory import guard\n"
+        "import httpx\n"
+        "async def run(store, url):\n"
+        "    raw = httpx.get(url).text\n"
+        "    verdict = await guard.write(raw, trust_level='untrusted', scope='agent-shared',"
+        " on_reject='return')\n"
+        "    if verdict.allowed:\n"
+        "        store.put(('ns',), 'k', {'text': verdict.content})\n"
+    )
+    d = tmp_path / "async_guard"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(f.screened for f in flows), flows
+
+
+def test_screened_value_reaches_the_sink_through_a_variable(tmp_path):
+    """``content = verdict.content`` then ``put(content)`` is screened.
+
+    Screening resolution stopped at the intermediate variable, so only a write that referenced
+    ``verdict.content`` *directly at the call* counted. Binding the screened value to a name first
+    is what almost every real handler does — including Aegis's own ``add_memory``
+    (``content_to_store = verdict.content``).
+
+    The hop follows assignments only into sanitizer *output* (``sanitized_names``), never into the
+    looser ``scanned_value_names``, so it cannot manufacture a false "screened".
+    """
+    src = (
+        "import httpx\n"
+        "def run(store, scanner, url):\n"
+        "    raw = httpx.get(url).text\n"
+        "    verdict = scanner.scan(raw)\n"
+        "    content_to_store = verdict.content\n"
+        "    store.put(('ns',), 'k', {'text': content_to_store})\n"
+    )
+    d = tmp_path / "viavar"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(f.screened for f in flows), flows
+
+
+def test_async_discarded_verdict_still_does_not_screen_a_raw_write(tmp_path):
+    """Soundness gate for the async fix: seeing ``await guard.write`` must not green-light a raw
+    write. The async recognizers must gain precision, not blanket permission."""
+    src = (
+        "import httpx\n"
+        "from aegis_memory import guard\n"
+        "async def run(store, url):\n"
+        "    raw = httpx.get(url).text\n"
+        "    verdict = await guard.write(raw, trust_level='untrusted', scope='agent-shared',"
+        " on_reject='return')\n"
+        "    store.put(('ns',), 'k', {'text': raw})  # BUG: ignores verdict, writes raw\n"
+    )
+    d = tmp_path / "async_discarded"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(not f.screened and f.severity == "critical" for f in flows), flows
+
+
+@pytest.mark.xfail(
+    reason=(
+        "Known gap, pre-existing and not addressed here: scanned_value_names records the ROOT "
+        "name of a scanner argument, so scan(body.content) marks every attribute of 'body' as "
+        "screened and writing body.other reads as screened. This is a false 'screened' -- the "
+        "error class this module treats as worst -- and needs dotted-path granularity to fix. "
+        "Filed rather than fixed here because narrowing it flips results toward more findings "
+        "and deserves its own change."
+    ),
+    strict=True,
+)
+def test_scan_does_not_screen_a_sibling_attribute(tmp_path):
+    src = (
+        "def run(store, scanner, body):\n"
+        "    scanner.scan(body.content)                 # scans ONE attribute\n"
+        "    store.put(('ns',), 'k', {'text': body.other})  # writes a DIFFERENT, unscanned one\n"
+    )
+    d = tmp_path / "sibling"; d.mkdir()
+    (d / "agent.py").write_text(src, encoding="utf-8")
+    flows = [f for f in analyze_project(d) if f.category.endswith("_to_memory")]
+    assert flows and all(not f.screened for f in flows), flows
+
+
 def test_plain_dict_get_is_not_an_untrusted_source(tmp_path):
     """Corpus regression: a bare ``.get()``/``.run()`` on a non-network receiver (``config.get(...)``,
     ``reflection.get("insight")``) must NOT read as untrusted network egress. Writing such an internal
