@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Documentation corrected: agent identity binding is not enforced on the memory routes.**
+  README, `docs/guides/security.mdx`, and `docs/introduction/overview.mdx` previously described
+  agent-identity binding and the trust-level write/read/delete rules as enforced. They are not.
+  `bound_agent_id`, `enforce_agent_binding`, and `TrustPolicy.can_write` / `can_read_scope` /
+  `can_delete` are implemented and unit-tested but are **not called from `/memories/*`**, which
+  derives the requesting agent from the request body. Any holder of a project API key can read any
+  agent's `agent-private` memories within that project. Project-level isolation is enforced and is
+  unaffected.
+
+  This corrects the claim made in the 2.0.0 entry below ("Closes HIGH: Agent ID spoofing (API key
+  binding)"), which was accurate about the mechanism shipping but not about it being wired into the
+  memory routes. Docs now describe actual enforcement; the enforcement fix follows separately.
+
+- **Documentation corrected: the server does not gate memory scope on trust level.** The README
+  previously stated that `untrusted`/`unknown` content "cannot be written straight to `global`".
+  That rule is enforced by `aegis_memory.guard` (offline) but **not** by the server:
+  `TrustPolicy.can_write()` is never called from `/memories/*`, so trust level controls screening
+  intensity only. Because `ScopeInference.infer_scope()` can resolve a memory to `global` scope
+  based on keywords present in the content itself, untrusted content accepted by the server can
+  reach `global`, where every agent in the project reads it. The guard and the server therefore
+  have divergent security semantics today. Docs now state this; unifying the two behind one policy
+  module is part of the enforcement work.
+
 ## [2.6.1] - 2026-07-05
 
 ### Added
