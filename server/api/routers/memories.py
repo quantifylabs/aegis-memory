@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from api.dependencies.auth import AuthContext, check_rate_limit, get_auth_context
+from memory_authz import authorize_delete, authorize_read, authorize_write, effective_agent_id, read_scope_restriction
 from api.dependencies.database import get_db, get_read_db
 from embedding_service import content_hash, get_embedding_service
 from event_repository import EventRepository
@@ -216,9 +217,12 @@ async def add_memory(body: MemoryCreate, project_id: str = Depends(check_rate_li
     """Add a single memory with automatic scope inference and deduplication."""
     try:
         with track_latency(OperationNames.MEMORY_ADD):
+            # Pin the agent identity to the API key when the key is bound; a request may not
+            # claim to be a different agent.
+            acting_agent_id = effective_agent_id(auth, body.agent_id)
             embed_service = get_embedding_service()
             hash_val = content_hash(body.content)
-            existing = await MemoryRepository.find_duplicates(db, content_hash=hash_val, project_id=project_id, namespace=body.namespace, user_id=body.user_id, agent_id=body.agent_id)
+            existing = await MemoryRepository.find_duplicates(db, content_hash=hash_val, project_id=project_id, namespace=body.namespace, user_id=body.user_id, agent_id=acting_agent_id)
             if existing:
                 record_operation(OperationNames.MEMORY_ADD, "success")
                 return AddResult(id=existing.id, deduped_from=existing.id)
@@ -243,20 +247,27 @@ async def add_memory(body: MemoryCreate, project_id: str = Depends(check_rate_li
             content_to_store = verdict.content
 
             # Memory quota check
-            if body.agent_id and _settings.agent_memory_limit:
-                count = await MemoryRepository.count_agent_memories(db, project_id, body.agent_id)
+            if acting_agent_id and _settings.agent_memory_limit:
+                count = await MemoryRepository.count_agent_memories(db, project_id, acting_agent_id)
                 if count >= _settings.agent_memory_limit:
-                    raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=f"Agent '{body.agent_id}' has reached memory limit ({_settings.agent_memory_limit}). Deprecate old memories to free quota.")
+                    raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=f"Agent '{acting_agent_id}' has reached memory limit ({_settings.agent_memory_limit}). Deprecate old memories to free quota.")
 
             embedding = await embed_service.embed_single(content_to_store, db)
-            resolved_scope = ScopeInference.infer_scope(content=content_to_store, explicit_scope=body.scope, agent_id=body.agent_id, metadata=body.metadata or {})
+            resolved_scope = ScopeInference.infer_scope(content=content_to_store, explicit_scope=body.scope, agent_id=acting_agent_id, metadata=body.metadata or {}, content_trust_level=resolved_trust)
+
+            # Authorize the write: content provenance ceiling (always) + principal trust (gated).
+            authorize_write(
+                auth, agent_id=acting_agent_id, scope=resolved_scope.value,
+                content_trust_level=resolved_trust,
+                enforce_principal_trust=_settings.enable_trust_levels,
+            )
 
             # Compute integrity hash
             integrity_hash = None
             if _settings.enable_integrity_check:
-                integrity_hash = compute_integrity_hash(content_to_store, body.agent_id, project_id, _settings.get_integrity_key())
+                integrity_hash = compute_integrity_hash(content_to_store, acting_agent_id, project_id, _settings.get_integrity_key())
 
-            mem = await MemoryRepository.add(db, project_id=project_id, content=content_to_store, embedding=embedding, user_id=body.user_id, agent_id=body.agent_id, namespace=body.namespace, metadata=body.metadata, ttl_seconds=body.ttl_seconds, scope=resolved_scope.value, shared_with_agents=body.shared_with_agents, derived_from_agents=body.derived_from_agents, coordination_metadata=body.coordination_metadata, integrity_hash=integrity_hash, content_flags=verdict.flags, trust_level=resolved_trust)
+            mem = await MemoryRepository.add(db, project_id=project_id, content=content_to_store, embedding=embedding, user_id=body.user_id, agent_id=acting_agent_id, namespace=body.namespace, metadata=body.metadata, ttl_seconds=body.ttl_seconds, scope=resolved_scope.value, shared_with_agents=body.shared_with_agents, derived_from_agents=body.derived_from_agents, coordination_metadata=body.coordination_metadata, integrity_hash=integrity_hash, content_flags=verdict.flags, trust_level=resolved_trust)
             record_memory_stored_scope(resolved_scope.value)
             await _emit(db, project_id=project_id, memory_id=mem.id, namespace=mem.namespace, agent_id=mem.agent_id, event_type=MemoryEventType.CREATED.value, payload={"source": "add"})
             record_operation(OperationNames.MEMORY_ADD, "success")
@@ -297,13 +308,19 @@ async def add_memory_batch(body: MemoryCreateBatch, project_id: str = Depends(ch
             await _emit(db, project_id=project_id, namespace=item.namespace, event_type=MemoryEventType.SECURITY_FLAGGED.value, payload={"flags": verdict.flags, "source": "add_batch"})
         content_to_store = verdict.content
 
+        acting_agent_id = effective_agent_id(auth, item.agent_id)
         hash_val = content_hash(content_to_store)
-        existing = await MemoryRepository.find_duplicates(db, content_hash=hash_val, project_id=project_id, namespace=item.namespace, user_id=item.user_id, agent_id=item.agent_id)
+        existing = await MemoryRepository.find_duplicates(db, content_hash=hash_val, project_id=project_id, namespace=item.namespace, user_id=item.user_id, agent_id=acting_agent_id)
         if existing:
             results.append(AddResult(id=existing.id, deduped_from=existing.id))
             continue
-        resolved_scope = ScopeInference.infer_scope(content=content_to_store, explicit_scope=item.scope, agent_id=item.agent_id, metadata=item.metadata or {})
-        to_insert.append({"project_id": project_id, "content": content_to_store, "embedding": embeddings[i], "user_id": item.user_id, "agent_id": item.agent_id, "namespace": item.namespace, "metadata": item.metadata, "ttl_seconds": item.ttl_seconds, "scope": resolved_scope.value, "shared_with_agents": item.shared_with_agents, "derived_from_agents": item.derived_from_agents, "coordination_metadata": item.coordination_metadata, "content_flags": verdict.flags, "trust_level": resolved_trust})
+        resolved_scope = ScopeInference.infer_scope(content=content_to_store, explicit_scope=item.scope, agent_id=acting_agent_id, metadata=item.metadata or {}, content_trust_level=resolved_trust)
+        authorize_write(
+            auth, agent_id=acting_agent_id, scope=resolved_scope.value,
+            content_trust_level=resolved_trust,
+            enforce_principal_trust=_settings.enable_trust_levels,
+        )
+        to_insert.append({"project_id": project_id, "content": content_to_store, "embedding": embeddings[i], "user_id": item.user_id, "agent_id": acting_agent_id, "namespace": item.namespace, "metadata": item.metadata, "ttl_seconds": item.ttl_seconds, "scope": resolved_scope.value, "shared_with_agents": item.shared_with_agents, "derived_from_agents": item.derived_from_agents, "coordination_metadata": item.coordination_metadata, "content_flags": verdict.flags, "trust_level": resolved_trust})
         results.append(None)
     if to_insert:
         memories = await MemoryRepository.add_batch(db, to_insert)
@@ -322,18 +339,24 @@ async def add_memory_batch(body: MemoryCreateBatch, project_id: str = Depends(ch
 
 
 @router.post("/query", response_model=QueryResult)
-async def query_memories(body: MemoryQuery, project_id: str = Depends(check_rate_limit), db: AsyncSession = Depends(get_db)):
+async def query_memories(body: MemoryQuery, project_id: str = Depends(check_rate_limit), auth: AuthContext = Depends(get_auth_context), db: AsyncSession = Depends(get_db)):
     """Semantic search over memories."""
     start = time.monotonic()
     try:
         with track_latency(OperationNames.MEMORY_QUERY):
+            # The scope ACL is only as strong as the identity behind it: resolve the requesting
+            # agent from the API key, not from the request body.
+            acting_agent_id = effective_agent_id(auth, body.agent_id)
+            # Search returns rows in bulk and never passes through authorize_read, so the
+            # principal-trust ceiling has to be applied as a filter here.
+            scope_filter = read_scope_restriction(auth, enforce_principal_trust=_settings.enable_trust_levels) or body.scope
             embed_service = get_embedding_service()
             query_embedding = await embed_service.embed_single(body.query, db)
-            results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, agent_id=body.agent_id, requesting_agent_id=body.agent_id, top_k=body.top_k, min_score=body.min_score, requested_scope=body.scope, memory_types=body.memory_types, apply_decay=body.apply_decay)
+            results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, agent_id=acting_agent_id, requesting_agent_id=acting_agent_id, top_k=body.top_k, min_score=body.min_score, requested_scope=scope_filter, memory_types=body.memory_types, apply_decay=body.apply_decay)
         elapsed_ms = (time.monotonic() - start) * 1000
         memories = [_mem_to_out(mem, score) for mem, score in results]
         retrieved_ids = [mem.id for mem, _ in results]
-        event = await _emit(db, project_id=project_id, namespace=body.namespace, agent_id=body.agent_id, event_type=MemoryEventType.QUERIED.value, payload={"query": body.query, "result_count": len(memories), "top_k": body.top_k}, task_id=body.task_id, selected_memory_ids=body.selected_memory_ids or retrieved_ids)
+        event = await _emit(db, project_id=project_id, namespace=body.namespace, agent_id=acting_agent_id, event_type=MemoryEventType.QUERIED.value, payload={"query": body.query, "result_count": len(memories), "top_k": body.top_k}, task_id=body.task_id, selected_memory_ids=body.selected_memory_ids or retrieved_ids)
         # Access tracking: best-effort bulk update (does not block response)
         await MemoryRepository.touch_accessed(db, retrieved_ids)
         record_operation(OperationNames.MEMORY_QUERY, "success")
@@ -344,11 +367,12 @@ async def query_memories(body: MemoryQuery, project_id: str = Depends(check_rate
 
 
 @router.post("/hybrid_query")
-async def hybrid_query(body: MemoryHybridQuery, project_id: str = Depends(check_rate_limit), db: AsyncSession = Depends(get_read_db)):
+async def hybrid_query(body: MemoryHybridQuery, project_id: str = Depends(check_rate_limit), auth: AuthContext = Depends(get_auth_context), db: AsyncSession = Depends(get_read_db)):
     """Hybrid retrieval: dense + sparse + RRF fusion (Memory Depth v2.4.0)."""
     start = time.monotonic()
     try:
         with track_latency(OperationNames.MEMORY_QUERY):
+            acting_agent_id = effective_agent_id(auth, body.agent_id)
             embed_service = get_embedding_service()
             query_embedding = await embed_service.embed_single(body.query, db)
             results, meta = await MemoryRepository.hybrid_search(
@@ -357,11 +381,18 @@ async def hybrid_query(body: MemoryHybridQuery, project_id: str = Depends(check_
                 query_embedding=query_embedding,
                 project_id=project_id,
                 namespace=body.namespace,
-                requesting_agent_id=body.agent_id,
+                requesting_agent_id=acting_agent_id,
                 top_k=body.top_k,
                 candidate_pool=body.candidate_pool,
                 apply_decay=body.apply_decay,
             )
+            # hybrid_search has no requested_scope parameter (it filters in Python against
+            # can_access after fusion), so the principal-trust ceiling is applied here for
+            # parity with semantic_search. Post-filtering can shrink the page below top_k --
+            # acceptable, because the alternative is returning rows this principal may not read.
+            scope_filter = read_scope_restriction(auth, enforce_principal_trust=_settings.enable_trust_levels)
+            if scope_filter is not None:
+                results = [(m, s) for m, s in results if (m.scope or "agent-private") == scope_filter]
         elapsed_ms = (time.monotonic() - start) * 1000
         record_operation(OperationNames.MEMORY_QUERY, "success")
         return {
@@ -382,37 +413,48 @@ async def hybrid_query(body: MemoryHybridQuery, project_id: str = Depends(check_
 
 
 @router.post("/query_cross_agent", response_model=QueryResult)
-async def query_cross_agent(body: CrossAgentQuery, project_id: str = Depends(check_rate_limit), db: AsyncSession = Depends(get_db)):
+async def query_cross_agent(body: CrossAgentQuery, project_id: str = Depends(check_rate_limit), auth: AuthContext = Depends(get_auth_context), db: AsyncSession = Depends(get_db)):
     """Cross-agent semantic search with scope-aware access control."""
     start = time.monotonic()
+    # Cross-agent reads are exactly where a spoofed requester would pay off: the scope ACL
+    # decides what agent-shared content is visible based on who is asking.
+    acting_agent_id = effective_agent_id(auth, body.requesting_agent_id)
     embed_service = get_embedding_service()
     query_embedding = await embed_service.embed_single(body.query, db)
-    results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, requesting_agent_id=body.requesting_agent_id, target_agent_ids=body.target_agent_ids, top_k=body.top_k, min_score=body.min_score, requested_scope=body.scope, apply_decay=body.apply_decay)
+    scope_filter = read_scope_restriction(auth, enforce_principal_trust=_settings.enable_trust_levels) or body.scope
+    results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, requesting_agent_id=acting_agent_id, target_agent_ids=body.target_agent_ids, top_k=body.top_k, min_score=body.min_score, requested_scope=scope_filter, apply_decay=body.apply_decay)
     elapsed_ms = (time.monotonic() - start) * 1000
     memories = [_mem_to_out(mem, score) for mem, score in results]
     retrieved_ids = [mem.id for mem, _ in results]
-    event = await _emit(db, project_id=project_id, namespace=body.namespace, agent_id=body.requesting_agent_id, event_type=MemoryEventType.QUERIED.value, payload={"source": "query_cross_agent", "query": body.query, "result_count": len(memories), "top_k": body.top_k, "target_agent_ids": body.target_agent_ids or []}, task_id=body.task_id, selected_memory_ids=body.selected_memory_ids or retrieved_ids)
+    event = await _emit(db, project_id=project_id, namespace=body.namespace, agent_id=acting_agent_id, event_type=MemoryEventType.QUERIED.value, payload={"source": "query_cross_agent", "query": body.query, "result_count": len(memories), "top_k": body.top_k, "target_agent_ids": body.target_agent_ids or []}, task_id=body.task_id, selected_memory_ids=body.selected_memory_ids or retrieved_ids)
     # Access tracking: best-effort bulk update (does not block response)
     await MemoryRepository.touch_accessed(db, retrieved_ids)
     return QueryResult(memories=memories, query_time_ms=round(elapsed_ms, 2), retrieval_event_id=event.event_id)
 
 
 @router.get("/{memory_id}", response_model=MemoryOut)
-async def get_memory(memory_id: str, project_id: str = Depends(check_rate_limit), db: AsyncSession = Depends(get_read_db)):
+async def get_memory(memory_id: str, project_id: str = Depends(check_rate_limit), auth: AuthContext = Depends(get_auth_context), db: AsyncSession = Depends(get_read_db)):
     """Get a single memory by ID."""
     mem = await MemoryRepository.get_by_id(db, memory_id, project_id)
     if not mem:
         raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
+    # Project scoping alone is not the agent boundary — a bound key may only read what its
+    # scope allows.
+    authorize_read(auth, mem, enforce_principal_trust=_settings.enable_trust_levels)
     return _mem_to_out(mem)
 
 
 @router.delete("/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_memory(memory_id: str, project_id: str = Depends(check_rate_limit), db: AsyncSession = Depends(get_db)):
+async def delete_memory(memory_id: str, project_id: str = Depends(check_rate_limit), auth: AuthContext = Depends(get_auth_context), db: AsyncSession = Depends(get_db)):
     """Delete a memory by ID."""
+    mem = await MemoryRepository.get_by_id(db, memory_id, project_id)
+    if not mem:
+        raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
+    authorize_delete(auth, mem, enforce_principal_trust=_settings.enable_trust_levels)
     deleted = await MemoryRepository.delete(db, memory_id, project_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
-    await _emit(db, project_id=project_id, memory_id=memory_id, namespace="default", event_type=MemoryEventType.DELETED.value, payload={"deleted_by": "api_caller"})
+    await _emit(db, project_id=project_id, memory_id=memory_id, namespace=mem.namespace or "default", event_type=MemoryEventType.DELETED.value, payload={"deleted_by": "api_caller"})
 
 
 @router.patch("/{memory_id}", response_model=MemoryOut)
@@ -429,6 +471,9 @@ async def update_memory(memory_id: str, body: MemoryUpdate, project_id: str = De
             mem = await MemoryRepository.get_by_id(db, memory_id, project_id)
             if not mem:
                 raise HTTPException(status_code=404, detail=f"Memory not found: {memory_id}")
+
+            # Mutating someone else's memory is the write-side equivalent of reading it.
+            authorize_delete(auth, mem, enforce_principal_trust=_settings.enable_trust_levels)
 
             changed: list[str] = []
             update_kwargs: dict[str, Any] = {}
@@ -448,6 +493,13 @@ async def update_memory(memory_id: str, body: MemoryUpdate, project_id: str = De
                 enable_trust_levels=_settings.enable_trust_levels,
             )
             if body.trust_level is not None:
+                # Relabelling provenance must respect the same ceiling as a fresh write:
+                # a memory cannot stay globally readable while being marked untrusted.
+                authorize_write(
+                    auth, agent_id=mem.agent_id, scope=mem.scope or "agent-private",
+                    content_trust_level=caller_trust,
+                    enforce_principal_trust=_settings.enable_trust_levels,
+                )
                 update_kwargs["trust_level"] = caller_trust
                 changed.append("trust_level")
 
@@ -464,6 +516,23 @@ async def update_memory(memory_id: str, body: MemoryUpdate, project_id: str = De
             # metadata (depth/keys/value-length) even on metadata-only patches, mirroring
             # the single content+metadata scan the add path performs.
             content_changed = body.content is not None and body.content != mem.content
+
+            # Replacing the content of an existing memory is a write of new content into that
+            # memory's existing scope, so it needs the same provenance ceiling as a fresh write.
+            # Gating this on `body.trust_level is not None` (as the relabel branch above does)
+            # left a hole: PATCH the content of a global memory without naming a trust_level and
+            # the new, unvouched content lands in global scope under the old trust label --
+            # exactly the untrusted-reaches-global promotion the add path refuses.
+            #
+            # scan_trust, not caller_trust: it is min(stored, caller), the same level the
+            # scanner screens at just below, so the authorization and the screening agree.
+            if content_changed and body.trust_level is None:
+                authorize_write(
+                    auth, agent_id=mem.agent_id, scope=mem.scope or "agent-private",
+                    content_trust_level=scan_trust,
+                    enforce_principal_trust=_settings.enable_trust_levels,
+                )
+
             if content_changed or body.metadata is not None:
                 effective_content = body.content if content_changed else mem.content
                 verdict = await _scanner.scan_async(
