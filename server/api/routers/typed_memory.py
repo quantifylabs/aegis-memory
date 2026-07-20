@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from temporal_decay import compute_relevance_score
 
 from api.dependencies.auth import AuthContext, check_rate_limit, get_auth_context
+from memory_authz import authorize_write, effective_agent_id
 from api.dependencies.database import get_db, get_read_db
 from config import get_settings
 from content_security import ContentSecurityScanner
@@ -179,6 +180,7 @@ async def _create_typed_memory(
     db: AsyncSession,
     project_id: str,
     *,
+    auth: AuthContext,
     content: str,
     memory_type: MemoryType,
     default_scope: MemoryScope,
@@ -194,8 +196,23 @@ async def _create_typed_memory(
     error_pattern: str | None = None,
     trust_level: str = "internal",
 ) -> TypedAddResult:
-    """Shared helper for all typed memory creation endpoints."""
+    """Shared helper for all typed memory creation endpoints.
+
+    This is the single choke point for typed writes, so authorization happens here rather than
+    in each of the four routes. Note ``create_semantic`` passes ``default_scope=GLOBAL``, which
+    makes the content-provenance ceiling load-bearing: without it, untrusted content could
+    become readable by every agent simply by being filed as a semantic memory.
+    """
     embed_service = get_embedding_service()
+
+    # Pin the agent identity to the API key when the key is bound.
+    agent_id = effective_agent_id(auth, agent_id)
+
+    authorize_write(
+        auth, agent_id=agent_id, scope=default_scope.value,
+        content_trust_level=trust_level,
+        enforce_principal_trust=_settings.enable_trust_levels,
+    )
 
     # Dedup check
     hash_val = content_hash(content)
@@ -282,6 +299,7 @@ async def create_episodic(
     """Store an episodic memory (time-ordered interaction trace)."""
     return await _create_typed_memory(
         db, project_id,
+        auth=auth,
         content=body.content,
         memory_type=MemoryType.EPISODIC,
         default_scope=MemoryScope.AGENT_PRIVATE,
@@ -309,6 +327,7 @@ async def create_semantic(
     """Store a semantic memory (fact, preference, knowledge)."""
     return await _create_typed_memory(
         db, project_id,
+        auth=auth,
         content=body.content,
         memory_type=MemoryType.SEMANTIC,
         default_scope=MemoryScope.GLOBAL,
@@ -341,6 +360,7 @@ async def create_procedural(
 
     return await _create_typed_memory(
         db, project_id,
+        auth=auth,
         content=body.content,
         memory_type=MemoryType.PROCEDURAL,
         default_scope=MemoryScope.GLOBAL,
@@ -370,6 +390,7 @@ async def create_control(
 
     return await _create_typed_memory(
         db, project_id,
+        auth=auth,
         content=body.content,
         memory_type=MemoryType.CONTROL,
         default_scope=MemoryScope.GLOBAL,
@@ -391,10 +412,12 @@ async def create_control(
 async def typed_query(
     body: TypedQuery,
     project_id: str = Depends(check_rate_limit),
+    auth: AuthContext = Depends(get_auth_context),
     db: AsyncSession = Depends(get_db),
 ):
     """Type-filtered semantic search across cognitive memory types."""
     start = time.monotonic()
+    acting_agent_id = effective_agent_id(auth, body.agent_id)
     embed_service = get_embedding_service()
     query_embedding = await embed_service.embed_single(body.query, db)
 
@@ -404,8 +427,8 @@ async def typed_query(
         project_id=project_id,
         namespace=body.namespace,
         user_id=body.user_id,
-        agent_id=body.agent_id,
-        requesting_agent_id=body.agent_id,
+        agent_id=acting_agent_id,
+        requesting_agent_id=acting_agent_id,
         top_k=body.top_k,
         min_score=body.min_score,
         memory_types=body.memory_types,

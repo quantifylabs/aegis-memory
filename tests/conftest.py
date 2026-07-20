@@ -209,7 +209,28 @@ def _patch_for_integration() -> None:
 
     # Fake embedding service.
     fake = _FakeEmbeddingService()
-    _embed_mod.get_embedding_service = lambda: fake  # type: ignore[assignment]
+    _get_fake = lambda: fake  # noqa: E731
+    _embed_mod.get_embedding_service = _get_fake  # type: ignore[assignment]
+
+    # Routers do `from embedding_service import get_embedding_service`, which binds the name
+    # into the router's own namespace at import time. Rebinding it on the embedding_service
+    # module (above) therefore does NOT reach a router that was already imported -- that router
+    # keeps calling the real service and hits the network, which shows up much later as an
+    # unrelated retrieval assertion failing in a *different* test file.
+    #
+    # Any test that imports a router before the first integration test triggers this. Rebind on
+    # every module that already grabbed the symbol so the patch is order-independent.
+    import sys as _sys
+    _real = getattr(_embed_mod, "_real_get_embedding_service", None)
+    for _mod in list(_sys.modules.values()):
+        if _mod is None or _mod is _embed_mod:
+            continue
+        _existing = getattr(_mod, "get_embedding_service", None)
+        if _existing is not None and _existing is not _get_fake and _existing is not _real:
+            try:
+                _mod.get_embedding_service = _get_fake  # type: ignore[attr-defined]
+            except (AttributeError, TypeError):
+                pass  # frozen//C modules -- nothing imported the symbol from there anyway
 
 
 # ---------------------------------------------------------------------------

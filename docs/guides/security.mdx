@@ -113,27 +113,51 @@ Four trust levels following OWASP recommendations:
 | `privileged` | All scopes | All | All | Yes |
 | `system` | All scopes | All | All | Yes |
 
-<Warning>
-**Enforcement status.** This table describes the policy defined in `server/trust_levels.py`. Today
-only the **Admin** column is enforced — `TrustPolicy.can_admin()` gates the `/security/*` endpoints.
-The Write, Read, and Delete rules are **not yet wired into the memory routes**: trust level
-currently controls how aggressively content is *screened*, not whether a principal may write, read,
-or delete. Wiring `can_write` / `can_read_scope` / `can_delete` into `/memories/*` is in progress.
-</Warning>
+<Note>
+**Enforcement status.** The Read and Delete rules are enforced on every memory route for
+**bound** API keys. The Write column — specifically "an `internal` principal may not write
+`global`" — is enforced when `ENABLE_TRUST_LEVELS=true`, because turning it on requires a
+privileged key for legitimate global writes. `can_admin()` gates `/security/*` as before.
+
+Independent of that setting, one rule is **always** enforced: content labelled `untrusted` or
+`unknown` can never be written to `global` scope. See [Content provenance vs. principal
+trust](#content-provenance-vs-principal-trust).
+</Note>
+
+### Content provenance vs. principal trust
+
+Two different things are called "trust", and conflating them is a security bug:
+
+| | What it describes | What it governs | Where |
+|---|---|---|---|
+| **Content provenance** | Where the *data* came from | What scope the content may reach | `aegis_memory/scope_policy.py` |
+| **Principal trust** | How much we trust the *caller* | Whether this key may write/read/delete | `server/trust_levels.py` |
+
+Both are checked on a write: provenance is the ceiling, principal trust is the floor. The
+provenance rule lives in one module imported by both `aegis_memory.guard` and the server, so the
+offline gate and the API cannot drift.
 
 ### Agent Identity Binding
 
-API keys can carry a `bound_agent_id`. The check itself (`enforce_agent_binding` in
-`server/api/dependencies/auth.py`) is implemented and unit-tested.
+API keys can carry a `bound_agent_id`. When set, that identity is authoritative on every memory
+route: the acting agent is resolved from the key, and a request body claiming a different
+`agent_id` is rejected with 403. The scope ACL is then evaluated against the bound agent, which is
+what makes `agent-private` an enforceable boundary.
 
-<Warning>
-**This is not currently enforced on the memory routes.** `/memories/*` derives the requesting agent
-from the `agent_id` in the request body without checking it against the key's `bound_agent_id`. As a
-result, **any holder of a project API key can read any agent's `agent-private` memories in that
-project** by setting `agent_id` in the request. Agent identity is not a security boundary today —
-treat a project key as trusting the entire application. Project-level isolation is unaffected and
-is enforced on every route.
-</Warning>
+<Note>
+**Unbound keys act as any agent in their project.** That is the intended posture for a
+project-scoped key — it represents the whole application, and has no agent identity to check
+against. Bind one key per agent when agents must be mutually isolated. Project-level isolation is
+always enforced regardless.
+</Note>
+
+### Scope inference cannot escalate
+
+`ScopeInference` reads memory content to pick a scope, and content is attacker-controlled — text
+containing keywords like "team" and "policy" would otherwise infer `global`. Inference therefore
+can never *raise* privilege: an inferred `global` is capped to `agent-private` when the content's
+provenance is untrusted. An *explicit* scope in the request is a caller instruction rather than
+content influence, so it is checked by the authorization layer instead.
 
 ## Per-Agent Rate Limiting
 

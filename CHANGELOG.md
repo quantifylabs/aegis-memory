@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **Agent identity is now enforced on every memory route.** `enforce_agent_binding` was
+  implemented, exported, and unit-tested, but called from zero routers; `/memories/*` derived the
+  requesting agent from the `agent_id` in the request body. Any holder of a project API key could
+  read any agent's `agent-private` memories in that project. The acting agent is now resolved from
+  the API key via `memory_authz.effective_agent_id()` on add, add_batch, query, hybrid_query,
+  query_cross_agent, get, update, delete, the four typed-memory creates, and typed query. A bound
+  key claiming a different `agent_id` gets 403. Unbound keys continue to act as any agent in their
+  project — the documented posture for a project-scoped key.
+
+- **Untrusted content can no longer reach `global` scope on the server.** `TrustPolicy.can_write`
+  had no production call sites, so trust level only affected screening intensity. Worse,
+  `ScopeInference` resolves scope from keywords *in the content itself*, so untrusted content
+  containing two words like "team" and "policy" promoted itself into the scope every agent reads.
+  Now: the content-provenance ceiling is enforced on every write path, and inferred scope can never
+  raise privilege (an inferred `global` is capped to `agent-private` for untrusted content). An
+  explicit scope is still a caller instruction and is checked by the authorization layer.
+
+- **`guard` and the server no longer diverge.** The rule "untrusted content may not become globally
+  readable" now lives in one module, `aegis_memory/scope_policy.py`, imported by both
+  `aegis_memory.guard` and the server. Previously guard enforced it and the server did not.
+
+- **Read/delete authorization on direct object access.** `GET`, `PATCH`, and `DELETE
+  /memories/{id}` resolved only `project_id`. They now check the memory's scope and ownership for
+  bound keys via `TrustPolicy.can_read_scope` / `can_delete`.
+
+- **Principal-trust rules** (`can_write` against the *caller's* trust level, e.g. an `internal` key
+  may not write `global`) are enforced when `ENABLE_TRUST_LEVELS=true`. This is gated because
+  enabling it requires a privileged key for legitimate global writes. The content-provenance rule
+  above is enforced unconditionally.
+
+- **Added `tests/test_authz_bypass.py`** — 40 tests that attempt real bypasses, including
+  structural assertions that each route resolves `get_auth_context` and that the routers actually
+  call the authz helpers. The original bug was invisible to behavioral unit tests because they
+  called the policy functions directly; these fail against the pre-fix tree.
+
 ### Changed
 
 - **Documentation corrected: agent identity binding is not enforced on the memory routes.**

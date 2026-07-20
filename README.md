@@ -202,9 +202,11 @@ A short, honest statement of what Aegis defends and how — drawn from the
 |---|---|
 | Prompt injection / memory poisoning in stored content | 4-stage content security pipeline (validation → secrets/PII → injection regex → optional LLM classifier) |
 | Secrets/credentials leaking into memory | Secret + token detection (AWS/OpenAI/GitHub keys, credit cards, SSN-like patterns) with reject/redact/flag policy |
-| Untrusted content reaching every agent | `aegis_memory.guard` blocks `untrusted`/`unknown` content from `global` scope. **The server does not yet apply this rule** — see the note below |
+| Untrusted content reaching every agent | `untrusted`/`unknown` content is refused `global` scope on every write path — the same rule in `aegis_memory.guard` and the server, from one shared policy module |
 | Silent tampering with stored memories | HMAC-SHA256 integrity hash over `{project}:{agent}:{content}`, verifiable on demand |
-| One agent reading another's private memory | Scope-aware ACLs (`agent-private` / `agent-shared` / `global`) applied in every query — but see the note below on agent identity |
+| One agent reading another's private memory | Scope-aware ACLs (`agent-private` / `agent-shared` / `global`) enforced in every query, against the agent bound to the API key |
+| Agent-identity spoofing | Keys bound to an agent id: a request body claiming a different `agent_id` is rejected with 403 |
+| Content escalating its own visibility | Scope inference can never *raise* privilege — an inferred `global` is capped for untrusted content |
 | Cross-project access | API keys are project-scoped; every route resolves `project_id` from the authenticated key |
 | Write floods / runaway agents | Per-project (and per-agent) sliding-window rate limits + memory quotas |
 
@@ -214,42 +216,36 @@ A short, honest statement of what Aegis defends and how — drawn from the
 **Trust levels** label content provenance: `untrusted` (external/user/tool content) → `internal`
 (default server trust) → `privileged` (admin-capable) → `system` (highest). **Scopes** control
 who can read a memory: `agent-private` (owner only) → `agent-shared` (owner + explicitly shared
-agents) → `global` (any agent in the project/namespace). The intended core rule is that
-screened-clean content is allowed into private/shared scopes while untrusted content is blocked
-from `global`, because promotion there means *every* agent reads it.
+agents) → `global` (any agent in the project/namespace). The core rule: screened-clean content is
+allowed into private/shared scopes, but untrusted content is blocked from `global`, because
+promotion there means *every* agent reads it.
 
-**Today that rule holds in `aegis_memory.guard` but not on the server** — see the note below the
-table. The trust hierarchy and scopes described here are the model; the note states which parts of
-it are currently enforced where.
+Two different things are called "trust" here and the distinction is load-bearing. A memory's
+`trust_level` labels the **content's provenance** — where the data came from — and governs what
+scope it may reach. An API key's trust level describes the **principal** and governs what that
+caller may do. Both are checked on a write; the shared rule lives in `aegis_memory/scope_policy.py`
+so `guard` and the server cannot drift.
 
 </details>
 
 > [!IMPORTANT]
-> **Agent identity is not currently a security boundary.** The memory routes derive the requesting
-> agent from the `agent_id` supplied in the request body, and do not yet verify it against the
-> agent bound to the API key. `bound_agent_id` and `enforce_agent_binding` exist and are tested,
-> but are not wired into `/memories/*`. **Any holder of a project API key can therefore read any
-> agent's `agent-private` memories within that project by setting `agent_id` in the request.**
+> **Agent identity comes from the API key, not the request body.** Bind a key to an agent
+> (`bound_agent_id`) and that identity is authoritative: a request claiming a different `agent_id`
+> is rejected with 403, and the scope ACL is evaluated against the bound agent. This is what makes
+> `agent-private` a boundary rather than a convention.
 >
-> Treat a project API key as trusting the whole application, not as separating agents inside it.
-> Scopes are a correctness and blast-radius tool today, not an authorization boundary between
-> mutually distrusting agents. Project isolation is unaffected.
->
-> **Relatedly, the server does not gate scope on trust level.** `TrustPolicy.can_write()` is
-> implemented and tested but is not called from `/memories/*`. Trust level currently controls how
-> aggressively content is *screened*, not what scope it may be written to. Because
-> `ScopeInference` can promote a memory to `global` based on keywords **in the content itself**,
-> untrusted content that reaches the server can land in `global` scope, where every agent in the
-> project reads it. `aegis_memory.guard` does enforce this rule offline — the server and the guard
-> currently have different semantics, and unifying them is part of the same fix.
->
-> Enforcement for both is the next change landing — tracked in
-> [Discussions](https://github.com/quantifylabs/aegis-memory/discussions).
+> **An *unbound* key represents the whole application** and may act as any agent in its project —
+> that is the documented posture for a project-scoped key, not a bypass. Agent-level isolation is
+> available to callers who opt into bound keys; an unbound key has no agent identity to check
+> against. Project isolation is always enforced.
 
 **What it does _not_ do (limitations)**
 
-- **Agent-level authorization within a project is not enforced** (see the note above). Project-level
-  isolation is.
+- Agent-level isolation requires **bound** API keys. An unbound project key can act as any agent in
+  its project by design — bind keys per agent when agents must be mutually isolated.
+- `TrustPolicy`'s principal rules (an `internal` key may not write `global`) are enforced only when
+  `ENABLE_TRUST_LEVELS=true`, since enabling them requires a privileged key for global writes. The
+  content-provenance rule — untrusted content may never reach `global` — is always enforced.
 - Regex-only stages (1–3) miss adaptive/semantic injection; Stage 4 (LLM classifier) improves
   coverage but adds latency and an API call, and can drift with the model/provider.
 - Integrity hashing detects tampering — it does **not** encrypt content. If `AEGIS_INTEGRITY_KEY`
@@ -265,7 +261,7 @@ recommendations natively. Six capabilities, none optional:
 1. **[4-stage content security pipeline](https://docs.aegismemory.com/guides/security)** — input validation, sensitive-data scanning, prompt-injection detection, and an optional LLM-based injection classifier. On every memory write.
 2. **[HMAC-SHA256 integrity signing](https://docs.aegismemory.com/guides/security)** — tamper detection on store, verification on demand. You know if a memory was modified.
 3. **[OWASP 4-tier trust hierarchy](https://docs.aegismemory.com/guides/security)** — untrusted, internal, privileged, system. Agents get compromised; Aegis limits the blast radius.
-4. **[Project-scoped API keys](https://docs.aegismemory.com/guides/security)** — every route resolves its project from the authenticated key, so memories never cross a project boundary. Keys can also carry a `bound_agent_id`; enforcing it on the memory routes is in progress (see the note in [Threat model](#threat-model)).
+4. **[Cryptographic agent binding](https://docs.aegismemory.com/guides/security)** — every route resolves its project *and* its acting agent from the authenticated key. No more trusting a request body that says "I'm the admin agent."
 5. **[ACE loop](https://docs.aegismemory.com/guides/ace-patterns)** — generation, reflection, curation. Agents that learn from their own mistakes and promote what works.
 6. **[Multi-agent coordination](https://docs.aegismemory.com/quickstart/installation)** — scoped access control, cross-agent query, structured handoffs. Memory sharing with boundaries.
 
@@ -495,7 +491,7 @@ docs.[^comparison]
 | **Content security pipeline** | — | — | — | 4-stage (validation, PII, injection, LLM) |
 | **Memory integrity** | — | — | — | HMAC-SHA256 |
 | **Trust hierarchy** | — | — | — | 4-tier OWASP model |
-| **Project-scoped API keys** | — | — | — | Yes (agent-level binding in progress) |
+| **Agent identity binding** | — | — | — | Cryptographic API key |
 | **Per-agent rate limiting** | — | — | — | Sliding window |
 | **Security audit trail** | — | — | — | Immutable event log |
 | **Sensitive data protection** | — | — | — | Auto-detect + reject/redact/flag |

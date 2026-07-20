@@ -43,12 +43,14 @@ from typing import Any
 
 from .inspect._scanner_bridge import ContentAction, get_scanner
 from .inspect.sinks import KEYED_WRITE_METHODS, WRITE_METHODS
+from .scope_policy import UNTRUSTED_CONTENT_LEVELS, content_may_enter_scope
 
 # Keyword arg names that commonly carry the written value (mirrors analyzer._VALUE_KWARGS).
 _VALUE_KWARGS = ("value", "content", "data", "text", "texts", "documents", "memory", "messages", "item")
 
 # Content provenance levels that must never be written straight to global scope.
-_UNTRUSTED_LEVELS = ("untrusted", "unknown")
+# Re-exported from scope_policy so the server and the guard share one definition.
+_UNTRUSTED_LEVELS = UNTRUSTED_CONTENT_LEVELS
 
 
 @dataclass
@@ -97,7 +99,8 @@ def write(
     sv = get_scanner().scan(content, metadata)
     scan_blocked = (not sv.allowed) or sv.action == ContentAction.REJECT
     # untrusted/unknown content may never be written straight to global scope.
-    scope_blocked = sc == "global" and tl in _UNTRUSTED_LEVELS
+    # Shared with the server via aegis_memory.scope_policy so the two cannot drift.
+    scope_blocked = not content_may_enter_scope(tl, sc)
     allowed = not (scan_blocked or scope_blocked)
 
     dets = [
