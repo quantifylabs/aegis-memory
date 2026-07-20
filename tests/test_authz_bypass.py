@@ -328,3 +328,117 @@ class TestRouteWiring:
             assert "requesting_agent_id=body.requesting_agent_id" not in src, (
                 f"{module.__name__} derives the ACL identity from the request body"
             )
+
+
+class TestHttpLayerBypass:
+    """The bypass attempted the way an attacker would: over HTTP, against a real route.
+
+    Everything above this line either calls a policy function directly or greps the router
+    source. Both are proxies. A direct call proves the policy is correct but not that anything
+    invokes it -- the exact blind spot that let this vulnerability ship. A source grep proves a
+    name appears but not that the call is reached, that its result is honored, or that it runs
+    before the data is fetched.
+
+    This class closes that gap: it drives an actual request through the FastAPI stack and
+    asserts on the response the attacker would receive. The repository is replaced with a
+    canary that records being called, so the test distinguishes "denied" from "allowed but
+    happened to return nothing" -- and fails loudly if a future refactor moves the check to
+    after the read.
+    """
+
+    @staticmethod
+    def _client(bound_agent_id: str, canary: dict):
+        """A test client for the memories router, authenticated as ``bound_agent_id``.
+
+        Only the trust boundary itself is real. Auth is overridden to simulate a key already
+        bound to an agent (issuing real keys is TokenVerifier's job, tested elsewhere); the DB
+        and embedding service are stubbed because the authorization decision must happen before
+        either is touched -- which is itself part of what this asserts.
+        """
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from api.dependencies.auth import AuthContext, check_rate_limit, get_auth_context
+        from api.dependencies.database import get_db, get_read_db
+        from api.routers import memories
+        from memory_repository import MemoryRepository
+
+        app = FastAPI()
+        # Same prefix as production (api/app.py:133) so the paths under test are the real ones.
+        app.include_router(memories.router, prefix="/memories")
+
+        async def _fake_db():
+            yield None
+
+        app.dependency_overrides[get_auth_context] = lambda: AuthContext(
+            project_id="proj-1", trust_level="internal", bound_agent_id=bound_agent_id
+        )
+        app.dependency_overrides[check_rate_limit] = lambda: "proj-1"
+        app.dependency_overrides[get_db] = _fake_db
+        app.dependency_overrides[get_read_db] = _fake_db
+
+        class _FakeEmbed:
+            async def embed_single(self, *a, **k):
+                return [0.0] * 8
+
+        async def _canary(*args, **kwargs):
+            """Stands in for the retrieval path. Reaching this means authorization let the
+            request through to the data."""
+            canary["called"] = True
+            canary["requesting_agent_id"] = kwargs.get("requesting_agent_id")
+            raise AssertionError("retrieval reached")
+
+        memories.get_embedding_service = lambda: _FakeEmbed()
+        MemoryRepository.semantic_search = staticmethod(_canary)
+
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_spoofed_agent_id_is_rejected_over_http(self):
+        """The headline vulnerability, end to end.
+
+        agent-2's key asks for agent-1's memories by naming agent-1 in the body. Against the
+        pre-fix code this returned 200 with agent-1's private memories.
+        """
+        canary: dict = {}
+        client = self._client("agent-2", canary)
+
+        resp = client.post("/memories/query", json={"query": "secrets", "agent_id": "agent-1"})
+
+        assert resp.status_code == 403, (
+            f"expected 403 for a spoofed agent_id, got {resp.status_code}. "
+            f"A project key must not be able to read another agent's memories."
+        )
+        assert not canary.get("called"), (
+            "authorization ran after the retrieval instead of before it: the memories were "
+            "already fetched by the time the request was denied"
+        )
+
+    def test_own_agent_id_reaches_retrieval_with_the_bound_identity(self):
+        """Positive control.
+
+        Without this, a route that denied *everything* would pass the test above. It also pins
+        the identity handed to the ACL: the one from the key, never the one from the body.
+        """
+        canary: dict = {}
+        client = self._client("agent-1", canary)
+
+        client.post("/memories/query", json={"query": "notes", "agent_id": "agent-1"})
+
+        assert canary.get("called"), "a legitimate self-query was blocked before retrieval"
+        assert canary.get("requesting_agent_id") == "agent-1"
+
+    def test_omitted_agent_id_is_pinned_to_the_key_not_left_open(self):
+        """Omitting agent_id must not widen the query to every agent.
+
+        A bound key that sends no agent_id should still be scoped to its own identity; passing
+        None here would hand the ACL a wildcard.
+        """
+        canary: dict = {}
+        client = self._client("agent-1", canary)
+
+        client.post("/memories/query", json={"query": "notes"})
+
+        assert canary.get("called")
+        assert canary.get("requesting_agent_id") == "agent-1", (
+            "omitting agent_id left the ACL identity unset, widening the query beyond the key"
+        )
