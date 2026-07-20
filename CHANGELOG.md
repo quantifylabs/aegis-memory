@@ -27,8 +27,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicit scope is still a caller instruction and is checked by the authorization layer.
 
 - **`guard` and the server no longer diverge.** The rule "untrusted content may not become globally
-  readable" now lives in one module, `aegis_memory/scope_policy.py`, imported by both
-  `aegis_memory.guard` and the server. Previously guard enforced it and the server did not.
+  readable" now lives in `scope_policy.py`. As with `content_security.py`, it ships as two
+  byte-identical copies — `aegis_memory/scope_policy.py` for the wheel and `server/scope_policy.py`
+  for the production image, which is built from `context: ./server` and has no `aegis_memory`
+  package. `tests/test_scope_policy_no_drift.py` fails if they diverge, and also boots the uvicorn
+  entrypoint with `aegis_memory` blocked so a cross-boundary import fails in CI rather than at
+  container startup. Previously guard enforced this rule and the server did not.
+
+- **Content-only `PATCH` is authorized.** The write check was gated on `body.trust_level is not
+  None`, so replacing the content of a `global` memory without naming a trust level stored new,
+  unvouched content in global scope under the old trust label — the promotion the add path
+  refuses. A content change is now authorized as a write into the memory's existing scope.
+
+- **Search honors principal trust.** `authorize_read` gated fetch-by-id, but query paths return
+  rows in bulk and never passed through it, so a principal that `TrustPolicy` confines to `global`
+  still got its own private and shared rows back from a query — search was more permissive than
+  `GET /{id}` for the same caller. `query`, `hybrid_query`, and `query_cross_agent` now apply
+  `memory_authz.read_scope_restriction()`.
 
 - **Read/delete authorization on direct object access.** `GET`, `PATCH`, and `DELETE
   /memories/{id}` resolved only `project_id`. They now check the memory's scope and ownership for
@@ -39,10 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enabling it requires a privileged key for legitimate global writes. The content-provenance rule
   above is enforced unconditionally.
 
-- **Added `tests/test_authz_bypass.py`** — 40 tests that attempt real bypasses, including
+- **Added `tests/test_authz_bypass.py`** — tests that attempt real bypasses over HTTP, plus
   structural assertions that each route resolves `get_auth_context` and that the routers actually
   call the authz helpers. The original bug was invisible to behavioral unit tests because they
-  called the policy functions directly; these fail against the pre-fix tree.
+  called the policy functions directly; these fail against the pre-fix tree, which was verified
+  rather than assumed.
 
 ### Changed
 

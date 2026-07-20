@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from api.dependencies.auth import AuthContext, check_rate_limit, get_auth_context
-from memory_authz import authorize_delete, authorize_read, authorize_write, effective_agent_id
+from memory_authz import authorize_delete, authorize_read, authorize_write, effective_agent_id, read_scope_restriction
 from api.dependencies.database import get_db, get_read_db
 from embedding_service import content_hash, get_embedding_service
 from event_repository import EventRepository
@@ -347,9 +347,12 @@ async def query_memories(body: MemoryQuery, project_id: str = Depends(check_rate
             # The scope ACL is only as strong as the identity behind it: resolve the requesting
             # agent from the API key, not from the request body.
             acting_agent_id = effective_agent_id(auth, body.agent_id)
+            # Search returns rows in bulk and never passes through authorize_read, so the
+            # principal-trust ceiling has to be applied as a filter here.
+            scope_filter = read_scope_restriction(auth, enforce_principal_trust=_settings.enable_trust_levels) or body.scope
             embed_service = get_embedding_service()
             query_embedding = await embed_service.embed_single(body.query, db)
-            results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, agent_id=acting_agent_id, requesting_agent_id=acting_agent_id, top_k=body.top_k, min_score=body.min_score, requested_scope=body.scope, memory_types=body.memory_types, apply_decay=body.apply_decay)
+            results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, agent_id=acting_agent_id, requesting_agent_id=acting_agent_id, top_k=body.top_k, min_score=body.min_score, requested_scope=scope_filter, memory_types=body.memory_types, apply_decay=body.apply_decay)
         elapsed_ms = (time.monotonic() - start) * 1000
         memories = [_mem_to_out(mem, score) for mem, score in results]
         retrieved_ids = [mem.id for mem, _ in results]
@@ -383,6 +386,13 @@ async def hybrid_query(body: MemoryHybridQuery, project_id: str = Depends(check_
                 candidate_pool=body.candidate_pool,
                 apply_decay=body.apply_decay,
             )
+            # hybrid_search has no requested_scope parameter (it filters in Python against
+            # can_access after fusion), so the principal-trust ceiling is applied here for
+            # parity with semantic_search. Post-filtering can shrink the page below top_k --
+            # acceptable, because the alternative is returning rows this principal may not read.
+            scope_filter = read_scope_restriction(auth, enforce_principal_trust=_settings.enable_trust_levels)
+            if scope_filter is not None:
+                results = [(m, s) for m, s in results if (m.scope or "agent-private") == scope_filter]
         elapsed_ms = (time.monotonic() - start) * 1000
         record_operation(OperationNames.MEMORY_QUERY, "success")
         return {
@@ -411,7 +421,8 @@ async def query_cross_agent(body: CrossAgentQuery, project_id: str = Depends(che
     acting_agent_id = effective_agent_id(auth, body.requesting_agent_id)
     embed_service = get_embedding_service()
     query_embedding = await embed_service.embed_single(body.query, db)
-    results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, requesting_agent_id=acting_agent_id, target_agent_ids=body.target_agent_ids, top_k=body.top_k, min_score=body.min_score, requested_scope=body.scope, apply_decay=body.apply_decay)
+    scope_filter = read_scope_restriction(auth, enforce_principal_trust=_settings.enable_trust_levels) or body.scope
+    results, query_meta = await MemoryRepository.semantic_search(db, query_embedding=query_embedding, project_id=project_id, namespace=body.namespace, user_id=body.user_id, requesting_agent_id=acting_agent_id, target_agent_ids=body.target_agent_ids, top_k=body.top_k, min_score=body.min_score, requested_scope=scope_filter, apply_decay=body.apply_decay)
     elapsed_ms = (time.monotonic() - start) * 1000
     memories = [_mem_to_out(mem, score) for mem, score in results]
     retrieved_ids = [mem.id for mem, _ in results]
@@ -505,6 +516,23 @@ async def update_memory(memory_id: str, body: MemoryUpdate, project_id: str = De
             # metadata (depth/keys/value-length) even on metadata-only patches, mirroring
             # the single content+metadata scan the add path performs.
             content_changed = body.content is not None and body.content != mem.content
+
+            # Replacing the content of an existing memory is a write of new content into that
+            # memory's existing scope, so it needs the same provenance ceiling as a fresh write.
+            # Gating this on `body.trust_level is not None` (as the relabel branch above does)
+            # left a hole: PATCH the content of a global memory without naming a trust_level and
+            # the new, unvouched content lands in global scope under the old trust label --
+            # exactly the untrusted-reaches-global promotion the add path refuses.
+            #
+            # scan_trust, not caller_trust: it is min(stored, caller), the same level the
+            # scanner screens at just below, so the authorization and the screening agree.
+            if content_changed and body.trust_level is None:
+                authorize_write(
+                    auth, agent_id=mem.agent_id, scope=mem.scope or "agent-private",
+                    content_trust_level=scan_trust,
+                    enforce_principal_trust=_settings.enable_trust_levels,
+                )
+
             if content_changed or body.metadata is not None:
                 effective_content = body.content if content_changed else mem.content
                 verdict = await _scanner.scan_async(

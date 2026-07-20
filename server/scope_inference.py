@@ -6,7 +6,7 @@ Kept simple and deterministic for v1.
 """
 
 
-from aegis_memory.scope_policy import content_may_enter_scope
+from scope_policy import content_may_enter_scope
 from models import MemoryScope
 
 

@@ -200,6 +200,94 @@ class TestReadAuthorization:
         assert exc.value.status_code == 403
 
 
+class TestSharingBeatsTrustTier:
+    """Pins an implicit precedence rule in ``authorize_read``, which is otherwise undocumented.
+
+    The sharing-list check runs *before* the trust check and returns early on a match. So an
+    ``untrusted`` principal named in ``shared_with_agents`` reads the memory, even though
+    ``TrustPolicy.can_read_scope('untrusted', ...)`` confines that tier to ``global`` alone.
+
+    That is intended -- an explicit grant by the owner is a deliberate act and should outrank
+    the caller's default tier, otherwise ``shared_with_agents`` would silently do nothing for
+    the exact low-trust agents it is most often used to hand data to. But nothing recorded the
+    intent, so the next reader of that function sees an ordering bug and "fixes" it, revoking
+    every explicit grant to an untrusted agent. These tests exist to make that a deliberate
+    choice rather than an accident: if you change the ordering, you fail here.
+    """
+
+    def test_explicit_share_outranks_untrusted_tier(self):
+        from memory_authz import authorize_read
+        authorize_read(
+            _auth(bound_agent_id="agent-2", trust_level="untrusted"),
+            _memory(agent_id="agent-1", scope="agent-shared", shared_with_agents=["agent-2"]),
+            enforce_principal_trust=True,
+        )
+
+    def test_the_grant_must_be_explicit_not_merely_shared_scope(self):
+        """The early return is keyed on the list, not the scope. Absent the grant, tier rules."""
+        from memory_authz import authorize_read
+        with pytest.raises(HTTPException) as exc:
+            authorize_read(
+                _auth(bound_agent_id="agent-3", trust_level="untrusted"),
+                _memory(agent_id="agent-1", scope="agent-shared", shared_with_agents=["agent-2"]),
+                enforce_principal_trust=True,
+            )
+        assert exc.value.status_code == 403
+
+    def test_sharing_does_not_extend_to_private_scope(self):
+        """Precedence is scoped to agent-shared. A stray grant cannot open a private memory."""
+        from memory_authz import authorize_read
+        with pytest.raises(HTTPException) as exc:
+            authorize_read(
+                _auth(bound_agent_id="agent-2", trust_level="untrusted"),
+                _memory(agent_id="agent-1", scope="agent-private", shared_with_agents=["agent-2"]),
+                enforce_principal_trust=True,
+            )
+        assert exc.value.status_code == 403
+
+
+class TestPrincipalTrustLimitsReads:
+    """Regression: search must not be more permissive than fetch-by-id for the same caller.
+
+    ``authorize_read`` gates the per-id path, but search returns rows in bulk and never passes
+    through it, so an untrusted principal still got its own private rows back from a query --
+    the scope ACL keys off agent identity and never consulted principal trust.
+    """
+
+    def test_untrusted_principal_is_confined_to_global(self):
+        from memory_authz import read_scope_restriction
+        assert read_scope_restriction(
+            _auth(bound_agent_id="agent-1", trust_level="untrusted"),
+            enforce_principal_trust=True,
+        ) == "global"
+
+    @pytest.mark.parametrize("trust", ["internal", "privileged", "system"])
+    def test_ordinary_principals_are_unrestricted(self, trust):
+        from memory_authz import read_scope_restriction
+        assert read_scope_restriction(
+            _auth(bound_agent_id="agent-1", trust_level=trust),
+            enforce_principal_trust=True,
+        ) is None
+
+    def test_restriction_is_inert_when_trust_levels_are_off(self):
+        from memory_authz import read_scope_restriction
+        assert read_scope_restriction(
+            _auth(bound_agent_id="agent-1", trust_level="untrusted"),
+            enforce_principal_trust=False,
+        ) is None
+
+    def test_query_paths_apply_the_restriction(self):
+        """Wiring assertion: the helper must reach every search route, not just exist."""
+        import inspect
+        from api.routers import memories
+
+        src = inspect.getsource(memories)
+        assert src.count("read_scope_restriction(") >= 3, (
+            "read_scope_restriction must be applied on query_memories, hybrid_query, and "
+            "query_cross_agent -- a search route that skips it is more permissive than GET /{id}"
+        )
+
+
 class TestDeleteAuthorization:
     def test_bound_key_cannot_delete_another_agents_memory(self):
         from memory_authz import authorize_delete
@@ -314,6 +402,22 @@ class TestRouteWiring:
             assert f"{fn}(" in mem_src, f"memories.py never calls {fn}"
         for fn in ("effective_agent_id", "authorize_write"):
             assert f"{fn}(" in typed_src, f"typed_memory.py never calls {fn}"
+
+    def test_patch_authorizes_content_changes_not_only_relabels(self):
+        """Regression: PATCH gated its write check on ``body.trust_level is not None``.
+
+        That left content-only patches unauthorized: replace the content of a global memory
+        without naming a trust_level and the new, unvouched content landed in global scope
+        under the old trust label -- the promotion the add path refuses.
+        """
+        import inspect
+        from api.routers import memories
+
+        src = inspect.getsource(memories.update_memory)
+        assert "content_changed and body.trust_level is None" in src, (
+            "update_memory does not authorize content-only patches; a content change is a "
+            "write of new content into the memory's existing scope and needs the same ceiling"
+        )
 
     def test_no_route_passes_body_agent_id_straight_to_the_acl(self):
         """The original vulnerability, asserted as a source-level invariant."""

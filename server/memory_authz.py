@@ -12,8 +12,10 @@ Two distinct notions of trust meet here and must not be conflated:
   whether this API key may write to a scope at all. Evaluated by ``TrustPolicy``.
 - **Content provenance** (the memory's resolved ``trust_level``) — where the *data* came from.
   Governs whether the content may become globally readable. Evaluated by
-  ``aegis_memory.scope_policy``, shared with the offline ``aegis_memory.guard`` so the two
-  enforcement paths cannot drift.
+  ``scope_policy``, kept byte-identical to ``aegis_memory/scope_policy.py`` (the copy the
+  offline ``aegis_memory.guard`` uses) so the two enforcement paths cannot drift. The server
+  imports its local copy because the production image is built from ``context: ./server`` and
+  has no ``aegis_memory`` package; ``tests/test_scope_policy_no_drift.py`` holds them together.
 
 Both apply on a write. Content provenance is the ceiling, principal trust is the floor.
 
@@ -27,7 +29,7 @@ unbound key has no agent identity to check against.
 
 from __future__ import annotations
 
-from aegis_memory.scope_policy import content_may_enter_scope, scope_denial_reason
+from scope_policy import GLOBAL_SCOPE, content_may_enter_scope, scope_denial_reason
 from api.dependencies.auth import AuthContext, enforce_agent_binding
 from fastapi import HTTPException, status
 from trust_levels import TrustPolicy
@@ -111,6 +113,26 @@ def authorize_read(auth: AuthContext, memory, *, enforce_principal_trust: bool) 
     raise _read_denied(scope)
 
 
+def read_scope_restriction(auth: AuthContext, *, enforce_principal_trust: bool) -> str | None:
+    """The single scope this principal may read, or ``None`` for no restriction.
+
+    ``authorize_read`` covers fetch-by-id, but search returns rows in bulk and never passes
+    through it. Without this, a principal that ``TrustPolicy`` confines to ``global`` still got
+    its own private and shared rows back from a query, because the scope ACL keys off the
+    *agent* identity and never consulted principal trust. That made the query path more
+    permissive than the per-id path for the same caller.
+
+    Derived from ``TrustPolicy.can_read_scope`` rather than restating the tier list, so the two
+    cannot disagree: if a principal may not read its own private memories, the only scope left
+    to it is ``global``.
+    """
+    if not enforce_principal_trust:
+        return None
+    if TrustPolicy.can_read_scope(auth.trust_level, "agent-private", is_owner=True):
+        return None
+    return GLOBAL_SCOPE
+
+
 def authorize_delete(auth: AuthContext, memory, *, enforce_principal_trust: bool) -> None:
     """Authorize deleting or mutating a specific memory. Raises 403 when policy forbids it."""
     if not auth.bound_agent_id:
@@ -146,4 +168,5 @@ __all__ = [
     "authorize_write",
     "authorize_read",
     "authorize_delete",
+    "read_scope_restriction",
 ]
